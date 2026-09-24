@@ -8,7 +8,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+// 默认 bff/data/；测试可用 BFF_DATA_DIR 指向临时目录，避免污染真实数据
+const DATA_DIR = process.env.BFF_DATA_DIR || path.join(__dirname, '..', 'data');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
 
 function file(name) { return path.join(DATA_DIR, name); }

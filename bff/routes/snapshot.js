@@ -1,10 +1,12 @@
 'use strict';
 /*
  * routes/snapshot.js — 店内整库快照的推送与读取（云端只存快照，不写店内 DB）
- *   POST /api/snapshot/push  {rev, data, machine}（机体 >5MB 拒收 413）
- *                            → 存 data/snapshot.json {rev, generated_at, size, data}
- *   GET  /api/snapshot/latest?module= → {rev, generated_at, size, data}
- *        module 按顶层 key 过滤 data 子集；无快照 404 {ok:false,error:"no snapshot"}
+ *   POST /api/snapshot/push  {rev, data, ext?, machine}（机体 >5MB 拒收 413）
+ *                            → 存 data/snapshot.json {rev, generated_at, size, data, ext}
+ *   GET  /api/snapshot/latest?module= → {rev, generated_at, size, data, ext}
+ *        module 按顶层 key 过滤 data 子集（?module=dishes）；
+ *        module=ext.* 过滤 ext 子集（?module=ext.recipes 只回 ext.recipes）；
+ *        无快照 404 {ok:false,error:"no snapshot"}
  */
 const store = require('../lib/store');
 
@@ -33,12 +35,18 @@ async function handle(req, res, ctx, pathname) {
       ctx.sendJSON(res, 400, { ok: false, error: 'missing rev(number) or data(object)' });
       return true;
     }
+    if (body.ext !== undefined &&
+        (typeof body.ext !== 'object' || body.ext === null || Array.isArray(body.ext))) {
+      ctx.sendJSON(res, 400, { ok: false, error: 'ext must be an object' });
+      return true;
+    }
     const snap = {
       rev: body.rev,
       generated_at: new Date().toISOString(),
       size: buf.length,
       machine: body.machine || null,
-      data: body.data
+      data: body.data,
+      ext: body.ext === undefined ? null : body.ext
     };
     store.writeJSON('snapshot.json', snap);
     ctx.sendJSON(res, 200, { ok: true, rev: snap.rev, size: snap.size, generated_at: snap.generated_at });
@@ -53,16 +61,28 @@ async function handle(req, res, ctx, pathname) {
     }
     const mod = (ctx.query.get('module') || '').trim();
     let data = snap.data;
+    let ext = snap.ext === undefined ? null : snap.ext;
     if (mod) {
-      data = {};
-      if (Object.prototype.hasOwnProperty.call(snap.data, mod)) data[mod] = snap.data[mod];
+      if (mod.indexOf('ext.') === 0) {
+        // ext.* 过滤：只回 ext 的指定子集
+        const k = mod.slice(4);
+        data = null;
+        const sub = {};
+        if (ext && Object.prototype.hasOwnProperty.call(ext, k)) sub[k] = ext[k];
+        ext = sub;
+      } else {
+        data = {};
+        if (Object.prototype.hasOwnProperty.call(snap.data, mod)) data[mod] = snap.data[mod];
+        ext = null;
+      }
     }
     ctx.sendJSON(res, 200, {
       ok: true,
       rev: snap.rev,
       generated_at: snap.generated_at,
       size: snap.size,
-      data
+      data,
+      ext
     });
     return true;
   }

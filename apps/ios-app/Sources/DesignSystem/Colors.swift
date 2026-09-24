@@ -23,6 +23,20 @@ extension Color {
 
     // 阴影 0 8px 28px rgba(40,50,70,.10)
     static let pwShadow = Color(red: 40/255, green: 50/255, blue: 70/255).opacity(0.10)
+
+    // POS 桌台四态（取自原型 .tbl.free/.busy/.clean/.rsv，bg / 文字 / 边框）
+    static let pwTableFreeBg = Color(red: 0xE2/255, green: 0xF0/255, blue: 0xE2/255)
+    static let pwTableFreeTxt = Color(red: 0x2E/255, green: 0x7D/255, blue: 0x32/255)
+    static let pwTableFreeBorder = Color(red: 0xB6/255, green: 0xDD/255, blue: 0xB6/255)
+    static let pwTableBusyBg = Color(red: 0xFC/255, green: 0xE4/255, blue: 0xE1/255)
+    static let pwTableBusyTxt = Color(red: 0xC6/255, green: 0x28/255, blue: 0x28/255)
+    static let pwTableBusyBorder = Color(red: 0xF5/255, green: 0xB0/255, blue: 0xAA/255)
+    static let pwTableCleanBg = Color(red: 0xFC/255, green: 0xED/255, blue: 0xD0/255)
+    static let pwTableCleanTxt = Color(red: 0x9C/255, green: 0x2C/255, blue: 0x2C/255)
+    static let pwTableCleanBorder = Color(red: 0xF0/255, green: 0xCF/255, blue: 0x7A/255)
+    static let pwTableRsvBg = Color(red: 0xE3/255, green: 0xED/255, blue: 0xF7/255)
+    static let pwTableRsvTxt = Color(red: 0x15/255, green: 0x65/255, blue: 0xC0/255)
+    static let pwTableRsvBorder = Color(red: 0xA8/255, green: 0xC8/255, blue: 0xE8/255)
 }
 
 // 圆角 token：14 / 20 / 26

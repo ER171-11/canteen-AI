@@ -14,12 +14,16 @@ import { fetchActions } from '../api'
 import type { ActionItem, ActionStatus } from '../api/types'
 import { COLORS } from '../theme'
 
-/** 审批四态标签 */
-const STATUS_TAG: Record<ActionStatus, { color: string; text: string }> = {
+/** 审批四态标签（兼容英文枚举与 BFF 实际下发的中文状态） */
+const STATUS_TAG: Record<string, { color: string; text: string }> = {
   pending: { color: COLORS.yellow, text: '待审批' },
   confirmed: { color: COLORS.green, text: '已通过' },
   rejected: { color: COLORS.red, text: '已驳回' },
   done: { color: COLORS.purple, text: '已执行' },
+  待审批: { color: COLORS.yellow, text: '待审批' },
+  已通过: { color: COLORS.green, text: '已通过' },
+  已驳回: { color: COLORS.red, text: '已驳回' },
+  已执行: { color: COLORS.purple, text: '已执行' },
 }
 
 export default function ActionsPage() {
@@ -49,13 +53,24 @@ export default function ActionsPage() {
   const columns: ColumnsType<ActionItem> = [
     { title: 'ID', dataIndex: 'id', width: 140, ellipsis: true },
     { title: '类型', dataIndex: 'type', width: 120 },
-    { title: '标题', dataIndex: 'title' },
-    { title: '发起人', dataIndex: 'initiator', width: 100, render: (v) => v ?? '-' },
+    {
+      title: '标题',
+      dataIndex: 'title',
+      render: (v: string | undefined, r) =>
+        v ?? (r.payload ? `${r.type} ${JSON.stringify(r.payload)}` : r.type),
+      ellipsis: true,
+    },
+    {
+      title: '发起人',
+      dataIndex: 'initiator',
+      width: 100,
+      render: (v: string | undefined, r) => v ?? r.operator ?? '-',
+    },
     {
       title: '状态',
       dataIndex: 'status',
       width: 100,
-      render: (s: ActionStatus) => {
+      render: (s: string) => {
         const tag = STATUS_TAG[s] ?? { color: 'default', text: s }
         return <Tag color={tag.color}>{tag.text}</Tag>
       },
@@ -101,10 +116,12 @@ export default function ActionsPage() {
           style={{ width: 140 }}
           value={status}
           onChange={(v) => setStatus(v)}
-          options={(Object.keys(STATUS_TAG) as ActionStatus[]).map((s) => ({
-            value: s,
-            label: STATUS_TAG[s].text,
-          }))}
+          options={(['pending', 'confirmed', 'rejected', 'done'] as ActionStatus[]).map(
+            (s) => ({
+              value: s,
+              label: STATUS_TAG[s].text,
+            }),
+          )}
         />
       }
     >

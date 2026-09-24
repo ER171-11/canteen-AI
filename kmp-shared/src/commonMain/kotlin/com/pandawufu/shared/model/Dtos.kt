@@ -12,21 +12,7 @@ data class HealthDto(
     val time: String? = null
 )
 
-/** GET /api/snapshot/latest —— 进销存快照（只读） */
-@Serializable
-data class SnapshotDto(
-    val rev: String,
-    val updatedAt: String,
-    val items: List<SnapshotItemDto> = emptyList()
-)
-
-@Serializable
-data class SnapshotItemDto(
-    val name: String,
-    val qty: Double,
-    val unit: String,
-    val safetyQty: Double? = null
-)
+/** GET /api/snapshot/latest —— 见 model/SnapshotDtos.kt（Sprint 1 起对齐 BFF 真实契约） */
 
 /** GET /api/report/daily —— 日报（只读） */
 @Serializable

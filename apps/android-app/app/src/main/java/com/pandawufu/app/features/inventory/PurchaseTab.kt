@@ -1,4 +1,4 @@
-package com.pandawufu.app.features.modules
+package com.pandawufu.app.features.inventory
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -7,12 +7,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.pandawufu.app.ui.designsystem.Sub
 
-// TODO: 对应原型 p-m-pos（堂食收银：桌台网格 / 并拆单撤销栈 → kmp-shared pos.UndoStack，
-//  结算写操作必须经 ConfirmGateway → /api/actions）。
+// 原型 inv-po：采购单列表（BFF 未开放采购单端点，Sprint 1 为空态占位）
 @Composable
-fun PosScreen() {
+fun PurchaseTab() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("堂食收银（骨架）", style = MaterialTheme.typography.titleMedium)
+        Text("暂无采购单\n（采购单端点待 BFF 开放）", style = MaterialTheme.typography.bodySmall, color = Sub)
     }
 }

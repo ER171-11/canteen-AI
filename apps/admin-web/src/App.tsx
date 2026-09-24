@@ -6,6 +6,11 @@ import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import ActionsPage from './pages/ActionsPage'
 import PlaceholderPage from './pages/PlaceholderPage'
+import DishesPage from './pages/kitchen/DishesPage'
+import RecipesPage from './pages/kitchen/RecipesPage'
+import SopPage from './pages/kitchen/SopPage'
+import WorkorderPage from './pages/kitchen/WorkorderPage'
+import QcPage from './pages/kitchen/QcPage'
 
 /** 路由守卫：未登录跳 /login */
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -38,11 +43,11 @@ export default function App() {
           <Route path="platform/actions" element={<ActionsPage />} />
 
           {/* 菜品厨房 */}
-          <Route path="kitchen/dishes" element={<PlaceholderPage title="菜品菜单" />} />
-          <Route path="kitchen/recipes" element={<PlaceholderPage title="配方BOM" />} />
-          <Route path="kitchen/sop" element={<PlaceholderPage title="SOP步骤" />} />
-          <Route path="kitchen/workorders" element={<PlaceholderPage title="工单排产" />} />
-          <Route path="kitchen/qc" element={<PlaceholderPage title="品控记录" />} />
+          <Route path="kitchen/dishes" element={<DishesPage />} />
+          <Route path="kitchen/recipes" element={<RecipesPage />} />
+          <Route path="kitchen/sop" element={<SopPage />} />
+          <Route path="kitchen/workorders" element={<WorkorderPage />} />
+          <Route path="kitchen/qc" element={<QcPage />} />
 
           {/* 进销存 */}
           <Route path="inventory/stock" element={<PlaceholderPage title="原料库存" />} />

@@ -56,4 +56,35 @@ class BffClient(
             contentType(ContentType.Application.Json)
             setBody(request)
         }.body()
+
+    /** POST /api/auth/login {account, device_fp} → Bearer token */
+    suspend fun login(account: String, deviceFp: String): LoginResponse =
+        http.post("$baseUrl/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(account, deviceFp))
+        }.body()
+
+    suspend fun kitchenRecipes(): RecipesResponse =
+        http.get("$baseUrl/api/kitchen/recipes") { auth() }.body()
+
+    suspend fun kitchenRecipeDetail(skuId: String): RecipeDetailResponse =
+        http.get("$baseUrl/api/kitchen/recipes/$skuId") { auth() }.body()
+
+    suspend fun kitchenWorkorders(date: String? = null): WorkordersResponse =
+        http.get("$baseUrl/api/sop/workorder") {
+            auth()
+            if (date != null) parameter("date", date)
+        }.body()
+
+    suspend fun kitchenQc(date: String? = null): QcResponse =
+        http.get("$baseUrl/api/kitchen/qc") {
+            auth()
+            if (date != null) parameter("date", date)
+        }.body()
+
+    suspend fun kitchenBoard(date: String? = null): BoardResponse =
+        http.get("$baseUrl/api/kitchen/board") {
+            auth()
+            if (date != null) parameter("date", date)
+        }.body()
 }

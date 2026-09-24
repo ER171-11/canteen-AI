@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # test_contract.sh — 熊猫五福餐厅 云端 BFF 契约自测
 # 用法：bash test_contract.sh
-#   脚本自行启动 node server.js（127.0.0.1:8787），跑完 curl 校验后杀掉，退出码反映成败。
+#   脚本自行启动 node server.js（默认 127.0.0.1:8788，可用 BFF_TEST_PORT 覆盖；
+#   数据目录用临时目录 BFF_DATA_DIR，不碰 bff/data 与 8787 上可能存在的服务），
+#   跑完 curl 校验后杀掉，退出码反映成败。
 set -u
 cd "$(dirname "$0")"
 
-BASE="http://127.0.0.1:8787"
+# 测试用独立端口与独立数据目录：8787 上可能有别人起的服务，绝不占用/污染
+PORT="${BFF_TEST_PORT:-8788}"
+BASE="http://127.0.0.1:$PORT"
 PASS=0
 FAIL=0
 TMPD="$(mktemp -d)"
@@ -25,8 +29,8 @@ assert_grep() {
 json_get() { node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const v=process.argv[2].split(".").reduce((o,k)=>o==null?o:o[k],j);console.log(v==null?"":v);' "$1" "$2"; }
 
 # ---------- 启动服务 ----------
-say "== 启动 BFF =="
-node server.js > "$TMPD/server.log" 2>&1 &
+say "== 启动 BFF（port=$PORT, data=$TMPD/data）=="
+BFF_PORT="$PORT" BFF_DATA_DIR="$TMPD/data" node server.js > "$TMPD/server.log" 2>&1 &
 SRV_PID=$!
 cleanup() { kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null; rm -rf "$TMPD"; }
 trap cleanup EXIT
@@ -35,6 +39,10 @@ for i in $(seq 1 50); do
   curl -s -o /dev/null "$BASE/api/health" && break
   sleep 0.2
 done
+if ! curl -s -o /dev/null "$BASE/api/health"; then
+  say "FATAL: 服务未能启动，日志："; cat "$TMPD/server.log"
+  exit 1
+fi
 
 # ---------- 1. 健康检查 ----------
 say "== 1. 健康检查 =="
@@ -65,6 +73,17 @@ ROTOKEN=$(json_get "$TMPD/ro.json" token)
 
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{}')
 assert_code "缺 account 登录" 400 "$CODE"
+
+# 无快照时只读端点一律 404（数据目录是全新的）
+CODE=$(curl -s -o "$TMPD/ns0.json" -w "%{http_code}" "$BASE/api/snapshot/latest" -H "$AUTH")
+assert_code "无快照 latest" 404 "$CODE"
+assert_grep "无快照错误体" "$TMPD/ns0.json" 'no snapshot'
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/sop/workorder" -H "$AUTH")
+assert_code "无快照 sop/workorder" 404 "$CODE"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/kitchen/recipes" -H "$AUTH")
+assert_code "无快照 kitchen/recipes" 404 "$CODE"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/kitchen/board" -H "$AUTH")
+assert_code "无快照 kitchen/board" 404 "$CODE"
 
 # ---------- 3. 快照 ----------
 say "== 3. 快照 push/latest =="
@@ -214,6 +233,99 @@ assert_code "kimi/vision 无 token" 401 "$CODE"
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/kimi/vision" \
   -H "$AUTH" -H 'Content-Type: application/json' -d '{"type":"nope","imageBase64":"x"}')
 assert_code "kimi/vision 非法 type" 400 "$CODE"
+
+# ---------- 9. ext 快照 + 厨房/SOP 只读端点 ----------
+say "== 9. ext 透传 / 厨房 / SOP =="
+# 全新 token，避免前面用例耗尽 60/min 标准桶
+KTOKEN=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"account":"kitchen-tester"}' | node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).token)')
+KAUTH="Authorization: Bearer $KTOKEN"
+TODAY=$(date +%F)
+YDAY=$(date -d "yesterday" +%F 2>/dev/null || date -v-1d +%F)
+
+node -e '
+const today=process.argv[2], yday=process.argv[3];
+const ext={
+  recipes:[
+    {sku_id:"sku-red",name:"五福红饺",color:"红",filling:"火龙果猪肉",version:3,updated_at:today+"T08:00:00"},
+    {sku_id:"sku-yellow",name:"五福黄饺",color:"黄",filling:"南瓜鸡肉",version:2,updated_at:today+"T08:00:00"}
+  ],
+  sop_steps:[
+    {sku_id:"sku-red",step_no:2,stage:"包制",duration_min:10,key_points:"褶纹≥12"},
+    {sku_id:"sku-red",step_no:1,stage:"和面",duration_min:15,key_points:"火龙果汁和面"},
+    {sku_id:"sku-yellow",step_no:1,stage:"和面",duration_min:12}
+  ],
+  sop_workorders:[
+    {id:"w1",date:today,sku_id:"sku-red",qty:100,planned_start:today+"T09:00:00",status:"已完成"},
+    {id:"w2",date:today,sku_id:"sku-yellow",qty:50,planned_start:today+"T14:00:00",status:"进行中"},
+    {id:"w3",date:yday,sku_id:"sku-red",qty:999,planned_start:yday+"T09:00:00",status:"已完成"}
+  ],
+  qc_records:[
+    {id:"q1",workorder_id:"w1",sku_id:"sku-red",sample_weight:26.1,pass:true,ts:today+"T12:05:00",source:"ai"},
+    {id:"q2",workorder_id:"w1",sku_id:"sku-red",sample_weight:23.5,pass:false,ts:today+"T12:20:00",source:"ai"},
+    {id:"q3",workorder_id:"w2",sku_id:"sku-yellow",sample_weight:25.8,pass:true,ts:today+"T15:00:00",source:"manual"}
+  ]
+};
+require("fs").writeFileSync(process.argv[1],JSON.stringify({rev:50,machine:"pos-k",data:{dishes:[{name:"五福红饺"}]},ext}));
+' "$TMPD/ext.json" "$TODAY" "$YDAY"
+
+assert_node() {
+  if node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(!eval(process.argv[2]))process.exit(1)' "$2" "$3" 2>/dev/null; then
+    ok "$1"
+  else
+    bad "$1 (表达式: $3)"
+  fi
+}
+
+CODE=$(curl -s -o "$TMPD/pushext.json" -w "%{http_code}" -X POST "$BASE/api/snapshot/push" \
+  -H "$KAUTH" -H 'Content-Type: application/json' --data-binary @"$TMPD/ext.json")
+assert_code "push 带 ext 快照" 200 "$CODE"
+assert_grep "push ext rev=50" "$TMPD/pushext.json" '"rev":50'
+
+curl -s "$BASE/api/snapshot/latest" -H "$KAUTH" > "$TMPD/lx.json"
+assert_node "latest 透传 ext.recipes" "$TMPD/lx.json" 'j.ext&&j.ext.recipes.length===2'
+assert_node "latest 透传 ext.qc_records" "$TMPD/lx.json" 'j.ext&&j.ext.qc_records.length===3'
+assert_node "latest 仍含 data" "$TMPD/lx.json" 'j.data&&j.data.dishes.length===1'
+
+curl -s "$BASE/api/snapshot/latest?module=ext.recipes" -H "$KAUTH" > "$TMPD/mr.json"
+assert_node "module=ext.recipes 只回 recipes" "$TMPD/mr.json" 'j.ext&&j.ext.recipes&&j.ext.recipes.length===2&&!j.ext.sop_steps'
+assert_node "module=ext.* 时 data 置空" "$TMPD/mr.json" 'j.data===null'
+curl -s "$BASE/api/snapshot/latest?module=ext.sop_steps" -H "$KAUTH" > "$TMPD/ms.json"
+assert_node "module=ext.sop_steps" "$TMPD/ms.json" 'j.ext&&j.ext.sop_steps.length===3&&!j.ext.recipes'
+
+curl -s "$BASE/api/sop/workorder" -H "$KAUTH" > "$TMPD/wo.json"
+assert_node "workorder 默认今日 count=2" "$TMPD/wo.json" 'j.ok&&j.count===2'
+assert_node "workorder 关联 name/color" "$TMPD/wo.json" 'j.workorders[0].name==="五福红饺"&&j.workorders[0].color==="红"'
+assert_node "workorder steps 按 step_no 升序" "$TMPD/wo.json" 'var w=j.workorders.find(function(x){return x.id==="w1"});w.steps.length===2&&w.steps[0].step_no===1&&w.steps[1].step_no===2'
+assert_node "昨日工单被过滤" "$TMPD/wo.json" '!j.workorders.some(function(x){return x.id==="w3"})'
+curl -s "$BASE/api/sop/workorder?date=1999-01-01" -H "$KAUTH" > "$TMPD/wo0.json"
+assert_node "workorder 指定空日期 count=0" "$TMPD/wo0.json" 'j.ok&&j.count===0&&j.workorders.length===0'
+
+curl -s "$BASE/api/kitchen/recipes" -H "$KAUTH" > "$TMPD/kr.json"
+assert_node "kitchen/recipes 全量 count=2" "$TMPD/kr.json" 'j.ok&&j.count===2&&j.rev===50'
+curl -s "$BASE/api/kitchen/recipes/sku-red" -H "$KAUTH" > "$TMPD/kr1.json"
+assert_node "kitchen/recipes/{sku} 单条+steps" "$TMPD/kr1.json" 'j.ok&&j.item.sku_id==="sku-red"&&j.steps.length===2'
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/kitchen/recipes/sku-none" -H "$KAUTH")
+assert_code "kitchen/recipes 未知 sku" 404 "$CODE"
+
+curl -s "$BASE/api/kitchen/qc" -H "$KAUTH" > "$TMPD/kq.json"
+assert_node "kitchen/qc 今日 3 条" "$TMPD/kq.json" 'j.ok&&j.count===3'
+assert_node "kitchen/qc 关联 name" "$TMPD/kq.json" 'j.items[0].name==="五福红饺"&&j.items[0].workorder_status==="已完成"'
+
+curl -s "$BASE/api/kitchen/board" -H "$KAUTH" > "$TMPD/kb.json"
+assert_node "board 红 planned/done=100/100" "$TMPD/kb.json" 'var g=j.board.find(function(x){return x.color==="红"});g&&g.planned===100&&g.done===100'
+assert_node "board 红 qc_pass_rate=0.5" "$TMPD/kb.json" 'var g=j.board.find(function(x){return x.color==="红"});g.qc_pass_rate===0.5&&g.qc_total===2'
+assert_node "board 黄 planned/done=50/0 rate=1" "$TMPD/kb.json" 'var g=j.board.find(function(x){return x.color==="黄"});g&&g.planned===50&&g.done===0&&g.qc_pass_rate===1'
+
+curl -s "$BASE/api/report/daily?date=$TODAY" -H "$KAUTH" > "$TMPD/rk.json"
+assert_node "日报含 kitchen 摘要 2/1" "$TMPD/rk.json" 'j.kitchen&&j.kitchen.workorders_total===2&&j.kitchen.workorders_done===1'
+
+# 只读性：写动词一律 404
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/sop/workorder" -H "$KAUTH" -H 'Content-Type: application/json' -d '{}')
+assert_code "POST sop/workorder 只读" 404 "$CODE"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/kitchen/recipes" -H "$KAUTH" -H 'Content-Type: application/json' -d '{}')
+assert_code "POST kitchen/recipes 只读" 404 "$CODE"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/kitchen/board" -H "$KAUTH" -H 'Content-Type: application/json' -d '{}')
+assert_code "POST kitchen/board 只读" 404 "$CODE"
 
 # ---------- 汇总 ----------
 say ""

@@ -3,11 +3,18 @@ import { client } from './client'
 import type {
   ActionItem,
   ActionStatus,
+  Dish,
   Health,
+  KitchenBoardItem,
+  ListResp,
   LoginRequest,
   LoginResponse,
+  QcRecord,
+  RecipeDetailResp,
+  RecipesResp,
   ReportDaily,
   Snapshot,
+  WorkorderResp,
 } from './types'
 
 /** POST /api/admin/login */
@@ -57,4 +64,52 @@ export async function fetchActions(status?: ActionStatus): Promise<ActionItem[]>
 export async function fetchAdminList<T>(resource: string): Promise<T[]> {
   const { data } = await client.get<T[] | { items: T[] }>(`/admin/${resource}`)
   return Array.isArray(data) ? data : data.items ?? []
+}
+
+/* ---------------- 菜品厨房（Sprint 1） ---------------- */
+
+/** GET /api/admin/dishes → {ok,key,count,items,rev} */
+export async function fetchAdminDishes(): Promise<ListResp<Dish>> {
+  const { data } = await client.get<ListResp<Dish>>('/admin/dishes')
+  return data
+}
+
+/** GET /api/kitchen/recipes */
+export async function fetchKitchenRecipes(): Promise<RecipesResp> {
+  const { data } = await client.get<RecipesResp>('/kitchen/recipes')
+  return data
+}
+
+/** GET /api/kitchen/recipes/{sku_id} */
+export async function fetchKitchenRecipe(skuId: string): Promise<RecipeDetailResp> {
+  const { data } = await client.get<RecipeDetailResp>(
+    `/kitchen/recipes/${encodeURIComponent(skuId)}`,
+  )
+  return data
+}
+
+/** GET /api/sop/workorder?date= */
+export async function fetchWorkorders(date: string): Promise<WorkorderResp> {
+  const { data } = await client.get<WorkorderResp>('/sop/workorder', {
+    params: { date },
+  })
+  return data
+}
+
+/** GET /api/kitchen/qc?date= */
+export async function fetchKitchenQc(date: string): Promise<ListResp<QcRecord>> {
+  const { data } = await client.get<ListResp<QcRecord>>('/kitchen/qc', {
+    params: { date },
+  })
+  return data
+}
+
+/** GET /api/kitchen/board?date= */
+export async function fetchKitchenBoard(
+  date: string,
+): Promise<ListResp<KitchenBoardItem>> {
+  const { data } = await client.get<ListResp<KitchenBoardItem>>('/kitchen/board', {
+    params: { date },
+  })
+  return data
 }

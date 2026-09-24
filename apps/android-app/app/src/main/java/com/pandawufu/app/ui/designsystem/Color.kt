@@ -24,3 +24,9 @@ val FivePurple = Color(0xFF9B6BBF)
 // 圆角 token（dp）：14 / 20 / 26
 // 阴影 token：0 8px 28px rgba(40,50,70,.10)
 val ShadowColor = Color(40, 50, 70, 26)
+
+// POS 桌台四态（取自原型 .tbl.free/.busy/.clean/.rsv，bg / 文字 / 边框）
+val TableFreeBg = Color(0xFFE2F0E2); val TableFreeTxt = Color(0xFF2E7D32); val TableFreeBorder = Color(0xFFB6DDB6)
+val TableBusyBg = Color(0xFFFCE4E1); val TableBusyTxt = Color(0xFFC62828); val TableBusyBorder = Color(0xFFF5B0AA)
+val TableCleanBg = Color(0xFFFCEDD0); val TableCleanTxt = Color(0xFF9C2C2C); val TableCleanBorder = Color(0xFFF0CF7A)
+val TableRsvBg = Color(0xFFE3EDF7); val TableRsvTxt = Color(0xFF1565C0); val TableRsvBorder = Color(0xFFA8C8E8)

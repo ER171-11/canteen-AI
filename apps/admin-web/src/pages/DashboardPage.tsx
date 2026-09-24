@@ -53,7 +53,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchReportDaily()
-      .then((data) => setReport(data))
+      .then((data) => {
+        /* 兼容 BFF 实际下发的 kpi:[{label,value,delta}]（value 已带格式） */
+        if (!data.kpis && Array.isArray(data.kpi)) {
+          data.kpis = data.kpi.map((k, i) => ({
+            key: k.label ?? String(i),
+            label: k.label,
+            value: k.value,
+            delta: k.delta ?? undefined,
+          }))
+        }
+        setReport(data)
+      })
       .catch(() => {
         setReport(MOCK_REPORT)
         setIsMock(true)

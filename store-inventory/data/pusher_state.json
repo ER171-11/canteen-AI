@@ -1,4 +1,10 @@
 {
-  "last_rev": 22,
-  "last_ts": "2026-09-24T19:12:47"
+  "last_rev": 26,
+  "last_ts": "2026-09-24T19:27:41",
+  "last_ext": {
+    "recipes": 9,
+    "sop_steps": 182,
+    "sop_workorders": 1,
+    "qc_records": 0
+  }
 }

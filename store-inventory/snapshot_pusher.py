@@ -6,17 +6,21 @@
 流程：
   1. GET 店内服务 /api/db 取 {rev, data}
   2. 计算 data 的 JSON 体积，超过阈值（默认 5MB）告警并跳过本次推送
-  3. POST 云端 BFF /api/snapshot/push {rev, data, machine}
-  4. 成功后写本地状态 data/pusher_state.json {last_rev, last_ts} 并记日志
+  3. 从本地 SQLite 新表（recipes/sop_steps/sop_workorders/qc_records）读取并组装 ext
+     （JSON TEXT 列注入时解析回对象/数组；表不存在/为空 → 对应 key 为空数组，不报错）
+  4. POST 云端 BFF /api/snapshot/push {rev, data, ext, machine}
+  5. 成功后写本地状态 data/pusher_state.json {last_rev, last_ts, last_ext} 并记日志
 
-只读店内服务（GET），绝不写回；不修改 server/ 与受保护 HTML（红线）。
+只读店内服务（GET）与本地新表（SELECT），绝不写回；不碰 docs/snapshots 主数据（红线）。
 
 参数：
   --store-url  店内服务地址（默认 http://127.0.0.1:8765）
   --bff-url    云端 BFF 地址（默认 http://127.0.0.1:8787）
   --interval   循环间隔秒数（默认 900）
   --once       只执行一次后退出
-  --max-bytes  快照体积上限（默认 5*1024*1024）
+  --max-bytes  快照体积上限（默认 5*1024*1024，含 ext）
+  --db         本地 sqlite 路径（默认 data/餐厅系统.db），ext 数据源
+  --token      BFF Bearer token（也可用环境变量 BFF_TOKEN）
 
 异常处理：网络/HTTP 异常按指数退避重试 3 次；最终失败记日志但不退出循环。
 仅使用 Python 标准库。
@@ -27,6 +31,7 @@ import json
 import logging
 import os
 import socket
+import sqlite3
 import sys
 import time
 import urllib.error
@@ -40,6 +45,15 @@ DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5MB
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_PATH = os.path.join(BASE_DIR, "data", "pusher_state.json")
+DEFAULT_DB_PATH = os.path.join(BASE_DIR, "data", "餐厅系统.db")
+
+# ext 契约：表名 → 需要把 JSON TEXT 解析回对象/数组的列
+EXT_TABLES = {
+    "recipes": ("main", "aux", "seasoning", "steps", "params", "diet_tags"),
+    "sop_steps": ("tools", "inputs", "params"),
+    "sop_workorders": ("qc_records",),
+    "qc_records": (),
+}
 
 log = logging.getLogger("snapshot_pusher")
 
@@ -85,9 +99,9 @@ def load_state():
         return {}
 
 
-def save_state(rev):
+def save_state(rev, ext_counts):
     os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
-    state = {"last_rev": rev, "last_ts": now_iso()}
+    state = {"last_rev": rev, "last_ts": now_iso(), "last_ext": ext_counts}
     tmp = STATE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
@@ -95,7 +109,44 @@ def save_state(rev):
     return state
 
 
-def push_once(store_url, bff_url, max_bytes, token=None):
+def build_ext(db_path):
+    """
+    从本地 sqlite 新表组装 ext（红线：只 SELECT 新表，绝不碰 docs/snapshots）。
+    表不存在/为空 → 对应 key 为空数组，不报错。返回 (ext, counts)。
+    """
+    ext, counts = {}, {}
+    if not os.path.exists(db_path):
+        log.warning("本地库不存在: %s，ext 全部置空数组", db_path)
+        return {t: [] for t in EXT_TABLES}, {t: 0 for t in EXT_TABLES}
+    conn = sqlite3.connect(db_path)
+    try:
+        for table, json_cols in EXT_TABLES.items():
+            try:
+                cur = conn.execute("SELECT * FROM %s" % table)
+                cols = [d[0] for d in cur.description]
+                rows = []
+                for tup in cur.fetchall():
+                    row = dict(zip(cols, tup))
+                    for c in json_cols:
+                        v = row.get(c)
+                        if isinstance(v, str) and v:
+                            try:
+                                row[c] = json.loads(v)
+                            except Exception:
+                                pass  # 非 JSON 文本原样保留
+                    rows.append(row)
+                ext[table] = rows
+                counts[table] = len(rows)
+            except sqlite3.OperationalError as exc:
+                log.info("ext 表 %s 不可读（%s），按空数组处理", table, exc)
+                ext[table] = []
+                counts[table] = 0
+    finally:
+        conn.close()
+    return ext, counts
+
+
+def push_once(store_url, bff_url, max_bytes, token=None, db_path=DEFAULT_DB_PATH):
     """单次推送。返回 True=已推送, False=跳过/失败（异常已被吞掉并记日志）。"""
     try:
         _, doc = with_retry(
@@ -115,12 +166,14 @@ def push_once(store_url, bff_url, max_bytes, token=None):
         log.warning("店内库为空（rev=%s），跳过推送", rev)
         return False
 
+    ext, ext_counts = build_ext(db_path)
+
     state = load_state()
-    if state.get("last_rev") == rev:
-        log.info("rev=%s 与上次推送一致，跳过", rev)
+    if state.get("last_rev") == rev and state.get("last_ext") == ext_counts:
+        log.info("rev=%s 且 ext 行数未变，跳过", rev)
         return True
 
-    blob = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    blob = json.dumps({"data": data, "ext": ext}, ensure_ascii=False).encode("utf-8")
     size = len(blob)
     if size > max_bytes:
         log.warning("快照体积 %d 字节超过阈值 %d 字节，本次跳过（可用 --max-bytes 调整）",
@@ -128,7 +181,7 @@ def push_once(store_url, bff_url, max_bytes, token=None):
         return False
 
     machine = socket.gethostname()
-    payload = {"rev": rev, "data": data, "machine": machine}
+    payload = {"rev": rev, "data": data, "ext": ext, "machine": machine}
     try:
         status, resp = with_retry(
             lambda: http_json("POST", bff_url.rstrip("/") + "/api/snapshot/push",
@@ -142,9 +195,10 @@ def push_once(store_url, bff_url, max_bytes, token=None):
         log.error("BFF 拒绝推送: http=%s resp=%s", status, resp)
         return False
 
-    saved = save_state(rev)
-    log.info("推送成功 rev=%s size=%dB machine=%s last_ts=%s",
-             rev, size, machine, saved["last_ts"])
+    saved = save_state(rev, ext_counts)
+    log.info("推送成功 rev=%s size=%dB machine=%s last_ts=%s ext=%s",
+             rev, size, machine, saved["last_ts"],
+             ",".join("%s:%d" % (k, v) for k, v in ext_counts.items()))
     return True
 
 
@@ -157,25 +211,30 @@ def main(argv=None):
     ap.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
     ap.add_argument("--token", default=os.environ.get("BFF_TOKEN", ""),
                     help="BFF Bearer token（也可用环境变量 BFF_TOKEN）")
+    ap.add_argument("--db", default=DEFAULT_DB_PATH,
+                    help="本地 sqlite 路径（ext 数据源，只读新表）")
     args = ap.parse_args(argv)
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-    log.info("启动 store=%s bff=%s interval=%ss max_bytes=%d once=%s",
-             args.store_url, args.bff_url, args.interval, args.max_bytes, args.once)
+    log.info("启动 store=%s bff=%s interval=%ss max_bytes=%d once=%s db=%s",
+             args.store_url, args.bff_url, args.interval, args.max_bytes, args.once,
+             args.db)
 
     if not args.token:
         log.warning("未配置 BFF token（--token 或 BFF_TOKEN），BFF 若开启鉴权将推送失败")
 
     if args.once:
-        ok = push_once(args.store_url, args.bff_url, args.max_bytes, token=args.token)
+        ok = push_once(args.store_url, args.bff_url, args.max_bytes,
+                       token=args.token, db_path=args.db)
         return 0 if ok else 1
 
     while True:
         try:
-            push_once(args.store_url, args.bff_url, args.max_bytes, token=args.token)
+            push_once(args.store_url, args.bff_url, args.max_bytes,
+                      token=args.token, db_path=args.db)
         except Exception:  # noqa: BLE001 - 循环兜底，失败不退出
             log.exception("本轮推送出现未捕获异常，继续循环")
         time.sleep(args.interval)

@@ -70,28 +70,38 @@ export interface AlertItem {
   created_at?: string
 }
 
-/** GET /api/report/daily */
+/**
+ * GET /api/report/daily
+ * 兼容两种下发形状：契约版 kpis:[{key,label,value,unit,delta,trend}]；
+ * 当前 BFF 实际版 kpi:[{label,value,delta}]（value 已带 ¥ 等格式）。
+ */
 export interface ReportDaily {
   date: string
   banner?: string
-  kpis: KpiItem[]
-  todos: TodoItem[]
-  alerts: AlertItem[]
+  kpis?: KpiItem[]
+  kpi?: Array<{ label: string; value: string | number; delta?: string | null }>
+  todos?: TodoItem[]
+  alerts?: AlertItem[]
+  rev?: number
 }
 
-/** 审批中心动作四态 */
+/** 审批中心动作四态（BFF 实际下发中文状态，渲染层做双语映射） */
 export type ActionStatus = 'pending' | 'confirmed' | 'rejected' | 'done'
 
 /** GET /api/actions 列表项 */
 export interface ActionItem {
   id: string
   type: string
-  title: string
-  status: ActionStatus
+  title?: string
+  /** 英文四态或中文「待审批/已通过/已驳回/已执行」 */
+  status: ActionStatus | '待审批' | '已通过' | '已驳回' | '已执行' | string
   initiator?: string
+  operator?: string
   payload?: Record<string, unknown>
   created_at?: string
   updated_at?: string
+  confirmed_at?: string
+  executed_at?: string
 }
 
 /** POST /api/actions/{id}/status 出参 */
@@ -113,12 +123,19 @@ export interface KimiLog {
 
 /* ---------------- 只读管理端点实体（/api/admin/*） ---------------- */
 
+/** GET /api/admin/dishes 菜品（快照下发，86 道真实菜品） */
 export interface Dish {
   id: string
+  /** 分类，如 引流/招牌/五福饺 */
+  cat?: string
   name: string
-  color?: 'red' | 'black' | 'yellow' | 'green' | 'purple' | 'white'
+  /** 估算成本（元） */
+  est?: number
   price?: number
-  status?: 'on' | 'off'
+  /** 销量 */
+  q?: number
+  /** 是否上架 */
+  on?: boolean
 }
 
 export interface Recipe {
@@ -165,4 +182,98 @@ export interface ApiError {
   ok: false
   error: string
   traceId?: string
+}
+
+/* ---------------- 菜品厨房（Sprint 1 契约） ---------------- */
+
+/** BOM 条目：face_main/main/aux/seasoning 数组元素，对象或字符串均可能出现 */
+export type BomEntry = Record<string, string | number | undefined> | string
+
+/** GET /api/kitchen/recipes → items 元素 */
+export interface RecipeItem {
+  sku_id: string
+  name: string
+  /** 五色：red/black/yellow/green/purple 或 红/黑/黄/绿/紫 */
+  color: string
+  filling?: string
+  face_main?: BomEntry[]
+  main?: BomEntry[]
+  aux?: BomEntry[]
+  seasoning?: BomEntry[]
+  steps?: string[]
+  params?: Record<string, string | number>
+  blessing?: string
+  diet_tags?: string[]
+  version?: string
+  updated_at?: string
+}
+
+/** GET /api/kitchen/recipes/{sku_id} → steps 元素（SOP 步骤） */
+export interface SopStep {
+  sku_id?: string
+  step_no: number
+  /** 阶段：和面/醒发/备馅/拌馅/剂子/包制/煮制/装盘 */
+  stage: string
+  duration_min?: number
+  tools?: string | string[]
+  inputs?: string
+  key_points?: string
+  qc_point?: string
+  risk?: string
+  params?: Record<string, unknown>
+}
+
+/** GET /api/sop/workorder?date= → workorders 元素 */
+export interface WorkOrder {
+  id: string
+  sku_id: string
+  name: string
+  color: string
+  qty: number
+  planned_start?: string
+  /** 待开始/进行中/已完成 */
+  status: string
+  steps?: SopStep[]
+}
+
+/** GET /api/kitchen/qc?date= → items 元素 */
+export interface QcRecord {
+  id: string
+  workorder_id?: string
+  sku_id: string
+  sample_weight?: number
+  pass: boolean
+  ts?: string
+  source?: string
+}
+
+/** GET /api/kitchen/board?date= → items 元素（按五色分组） */
+export interface KitchenBoardItem {
+  color: string
+  planned: number
+  done: number
+  qc_pass_rate?: number
+}
+
+/** 通用列表响应包装 */
+export interface ListResp<T> {
+  ok: boolean
+  items: T[]
+  rev?: number | string
+  count?: number
+  key?: string
+}
+
+export type RecipesResp = ListResp<RecipeItem>
+
+export interface RecipeDetailResp {
+  ok: boolean
+  item: RecipeItem
+  steps: SopStep[]
+}
+
+export interface WorkorderResp {
+  ok: boolean
+  date: string
+  workorders: WorkOrder[]
 }

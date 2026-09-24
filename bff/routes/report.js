@@ -78,7 +78,7 @@ function deriveReport(snap, date) {
   const ageH = (Date.now() - new Date(snap.generated_at).getTime()) / 3600000;
   if (ageH > 24) alerts.push({ level: 'warn', text: '快照已超 24h 未更新（rev=' + snap.rev + '）' });
 
-  return {
+  const report = {
     ok: true,
     mock: false,
     date,
@@ -99,6 +99,18 @@ function deriveReport(snap, date) {
     todos,
     alerts
   };
+
+  // 厨房摘要：快照带 ext 时附今日工单统计，无 ext 跳过
+  if (snap.ext && typeof snap.ext === 'object') {
+    const wos = Array.isArray(snap.ext.sop_workorders) ? snap.ext.sop_workorders : [];
+    const todays = wos.filter((w) => w && String(w.date || '') === date);
+    report.kitchen = {
+      workorders_total: todays.length,
+      workorders_done: todays.filter((w) => w.status === '已完成').length
+    };
+  }
+
+  return report;
 }
 
 async function handle(req, res, ctx, pathname) {

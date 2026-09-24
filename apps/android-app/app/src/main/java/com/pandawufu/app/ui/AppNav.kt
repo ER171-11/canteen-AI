@@ -43,12 +43,12 @@ import com.pandawufu.app.features.modules.EquipmentScreen
 import com.pandawufu.app.features.modules.FinanceScreen
 import com.pandawufu.app.features.modules.FoodsafeScreen
 import com.pandawufu.app.features.modules.LossScreen
-import com.pandawufu.app.features.modules.PosScreen
 import com.pandawufu.app.features.modules.ReviewScreen
 import com.pandawufu.app.features.modules.StaffScreen
 import com.pandawufu.app.features.modules.SupplyScreen
 import com.pandawufu.app.features.modules.TakeoutScreen
 import com.pandawufu.app.features.modules.VipScreen
+import com.pandawufu.app.features.pos.PosScreen
 import com.pandawufu.app.ui.designsystem.AiPink
 import com.pandawufu.app.ui.designsystem.AiPurple
 import com.pandawufu.app.ui.designsystem.ShadowColor

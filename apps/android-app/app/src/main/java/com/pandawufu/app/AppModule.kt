@@ -5,7 +5,9 @@ import com.pandawufu.shared.network.SseClient
 import com.pandawufu.shared.redline.ConfirmGateway
 import com.pandawufu.shared.repository.ActionRepositoryImpl
 import com.pandawufu.shared.repository.HealthRepositoryImpl
+import com.pandawufu.shared.repository.InventoryRepositoryImpl
 import com.pandawufu.shared.repository.KimiRepositoryImpl
+import com.pandawufu.shared.repository.KitchenRepositoryImpl
 import com.pandawufu.shared.repository.ReportRepositoryImpl
 import com.pandawufu.shared.repository.SnapshotRepositoryImpl
 
@@ -25,6 +27,8 @@ object AppModule {
     val reportRepository = ReportRepositoryImpl(bffClient)
     val actionRepository = ActionRepositoryImpl(bffClient)
     val kimiRepository = KimiRepositoryImpl(bffClient, sseClient)
+    val kitchenRepository = KitchenRepositoryImpl(bffClient)
+    val inventoryRepository = InventoryRepositoryImpl(bffClient)
 
     fun initRedline() {
         ConfirmGateway.init(actionRepository)

@@ -51,11 +51,12 @@ const ROUTES = [
   require('./routes/report'),
   require('./routes/actions'),
   require('./routes/agent'),
-  require('./routes/admin')
+  require('./routes/admin'),
+  require('./routes/kitchen')
 ];
 
-const HOST = '127.0.0.1';
-const PORT = 8787;
+const HOST = process.env.BFF_HOST || '127.0.0.1';
+const PORT = parseInt(process.env.BFF_PORT || '8787', 10);
 
 /* ------------------------------------------------------------------ */
 /* 公共工具                                                            */

@@ -24,21 +24,51 @@ sqlite3 data/餐厅系统.db < migrations/001_new_tables.sql
 
 ## 2. snapshot_pusher.py —— 整库快照推送器（店内 → 云端 BFF）
 
-流程：`GET /api/db` → 体积检查（超阈值告警跳过）→ `POST BFF /api/snapshot/push`
-→ 成功后写 `data/pusher_state.json`（last_rev/last_ts）。只读店内服务，绝不写回。
+流程：`GET /api/db` → 从本地 sqlite 新表（recipes/sop_steps/sop_workorders/qc_records）
+只读组装 `ext`（JSON TEXT 列解析回对象/数组；表不存在/为空 → 空数组不报错）→
+体积检查（data+ext 超阈值告警跳过）→ `POST BFF /api/snapshot/push {rev, data, ext, machine}`
+→ 成功后写 `data/pusher_state.json`（last_rev/last_ts/last_ext）。只读店内服务与新表，绝不写回。
 
 ```bash
 python3 snapshot_pusher.py                      # 常驻循环（默认 900s/轮）
-python3 snapshot_pusher.py --once               # 单次执行（rev 未变则跳过）
+python3 snapshot_pusher.py --once               # 单次执行（rev 与 ext 行数均未变则跳过）
 python3 snapshot_pusher.py --interval 300 \
     --store-url http://127.0.0.1:8765 \
     --bff-url http://127.0.0.1:8787 \
-    --max-bytes 5242880
+    --max-bytes 5242880 \
+    --db data/餐厅系统.db \
+    --token "$BFF_TOKEN"
 ```
 
 - 网络/HTTP 异常指数退避重试 3 次（2s/4s/8s），最终失败记日志、不退出循环。
 - 体积默认上限 5MB，可用 `--max-bytes` 调整。
+- rev 未变但 ext 行数变化（如重新 seed 配方）也会触发重推。
 - 删除 `data/pusher_state.json` 可强制下一轮全量重推。
+- 推送日志含 ext 各模块行数，如 `ext=recipes:9,sop_steps:182,sop_workorders:1,qc_records:0`。
+
+## 2.1 seed_recipes.py —— 五福饺子配方种子（docx → recipes/sop_steps）
+
+从 `../金丰御字牌五福饺子(2).docx` 解析（zipfile + 正则，纯标准库），按
+PRD v1.0 附录 A 的 9 SKU 对齐命名（SKU-WF-HONG/HUANG/LV/ZI/HEI/BAI-SUANCAI/
+BAI-NIUROU/BAI-XIHULU/BAI-SHANYAO），INSERT OR REPLACE 幂等写入 `recipes` 与
+`sop_steps`（docx 每步分类到 和面/醒发/备馅/拌馅/剂子/包制/煮制/装盘 八阶段，
+附带 QC 点与风险），并生成 1 条今日示范工单进 `sop_workorders`（同日同 SKU 已存在则跳过）。
+
+```bash
+python3 seed_recipes.py --dry-run   # 只打印 SKU 清单摘要，不落库
+python3 seed_recipes.py             # 解析 + 落库（可重复执行）
+python3 seed_recipes.py --db 路径 --docx 路径
+```
+
+红线保护：
+- `face_main`（色源）从 docx 面主料扣除面粉/食盐基料得出；**红色 SKU 强制校验
+  必须含「火龙果」，否则中止写入**（PRD：红色必须火龙果，色源不可替换）。
+- 时长仅「醒发 30 分钟」有 docx 出处，其余 duration_min 留空不编造；
+  剂子 10-11g、成品 25-27g（白色部分 25-28g 按 docx 原文）、点水 3 次等取自
+  docx 步骤与 PRD 通用工艺参数；褶纹 12-14 道来自任务书给定标准。
+- docx 另有 5 个白色变体（牛肉白萝卜/胡萝卜木耳粉丝鸡蛋/茴香鸡蛋/猪肉香菇/
+  韭菜鸡蛋）及冰花煎饺/蒸饺/鲜肉包等衍生品，因不在 PRD 9 SKU 内未入库，
+  需要时在 `SKU_DEFS` 追加一行即可。
 
 ## 3. queue_consumer.py —— 云端动作队列消费者（BFF → 店内库）
 
