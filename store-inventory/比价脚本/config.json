@@ -1,0 +1,34 @@
+{
+  "_说明_接口引擎": "以下参数给 fetch_quotes.py（1688 开放平台 / onebound 接口）使用",
+  "api_url": "https://api-gw.onebound.cn/1688/item_search",
+  "api_key": "",
+  "api_secret": "",
+  "page_size": 40,
+  "pages": 1,
+  "sleep": 1.5,
+  "retry": 2,
+  "sort": "price",
+  "top_n": 3,
+  "source": "1688(API)",
+  "keyword_suffix": "",
+  "only_direct": true,
+  "allow_conv_grab": false,
+
+  "_说明_网页引擎": "以下参数给 fetch_quotes_selenium.py（Selenium 真实浏览器）使用；命令行参数优先级更高",
+  "selenium": {
+    "source": "1688(网页)",
+    "delay": 2.5,
+    "jitter": 0.35,
+    "scrolls": 3,
+    "pages": 1,
+    "top_n": 3,
+    "page_timeout": 25,
+    "login_wait": 300,
+    "profile_dir": "chrome_profile",
+    "headless": false,
+    "browser": "auto",
+    "binary": "",
+    "keyword_suffix": "",
+    "allow_conv_grab": false
+  }
+}

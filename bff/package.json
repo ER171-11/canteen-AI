@@ -1,0 +1,12 @@
+{
+  "name": "canteenai-kimi-bff",
+  "version": "1.0.0",
+  "description": "熊猫五福餐厅 老板 AI App 原型 - 本地零依赖 Node BFF，代理调用 Moonshot/Kimi 视觉 API",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "private": true,
+  "license": "UNLICENSED"
+}

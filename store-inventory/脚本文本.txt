@@ -1,0 +1,61 @@
+import requests
+import pandas as pd
+import time
+
+# 配置你的API密钥（以万邦等第三方数据接口为例）
+API_KEY = 'YOUR_API_KEY'
+API_SECRET = 'YOUR_API_SECRET'
+
+def search_1688_products(keyword, page=1):
+    """搜索1688商品并返回结构化数据"""
+    url = 'https://api-gw.onebound.cn/1688/item_search'
+    params = {
+        'key': API_KEY,
+        'secret': API_SECRET,
+        'q': keyword,
+        'page': page,
+        'page_size': 40,
+        'sort': 'price' # 按价格排序，方便比价
+    }
+    
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json().get('products', [])
+        else:
+            print(f"请求失败，状态码: {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"发生错误: {e}")
+        return []
+
+def export_to_excel(data, filename="1688_price_comparison.xlsx"):
+    """将数据清洗并导出为Excel对比表"""
+    if not data:
+        print("没有数据可导出")
+        return
+        
+    # 提取核心比价字段
+    extracted_data = []
+    for item in data:
+        extracted_data.append({
+            "商品标题": item.get('title'),
+            "批发价(元)": item.get('price'),
+            "最小起订量": item.get('min_quantity'),
+            "供应商名称": item.get('shop_title'),
+            "发货地": item.get('location'),
+            "商品链接": item.get('detail_url')
+        })
+        
+    # 使用Pandas生成Excel
+    df = pd.DataFrame(extracted_data)
+    df.to_excel(filename, index=False, engine='openpyxl')
+    print(f"✅ 成功抓取 {len(data)} 条数据，已保存至 {filename}")
+
+if __name__ == "__main__":
+    # 假设你正在为快餐店寻找包材或食材供应商
+    target_keyword = "快餐打包盒 圆形" 
+    print(f"正在搜索: {target_keyword} ...")
+    
+    products = search_1688_products(target_keyword)
+    export_to_excel(products)

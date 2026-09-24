@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  redline-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 红线守卫（受保护文件/旁路写/硬编码Key/图片落盘）
+        run: bash ci/redline_guard.sh
+
+  bff-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: BFF 契约测试
+        env:
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY_TEST }}
+        run: |
+          cd bff
+          node server.js &
+          sleep 1
+          bash test_contract.sh
+
+  admin-web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/admin-web/package-lock.json
+      - name: admin-web install & build
+        run: |
+          cd apps/admin-web
+          npm ci
+          npm run build
+
+  store-inventory-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python 语法检查 + DDL 幂等验证
+        run: |
+          python3 -m py_compile store-inventory/snapshot_pusher.py store-inventory/queue_consumer.py
+          cp store-inventory/data/餐厅系统.db /tmp/test_ci.db
+          sqlite3 /tmp/test_ci.db < store-inventory/migrations/001_new_tables.sql
+          sqlite3 /tmp/test_ci.db < store-inventory/migrations/001_new_tables.sql
+          sqlite3 /tmp/test_ci.db "SELECT count(*) FROM sqlite_master WHERE type='table';"
+
+  kmp-build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: KMP commonTest
+        run: |
+          cd kmp-shared
+          ./gradlew :compileKotlinMetadata testDebugUnitTest --stacktrace

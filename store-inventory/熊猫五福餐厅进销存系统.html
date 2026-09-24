@@ -1,0 +1,1679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>熊猫五福餐厅 · 进销存与毛利管理系统</title>
+<style>
+:root{
+  --bg:#f4f6f9; --card:#ffffff; --line:#e3e8ef; --text:#1f2937; --sub:#6b7280;
+  --traffic:#E8734A; --star:#D93025; --profit:#1E8E5A; --image:#6B4C9A; --regular:#3D7EA6;
+  --ok:#1E8E5A; --bad:#D93025; --warn:#B7791F; --blue:#2563eb;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);
+  font-family:"Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei","PingFang SC",sans-serif;
+  font-size:14px;line-height:1.6;padding:0 0 60px}
+.wrap{max-width:1560px;margin:0 auto;padding:22px 28px}
+h1{font-size:22px;font-weight:700}
+h2{font-size:16px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+h2 .hint{font-size:12px;font-weight:400;color:var(--sub)}
+h3{font-size:14px;font-weight:700;margin:12px 0 8px}
+.sub{color:var(--sub);font-size:12.5px}
+header.topbar{background:#111827;color:#fff;margin-bottom:16px}
+header.topbar .inner{max-width:1560px;margin:0 auto;padding:16px 28px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+header.topbar h1{font-size:19px}
+header.topbar .meta{color:#9ca3af;font-size:12.5px}
+nav.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+nav.tabs .tab{padding:6px 14px;border-radius:20px;cursor:pointer;font-size:13px;color:#d1d5db;border:1px solid transparent;position:relative}
+nav.tabs .tab:hover{background:#1f2937;color:#fff}
+nav.tabs .tab.on{background:#fff;color:#111827;font-weight:700}
+nav.tabs .tab .badge{position:absolute;top:-4px;right:-2px;background:var(--bad);color:#fff;font-size:10px;
+  border-radius:10px;padding:0 5px;line-height:15px;font-weight:700}
+section.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:16px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.kpi{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--regular);border-radius:8px;padding:12px 14px}
+.kpi .k{font-size:12px;color:var(--sub)}
+.kpi .v{font-size:22px;font-weight:700;margin-top:2px;letter-spacing:-.5px}
+.kpi .u{font-size:12px;color:var(--sub);font-weight:400}
+.kpi.k1{border-left-color:var(--star)}.kpi.k2{border-left-color:var(--profit)}
+.kpi.k3{border-left-color:var(--warn)}.kpi.k4{border-left-color:var(--image)}
+.kpi.k5{border-left-color:var(--regular)}.kpi.k6{border-left-color:#7c3aed}
+.kpi.k7{border-left-color:#0891b2}.kpi.k8{border-left-color:#be185d}
+.pos{color:var(--ok)}.neg{color:var(--bad)}.warn{color:var(--warn)}
+.btn{padding:5px 12px;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;
+  font-size:12.5px;font-family:inherit;color:var(--text);white-space:nowrap}
+.btn:hover{background:#f3f4f6}
+.btn.pri{background:#1f2937;color:#fff;border-color:#1f2937}
+.btn.pri:hover{background:#374151}
+.btn.ok{background:var(--ok);color:#fff;border-color:var(--ok)}
+.btn.danger{color:var(--bad);border-color:#fecaca}
+.btn.danger:hover{background:#fef2f2}
+.btn.sm{padding:2px 8px;font-size:11.5px}
+select,input[type=text],input[type=number],input[type=date],input[type=search],textarea{
+  padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:13px;background:#fff}
+input:focus,select:focus,textarea:focus{outline:2px solid #93c5fd;outline-offset:-1px;border-color:#3b82f6}
+input[type=number]{text-align:right}
+input.cell{width:74px;padding:2px 6px;border:1px solid transparent;border-radius:4px;text-align:right;font-size:13px;background:transparent}
+input.cell:hover{border-color:#cbd5e1;background:#fff}
+input.cell:focus{outline:2px solid #93c5fd;border-color:#3b82f6;background:#fff}
+.tbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{padding:4px 11px;border:1px solid var(--line);background:#fff;border-radius:20px;cursor:pointer;font-size:12.5px;color:#374151}
+.chip.on{background:#1f2937;color:#fff;border-color:#1f2937}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 8px;border-bottom:1px solid #eef1f5;text-align:right;white-space:nowrap}
+th{background:#f8fafc;font-size:12px;color:#475569;border-bottom:1px solid var(--line);font-weight:600}
+th.l,td.l{text-align:left}
+.tw{max-height:580px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.tw.noslide{max-height:none;overflow:visible}
+tbody tr:hover{background:#f9fafb}
+tbody tr.off{opacity:.45}
+tbody tr.negrow td{color:var(--bad)}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:#fff;font-weight:600}
+.tag.gray{background:#9ca3af}.tag.red{background:var(--bad)}.tag.green{background:var(--ok)}
+.tag.orange{background:var(--traffic)}.tag.blue{background:var(--regular)}.tag.purple{background:var(--image)}
+.bg-引流{background:var(--traffic)}.bg-爆品{background:var(--star)}.bg-利润{background:var(--profit)}
+.bg-形象{background:var(--image)}.bg-常规{background:var(--regular)}
+.grid2{display:grid;grid-template-columns:1.2fr 1fr;gap:16px}
+.grid2b{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cardbox{background:#fcfdfe;border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.cardbox .ct{font-size:13px;font-weight:700;margin-bottom:8px}
+.note{font-size:12px;color:var(--sub);line-height:1.75}
+.note b{color:#374151}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--sub);margin-top:6px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle}
+/* 弹层 */
+.overlay{position:fixed;inset:0;background:rgba(17,24,39,.45);z-index:100;display:flex;align-items:flex-start;
+  justify-content:center;padding:40px 16px;overflow:auto}
+.modal{background:#fff;border-radius:10px;width:760px;max-width:100%;box-shadow:0 18px 50px rgba(0,0,0,.25)}
+.modal.wide{width:1040px}
+.modal header{padding:13px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.modal header b{font-size:15px}
+.modal .mbody{padding:16px 18px;max-height:66vh;overflow:auto}
+.modal footer{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+.xclose{cursor:pointer;border:none;background:none;font-size:18px;color:var(--sub)}
+.fgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 14px}
+.fgrid .fld{display:flex;flex-direction:column;gap:3px}
+.fgrid .fld.full{grid-column:1/-1}
+.fgrid label{font-size:12px;color:var(--sub)}
+.lines td{padding:4px 6px}
+.totrow{display:flex;justify-content:flex-end;gap:26px;margin-top:10px;font-size:13.5px;flex-wrap:wrap}
+.totrow b{font-size:15px}
+/* 比价下拉 */
+details.pop{position:relative;display:inline-block}
+details.pop summary{list-style:none;cursor:pointer}
+details.pop summary::-webkit-details-marker{display:none}
+.popmenu{position:fixed;z-index:200;background:#fff;border:1px solid var(--line);
+  border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.13);padding:6px;width:172px;
+  max-height:70vh;overflow:auto}
+.popmenu a{display:block;padding:6px 9px;border-radius:5px;font-size:12.5px;color:var(--text);text-decoration:none}
+.popmenu a:hover{background:#f3f4f6}
+.popmenu hr{border:none;border-top:1px solid var(--line);margin:5px 0}
+.popmenu .pm-h{font-size:11px;color:var(--sub);padding:3px 9px}
+.quotebox{background:#f0f7ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 9px;font-size:12px;margin-top:6px}
+footer.foot{color:var(--sub);font-size:12px;text-align:center;margin-top:20px}
+@media(max-width:1300px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2,.grid2b{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="inner">
+    <div>
+      <h1 id="restName">熊猫五福餐厅 · 进销存与毛利管理系统</h1>
+      <div class="meta">数据输入通道：采购单(Excel/手工录入) → 原料库存自动入库 → 菜品配方(BOM) → 销售出库 → 应收实收 · 数据保存在本机浏览器</div>
+    </div>
+    <nav class="tabs" id="nav">
+      <div class="tab on" data-tab="dash">经营概览</div>
+      <div class="tab" data-tab="ing">原料库存<span class="badge" id="bgIng" style="display:none"></span></div>
+      <div class="tab" data-tab="buy">采购进货</div>
+      <div class="tab" data-tab="dish">菜品配方</div>
+      <div class="tab" data-tab="sale">销售收银<span class="badge" id="bgSale" style="display:none"></span></div>
+      <div class="tab" data-tab="price">外接比价</div>
+      <div class="tab" data-tab="stock">库存流水</div>
+      <div class="tab" data-tab="set">设置</div>
+    </nav>
+  </div>
+</header>
+<div class="wrap">
+
+<!-- ============ 经营概览 ============ -->
+<section class="panel" id="tab-dash">
+  <div class="tbar">
+    <h2 style="margin:0">经营概览 <span class="hint">自动汇总：采购进货 + 销售收银 + 原料库存 各模块数据，无需单独录入</span></h2>
+    <span class="sub">统计周期：</span>
+    <div class="chips" id="dashRange">
+      <div class="chip" data-r="7">近7天</div>
+      <div class="chip on" data-r="30">近30天</div>
+      <div class="chip" data-r="all">全部</div>
+    </div>
+    <span style="flex:1"></span>
+    <span class="sub" id="dashDateTip"></span>
+  </div>
+  <div class="kpis" id="dashKpi" style="margin-bottom:16px"></div>
+  <div class="grid2">
+    <div class="cardbox">
+      <div class="ct">每日应收 vs 实收（近14天）</div>
+      <div id="chartDaily"></div>
+      <div class="legend">
+        <span><i style="background:#3D7EA6"></i>应收（挂账前）</span>
+        <span><i style="background:#1E8E5A"></i>实收</span>
+        <span><i style="background:#D93025"></i>当日新增欠款</span>
+      </div>
+    </div>
+    <div class="cardbox">
+      <div class="ct">库存预警（低于安全库存的原料）</div>
+      <div id="lowStockBox"></div>
+    </div>
+  </div>
+  <div class="grid2" style="margin-top:16px">
+    <div class="cardbox">
+      <div class="ct">未收账款（客户挂账）</div>
+      <div id="recvBox"></div>
+    </div>
+    <div class="cardbox">
+      <div class="ct">菜品毛利排行（近30天，按毛利额）</div>
+      <div class="tw" style="max-height:300px"><table id="topDish"></table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 原料库存 ============ -->
+<section class="panel" id="tab-ing" style="display:none">
+  <h2>原料与库存 <span class="hint">数据来源：采购单入库自动生成库存 · 新增原料手工录入 · 安全库存/出成率请按实际设置 · 移动加权平均法计价</span></h2>
+  <div class="tbar">
+    <button class="btn pri" id="btnNewIng">＋ 新增原料</button>
+    <input type="search" id="ingSearch" placeholder="搜索原料名称…" style="width:200px">
+    <div class="chips" id="ingCats"></div>
+  </div>
+  <div class="tw noslide">
+    <table>
+      <thead><tr>
+        <th class="l">原料名称</th><th class="l" style="width:90px">分类</th>
+        <th style="width:110px">采购规格</th><th style="width:80px">换算率</th>
+        <th style="width:110px">当前库存</th><th style="width:80px">安全库存</th>
+        <th style="width:110px">库存均价</th><th style="width:110px">最近采购价</th>
+        <th style="width:100px">库存总值</th><th style="width:70px">出成率</th>
+        <th style="width:170px">操作</th>
+      </tr></thead>
+      <tbody id="ingBody"></tbody>
+    </table>
+  </div>
+  <div class="note" style="margin-top:8px">
+    <b>换算率</b>：1 个采购单位 = N 个库存单位。当前真实采购单各品项采购单位=库存单位，换算率均为1。
+    <b>出成率</b>：毛料经宰杀/择洗后出净料的比例，配方按净料用量计算，自动还原毛料消耗。当前暂无净料率数据，均设为1，待补食谱卡后调整。
+    <b>安全库存</b>：当前均为0（暂无数据），请在原料行「编辑」中按实际设置最低备货量。
+  </div>
+</section>
+
+<!-- ============ 采购进货 ============ -->
+<section class="panel" id="tab-buy" style="display:none">
+  <h2>采购进货 <span class="hint">数据来源：采购单整理_熊猫五福.xlsx (海南菜篮子实业 2026-09-12 已录入) · 后续在「新建采购单」录入 · 确认后自动入库并刷新均价</span></h2>
+  <div class="kpis" id="buyKpi" style="margin-bottom:14px;grid-template-columns:repeat(4,1fr)"></div>
+  <div class="tbar">
+    <button class="btn pri" id="btnNewPo">＋ 新建采购单</button>
+    <span class="sub">供应商：</span>
+    <select id="poSupplierFilter"><option value="">全部</option></select>
+    <span style="flex:1"></span>
+    <span class="sub" id="poCount"></span>
+  </div>
+  <div class="tw"><table>
+    <thead><tr>
+      <th style="width:110px">单号</th><th style="width:96px">日期</th><th class="l">供应商</th>
+      <th class="l">采购内容</th><th style="width:100px">应付金额</th>
+      <th style="width:100px">实付金额</th><th style="width:90px">欠款</th>
+      <th style="width:80px">状态</th><th style="width:150px">操作</th>
+    </tr></thead>
+    <tbody id="poBody"></tbody>
+  </table></div>
+</section>
+
+<!-- ============ 菜品配方 ============ -->
+<section class="panel" id="tab-dish" style="display:none">
+  <h2>菜品 · 配方(BOM) · 毛利率 <span class="hint">数据来源：菜品目录来自「保本测算」86道菜 · 成本暂用估算值(保本测算est) · 取得食谱卡后在「编辑配方」录入净料用量即自动按原料实时均价核算</span></h2>
+  <div class="tbar">
+    <button class="btn pri" id="btnNewDish">＋ 新增菜品</button>
+    <input type="search" id="dishSearch" placeholder="搜索菜品…" style="width:200px">
+    <div class="chips" id="dishTabs"></div>
+    <span style="flex:1"></span>
+    <span class="sub">近30天毛利基于实际销售单统计</span>
+  </div>
+  <div class="tw"><table>
+    <thead><tr>
+      <th class="l">菜品名称</th><th class="l" style="width:80px">类型</th>
+      <th style="width:90px">成本来源</th><th style="width:90px">食材成本</th>
+      <th style="width:80px">售价</th><th style="width:80px">毛利率</th>
+      <th style="width:90px">近30天销量</th><th style="width:110px">近30天毛利</th>
+      <th style="width:90px">配方原料</th><th style="width:170px">操作</th>
+    </tr></thead>
+    <tbody id="dishBody"></tbody>
+  </table></div>
+</section>
+
+<!-- ============ 销售收银 ============ -->
+<section class="panel" id="tab-sale" style="display:none">
+  <h2>销售收银 · 应收 / 实收 <span class="hint">数据来源：暂无真实销售数据 · 在「新建销售单」录入每单菜品/数量/单价/折扣/收款 · 确认后按配方自动扣库存 · 应收−实收=客户欠款可分次收</span></h2>
+  <div class="kpis" id="saleKpi" style="margin-bottom:14px;grid-template-columns:repeat(4,1fr)"></div>
+  <div class="tbar">
+    <button class="btn pri" id="btnNewSale">＋ 新建销售单</button>
+    <span class="sub">渠道：</span>
+    <select id="saleChFilter">
+      <option value="">全部</option><option value="堂食">堂食</option><option value="外卖">外卖</option>
+    </select>
+    <span class="sub" style="margin-left:8px">状态：</span>
+    <select id="saleStFilter">
+      <option value="">全部</option><option value="unpaid">有欠款</option><option value="paid">已结清</option>
+    </select>
+    <span style="flex:1"></span>
+    <span class="sub" id="saleCount"></span>
+  </div>
+  <div class="tw"><table>
+    <thead><tr>
+      <th style="width:110px">单号</th><th style="width:96px">日期</th><th style="width:70px">渠道</th>
+      <th class="l">销售内容</th><th style="width:90px">应收</th>
+      <th style="width:90px">实收</th><th style="width:80px">欠款</th>
+      <th style="width:90px">食材成本</th><th style="width:80px">毛利率</th>
+      <th style="width:80px">状态</th><th style="width:160px">操作</th>
+    </tr></thead>
+    <tbody id="saleBody"></tbody>
+  </table></div>
+</section>
+
+<!-- ============ 外接比价 ============ -->
+<section class="panel" id="tab-price" style="display:none">
+  <h2>外接比价 <span class="hint">数据来源：暂无外部报价 · 「去比价」跳转1688/京东/拼多多搜索 · 查到价格后「录入报价」自动换算对比本店采购价</span></h2>
+  <div class="tbar">
+    <input type="search" id="priceSearch" placeholder="搜索原料…" style="width:220px">
+    <span class="sub">显示：</span>
+    <select id="priceFilter">
+      <option value="">全部原料</option>
+      <option value="better">外价更低（可省钱）</option>
+      <option value="worse">外价更高</option>
+      <option value="none">暂无报价</option>
+    </select>
+    <span style="flex:1"></span>
+    <button class="btn" id="btnQuoteAll">查看全部报价记录</button>
+  </div>
+  <div class="tw"><table>
+    <thead><tr>
+      <th class="l">原料</th><th style="width:110px">本店均价</th>
+      <th style="width:130px">外部最低报价</th><th style="width:90px">差价</th>
+      <th style="width:100px">节省/增加</th><th class="l">报价来源与时间</th>
+      <th style="width:180px">操作</th>
+    </tr></thead>
+    <tbody id="priceBody"></tbody>
+  </table></div>
+  <div class="note" style="margin-top:8px">
+    外部平台报价为<b>含税/含运口径不一</b>的参考价，下单前请确认运费、起批量、发票与到货规格；平台搜索地址可在「设置」中自行增改（支持 <b>{kw}</b> 占位符）。
+  </div>
+</section>
+
+<!-- ============ 库存流水 ============ -->
+<section class="panel" id="tab-stock" style="display:none">
+  <h2>库存查询与流水 <span class="hint">自动生成：期初建账 → 采购入库 → 销售出库 → 盘点/手工调整，按业务日期顺序重放 · 盘点调整手工录入</span></h2>
+  <div class="tbar">
+    <button class="btn pri" id="btnCheck">📋 盘点调整</button>
+    <select id="logIng"><option value="">全部原料</option></select>
+    <select id="logType">
+      <option value="">全部类型</option><option>期初</option><option>采购入库</option>
+      <option>销售出库</option><option>盘点调整</option><option>手工调整</option>
+    </select>
+    <span style="flex:1"></span>
+    <span class="sub" id="stockVal"></span>
+  </div>
+  <div class="grid2">
+    <div class="tw" style="max-height:520px"><table>
+      <thead><tr><th class="l">原料</th><th style="width:90px">当前库存</th><th style="width:90px">均价</th><th style="width:110px">库存总值</th></tr></thead>
+      <tbody id="stockCur"></tbody>
+    </table></div>
+    <div class="tw" style="max-height:520px"><table>
+      <thead><tr><th style="width:110px">日期</th><th class="l">原料</th><th style="width:90px">类型</th>
+        <th style="width:90px">变动</th><th style="width:90px">结存</th><th class="l">关联单据</th></tr></thead>
+      <tbody id="logBody"></tbody></table></div>
+  </div>
+</section>
+
+<!-- ============ 设置 ============ -->
+<section class="panel" id="tab-set" style="display:none">
+  <h2>设置与数据管理 <span class="hint">数据迁移：导出JSON备份 / 导入JSON备份 / 导出CSV · 重置为真实数据基线(海南菜篮子采购单)</span></h2>
+  <h3>各功能模块数据输入通道一览</h3>
+  <div class="cardbox" style="margin-bottom:14px">
+    <table style="font-size:12.5px">
+      <thead><tr><th class="l" style="width:90px">模块</th><th class="l" style="width:160px">数据来源</th><th class="l" style="width:160px">输入方式</th><th class="l">当前状态</th></tr></thead>
+      <tbody>
+        <tr><td class="l">原料库存</td><td class="l">采购单入库自动生成</td><td class="l">新增原料 / 采购单确认</td><td class="l">74种真实商品(干调/蔬菜/鲜肉/水产)</td></tr>
+        <tr><td class="l">采购进货</td><td class="l">采购单整理_熊猫五福.xlsx</td><td class="l">新建采购单(手工录入)</td><td class="l">1单84行 海南菜篮子 2026-09-12</td></tr>
+        <tr><td class="l">菜品配方</td><td class="l">保本测算(86道菜目录)</td><td class="l">编辑配方(录入净料用量)</td><td class="l">目录已建/配方待补食谱卡·成本用估算值</td></tr>
+        <tr><td class="l">销售收银</td><td class="l">暂无真实销售数据</td><td class="l">新建销售单(每单录入)</td><td class="l">空·开业后录入</td></tr>
+        <tr><td class="l">外接比价</td><td class="l">暂无外部报价</td><td class="l">去比价→录入报价</td><td class="l">空·按需录入</td></tr>
+        <tr><td class="l">库存流水</td><td class="l">期初+采购+销售+盘点自动重放</td><td class="l">盘点调整(手工)</td><td class="l">由采购单自动生成入库流水</td></tr>
+        <tr><td class="l">经营概览</td><td class="l">各模块自动汇总</td><td class="l">无需单独录入</td><td class="l">采购KPI有值/销售KPI为0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="fgrid" style="max-width:720px">
+    <div class="fld full"><label>餐厅名称</label><input type="text" id="setRest"></div>
+  </div>
+  <h3>外接比价平台（URL 中用 {kw} 代表原料关键词）</h3>
+  <table style="max-width:820px" id="platTable"></table>
+  <div style="margin:8px 0"><button class="btn" id="btnAddPlat">＋ 增加平台</button></div>
+  <h3>数据备份</h3>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+    <button class="btn" id="btnExport">导出全部数据(JSON)</button>
+    <button class="btn" id="btnCsvIng">导出原料CSV</button>
+    <button class="btn" id="btnCsvDish">导出菜品成本CSV</button>
+    <button class="btn" id="btnCsvSale">导出销售CSV</button>
+    <label class="btn" style="cursor:pointer">导入JSON备份<input type="file" id="fileImport" accept=".json,application/json" hidden></label>
+  </div>
+  <h3>危险操作</h3>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="btn danger" id="btnReseed">重置为真实数据基线（覆盖当前数据）</button>
+    <button class="btn danger" id="btnClear">清空全部业务数据</button>
+  </div>
+  <div class="note" style="margin-top:14px">
+    所有数据仅保存在本浏览器（localStorage），清除浏览器缓存会丢数据，建议定期导出 JSON 备份；换电脑时用「导入JSON备份」迁移。
+  </div>
+</section>
+
+<footer class="foot">
+  熊猫五福餐厅进销存系统 · 真实数据基线：采购单(海南菜篮子实业 BFXYVa2609100003 2026-09-12) + 菜品目录(保本测算86道) · 移动加权平均计价 · 配方成本=Σ(净料用量÷出成率×库存均价) · 销售应收按单日期、实收按收款日期统计 · 待补：食谱卡/安全库存/出成率/真实销售单<br>
+  <a href="docs/ARCHITECTURE.md" style="color:var(--sub)">架构文档</a> · <a href="docs/CHANGELOG.md" style="color:var(--sub)">变更历史</a> · <a href="docs/AGENTS.md" style="color:var(--sub)">AI协作协议</a> · <a href="docs/modules/" style="color:var(--sub)">模块设计</a>
+</footer>
+</div>
+
+<script>
+/* ================================================================
+   熊猫五福餐厅 进销存系统 v2
+   真实数据基线：
+   - 原料目录：74种商品 ← 采购单整理_熊猫五福.xlsx（海南菜篮子实业 2026-09-12 实收84行）
+   - 菜品目录：86道菜 ← 熊猫五福餐厅菜品保本测算.html（引流/爆品/利润/形象/常规）
+   - 采购单：1单84行 ← 同Excel配送单 BFXYVa2609100003
+   - 销售单/外部报价/食谱卡：暂无真实数据，置空待录入
+   口径：
+   - 库存计价：移动加权平均法
+   - 采购：价格按采购单位录入，入库单价 = 采购价 / 换算率(1采购单位=N库存单位)
+   - 配方：每份净料用量；毛料 = 净料 / 出成率；菜品成本 = Σ 毛料 × 库存均价
+   - 未配配方：回退菜品.est 估算成本（来自保本测算）
+   - 销售：应收 = 售价合计 - 折扣；实收 = 收款记录合计；欠款 = 应收 - 实收
+   ================================================================ */
+const LS_KEY='panda_inv_v2';
+const $=s=>document.querySelector(s);
+const $$=s=>Array.from(document.querySelectorAll(s));
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmt=(n,d=2)=>n==null||!isFinite(n)?'—':Number(n).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmt0=n=>fmt(n,0);
+const pct=(n,d=1)=>n==null||!isFinite(n)?'—':(n*100).toFixed(d)+'%';
+const r3=n=>Math.round((n+Number.EPSILON)*1000)/1000;
+const r2=n=>Math.round((n+Number.EPSILON)*100)/100;
+const today=()=>{const d=new Date();return d.toISOString().slice(0,10);};
+const dOff=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);};
+const daysAgo=n=>dOff(-n);
+const uid=p=>p+(DB.seq++);
+const ing=id=>DB.ings.find(x=>x.id===id);
+const dish=id=>DB.dishes.find(x=>x.id===id);
+
+/* -------------- 菜品基础数据（继承保本测算 86 道菜） -------------- */
+const TYPES=['引流','爆品','利润','形象','常规'];
+const RAW=[
+['引流','老虎菜',4.5,18,4],['引流','酸辣蕨根粉',5,22,3],['引流','酸辣藕片',4.5,20,3],
+['引流','老醋花生',4,18,6],['引流','酱黄瓜',4,16,5],['引流','爽口莴笋',4.5,20,3],
+['引流','泡萝卜',3,14,4],['引流','冰花煎饺',11,32,5],['引流','宫廷定胜糕',5,18,3],
+['引流','熊猫豆沙包',5,18,6],['引流','红烩牛肉饭',15,42,6],['引流','儿童黑椒牛排套餐',26,68,5],
+['爆品','白切文昌鸡',38,98,12],['爆品','招牌捞叶炒鸡',36,98,12],['爆品','地胆头鸡汤',46,128,7],
+['爆品','糟粕醋火锅',78,198,5],['爆品','海南全家福煲',46,128,6],['爆品','东坡肉',18,58,7],
+['爆品','五福饺子',13,38,9],['爆品','水晶虾饺',16,42,8],['爆品','黑金流沙包',8,26,9],
+['爆品','全家福水饺',13,38,6],['爆品','椰子鸡',58,158,4],['爆品','东山羊(红焖)',62,168,4],
+['利润','捞汁秋葵',8,28,3],['利润','果蔬沙拉',10,36,2],['利润','老北京豆酱',7,28,2],
+['利润','京味大拉皮',6.5,26,3],['利润','椰汁木瓜',11,38,2],['利润','青椒皮蛋',7,26,3],
+['利润','冰沙清补凉',6,26,5],['利润','脆薯角',5,18,3],['利润','缤纷冰淇淋',8,28,3],
+['利润','笑脸薯饼拼盘',8,28,3],['利润','番茄肉酱意面',12,38,3],['利润','奶油蘑菇意面',10,36,2],
+['利润','芝士海鲜焗饭',18,52,2],['利润','御膳什锦果盆',26,68,2],['利润','阿胶烤梨羹',12,38,2],
+['利润','厚椰乳燕窝粥',30,88,1],['利润','椰香燕麦花胶粥',24,68,2],['利润','羊肚菌鸽子汤',42,118,2],
+['利润','滋补双胶',45,128,1],['利润','党参肉苁蓉鸽子汤',34,98,2],['利润','人参蛹虫草鸡汤',40,118,2],
+['利润','阿胶黄精土鸡汤',42,128,2],
+['形象','清蒸石斑鱼',68,178,3],['形象','白灼大角虾',92,228,1],['形象','鲍鱼花胶文昌鸡煲',105,268,1],
+['形象','东山羊打边炉',105,268,1],['形象','御膳烤鸭',78,208,2],['形象','宫廷烤鸭',74,198,1],
+['形象','葱烧海参',68,188,1],['形象','迷你佛跳墙',82,218,1],['形象','宫廷烤羊排',68,178,1],
+['形象','清汤燕窝羹',42,128,1],
+['常规','麻酱糖拌白碟',5,22,2],['常规','芥末鸭掌',10,38,2],['常规','老醋蜇头',13,48,2],
+['常规','捞汁牛百叶',22,68,2],['常规','翡翠滑虾片',20,58,1],['常规','黄流老鸭汤',48,138,2],
+['常规','葱油捞白切猪脚',26,78,3],['常规','琼式扣羊',58,158,1],['常规','冠早馅饼',7,22,2],
+['常规','求醋元宵',5,18,1],['常规','桃胶粽子',8,26,1],['常规','琼式海香肠',28,78,1],
+['常规','抓炒大虾',38,98,2],['常规','抓炒鱼片',18,52,2],['常规','抓炒里脊',14,42,2],
+['常规','抓炒腰片',22,62,1],['常规','铁板牛排',32,88,3],['常规','咖喱牛肉',24,68,2],
+['常规','预制酱牛肉',34,88,2],['常规','大通全家福',44,118,1],['常规','罐焖红烩牛肉',24,68,2],
+['常规','清炖蟹粉狮子头',28,78,2],['常规','乌鱼蛋汤',18,58,1],['常规','墨云水饺',15,42,2],
+['常规','海胆蒸饺',22,58,1],['常规','翡翠白薯饺',10,32,2],['常规','墨玉锅贴',13,36,2],
+['常规','菲力小牛排',48,128,1],['常规','黑椒牛肋排',58,158,1],['常规','香煎龙利鱼',18,52,2]
+];
+
+/* -------------- 原料目录：来源「采购单整理_熊猫五福.xlsx」真实收货商品（海南菜篮子实业 2026-09-12）
+   格式 [名称,分类,库存单位,期初库存,期初均价,安全库存,出成率]
+   期初库存=0：以真实采购单重放入库，不预设虚假期初；安全库存=0：暂无数据，由用户按需设置；出成率=1：暂无净料率数据，待补食谱卡 -------------- */
+const ING_TUPLES=[
+['东古一品鲜500ml','干调类','瓶',0,0,0,1],['海天苹果醋450ml','干调类','瓶',0,0,0,1],
+['海天金标生抽1.9L','干调类','桶',0,0,0,1],['家乐辣鲜露448g','干调类','瓶',0,0,0,1],
+['家乐麻辣鲜露468g','干调类','瓶',0,0,0,1],['顿可辣椒油210ml','干调类','瓶',0,0,0,1],
+['紫林陈醋420ml','干调类','件',0,0,0,1],['上海鼎丰白醋','干调类','瓶',0,0,0,1],
+['超霸芥末','干调类','支',0,0,0,1],['金永丰香麻油860ml','干调类','瓶',0,0,0,1],
+['百利凝胶片','干调类','盒',0,0,0,1],['雪天精制盐','干调类','包',0,0,0,1],
+['丘比千岛酱','干调类','瓶',0,0,0,1],['丘比沙拉酱香甜味1kg','干调类','瓶',0,0,0,1],
+['桂皮','干调类','斤',0,0,0,1],['八角','干调类','斤',0,0,0,1],['小茴香','干调类','斤',0,0,0,1],
+['丁香','干调类','斤',0,0,0,1],['白芷','干调类','斤',0,0,0,1],['白蔻','干调类','斤',0,0,0,1],
+['香果','干调类','斤',0,0,0,1],['砂仁','干调类','斤',0,0,0,1],['甘草','干调类','斤',0,0,0,1],
+['青花椒','干调类','斤',0,0,0,1],['花椒粒','干调类','斤',0,0,0,1],
+['10升金龙鱼非转大豆油','干调类','件',0,0,0,1],['狮球吉士粉','干调类','罐',0,0,0,1],
+['海天上等蚝油1kg','干调类','瓶',0,0,0,1],['李锦记排骨酱240g','干调类','瓶',0,0,0,1],
+['李锦记叉烧酱240g','干调类','瓶',0,0,0,1],['李锦记柱侯酱240g','干调类','瓶',0,0,0,1],
+['李锦记海鲜酱240g','干调类','瓶',0,0,0,1],['安格斯黑椒碎','干调类','罐',0,0,0,1],
+['家乐浓缩鸡汁1kg','干调类','瓶',0,0,0,1],['家乐鸡粉2kg','干调类','罐',0,0,0,1],
+['味丹味精','干调类','件',0,0,0,1],['香叶','干调类','斤',0,0,0,1],['陈皮','干调类','斤',0,0,0,1],
+['草果','干调类','斤',0,0,0,1],['安琪酵母500g','干调类','包',0,0,0,1],
+['5L金龙鱼非转大豆油','干调类','桶',0,0,0,1],['白糖','干调类','斤',0,0,0,1],
+['家乐鸡精900g','干调类','包',0,0,0,1],['莲花细味精908g','干调类','包',0,0,0,1],
+['白胡椒粉','干调类','斤',0,0,0,1],['海天金字蚝油6kg','干调类','桶',0,0,0,1],
+['海天草菇老抽1.9L','干调类','桶',0,0,0,1],['十三香45g','干调类','盒',0,0,0,1],
+['海天料酒450ml','干调类','瓶',0,0,0,1],['龙口粉丝7kg','干调类','包',0,0,0,1],
+['云耳(好)','干调类','斤',0,0,0,1],['东北酸菜(切丝)','干调类','包',0,0,0,1],
+['冠珠龙口粉丝400g','干调类','包',0,0,0,1],['茴香','干调类','斤',0,0,0,1],
+['食用墨鱼汁','干调类','瓶',0,0,0,1],['紫薯粉','干调类','瓶',0,0,0,1],
+['五常大米5kg','干调类','包',0,0,0,1],
+['玉米粒','蔬菜类','斤',0,0,0,1],['生姜','蔬菜类','斤',0,0,0,1],['包菜','蔬菜类','斤',0,0,0,1],
+['菠菜','蔬菜类','斤',0,0,0,1],['南瓜','蔬菜类','斤',0,0,0,1],['胡萝卜','蔬菜类','斤',0,0,0,1],
+['白萝卜','蔬菜类','斤',0,0,0,1],['西葫芦','蔬菜类','斤',0,0,0,1],['香菜','蔬菜类','斤',0,0,0,1],
+['红葱头','蔬菜类','斤',0,0,0,1],['圆白菜','蔬菜类','斤',0,0,0,1],['大葱','蔬菜类','斤',0,0,0,1],
+['韭菜','蔬菜类','斤',0,0,0,1],
+['牛上脑','鲜肉类','斤',0,0,0,1],['黑猪五花肉','鲜肉类','斤',0,0,0,1],['前腿半肥肉','鲜肉类','斤',0,0,0,1],
+['虾仁','水产类','斤',0,0,0,1]
+];
+/* 无特殊采购规格（真实采购单中各品项采购单位=库存单位，换算率均为1） */
+const ING_SPECIAL=[];
+const ING_CATS=['干调类','蔬菜类','鲜肉类','水产类'];
+
+/* 配方(BOM)：[菜品名, [[原料名,每份净料用量], ...]]
+   暂无真实食谱卡数据，置空；菜品成本回退到「保本测算」估算成本(est字段)。
+   后续取得标准食谱卡后，可在「菜品配方」页录入每道菜的净料用量，系统将自动按原料实时均价核算配方成本。 */
+const RECIPES=[];
+
+const DEF_PLATFORMS=[
+ {name:'1688批发',tpl:'https://s.1688.com/selloffer/offer_search.htm?keywords={kw}'},
+ {name:'京东',tpl:'https://search.jd.com/Search?keyword={kw}&enc=utf-8'},
+ {name:'淘宝',tpl:'https://s.taobao.com/search?q={kw}'},
+ {name:'拼多多',tpl:'https://mobile.yangkeduo.com/search_result.html?search_key={kw}'},
+ {name:'百度爱采购',tpl:'https://b2b.baidu.com/s?q={kw}'},
+ {name:'美菜商城',tpl:'https://www.mallcai.com/'},
+ {name:'美团快驴',tpl:'https://www.kuailv.com/'}
+];
+
+/* ====================== 种子数据构建 ====================== */
+let DB=null;
+function seedDB(){
+ DB={seq:1,v:2,rest:'熊猫五福餐厅',ings:[],dishes:[],rec:{},pos:[],sales:[],logs:[],quotes:[],
+     platforms:JSON.parse(JSON.stringify(DEF_PLATFORMS)),suppliers:[]};
+ /* 原料：initStock/initAvg 为期初基线，当前 stock/avg 由 rebuildStock() 重放得出 */
+ ING_TUPLES.forEach(t=>{
+   DB.ings.push({id:uid('I'),name:t[0],cat:t[1],unit:t[2],buy:t[2],conv:1,spec:'',
+     stock:0,avg:0,initStock:t[3],initAvg:t[4],initDate:dOff(-10),last:null,safe:t[5],yld:t[6],on:true});
+ });
+ ING_SPECIAL.forEach(t=>{
+   const [name,buy,conv,spec,stock,avg,safe]=t;
+   const unit = name==='大米'||name==='面粉'?'斤':name==='可乐'||name==='啤酒'?'瓶':'L';
+   const cat = name==='可乐'||name==='啤酒'?'酒水':'干货调味';
+   DB.ings.push({id:uid('I'),name,cat,unit,buy,conv,spec,stock:0,avg:0,
+     initStock:stock,initAvg:avg,initDate:dOff(-10),last:null,safe,yld:1,on:true});
+ });
+ const ingByName=n=>DB.ings.find(x=>x.name===n);
+ /* 菜品 */
+ RAW.forEach(r=>DB.dishes.push({id:uid('D'),cat:r[0],name:r[1],est:r[2],price:r[3],on:true}));
+ /* 配方 */
+ RECIPES.forEach(([dn,lines])=>{
+   const d=DB.dishes.find(x=>x.name===dn);if(!d)return;
+   DB.rec[d.id]=lines.map(([n,q])=>({ing:ingByName(n).id,qty:q}));
+ });
+ DB.suppliers=['海南菜篮子实业有限公司'];
+
+ /* 真实采购单：来源「采购单整理_熊猫五福.xlsx」
+    海南菜篮子实业 · 配送单号 BFXYVa2609100003 · 2026-09-12
+    89行明细，剔除未收货5项(白糖划掉/荠菜/红兰草/小苏打/鸡蛋)，实收84行
+    [offset,supplier,[[原料名,实收数,采购单价]],备注] */
+ const PO_SEED=[
+  [0,'海南菜篮子实业有限公司',[
+   ['东古一品鲜500ml',5,8.1],['海天苹果醋450ml',3,6.48],['海天金标生抽1.9L',3,18.9],
+   ['家乐辣鲜露448g',6,19.44],['家乐麻辣鲜露468g',2,21.6],['顿可辣椒油210ml',2,5.4],
+   ['紫林陈醋420ml',1,70.2],['上海鼎丰白醋',12,4.32],['超霸芥末',10,4.86],
+   ['金永丰香麻油860ml',2,20.52],['百利凝胶片',1,124.2],['雪天精制盐',10,1],
+   ['丘比千岛酱',2,29.16],['丘比沙拉酱香甜味1kg',2,30.24],['桂皮',0.5,19.44],
+   ['八角',0.5,18.36],['小茴香',0.5,15.12],['丁香',0.3,48.6],['白芷',0.5,19.44],
+   ['白蔻',0.5,32.4],['香果',0.5,30.24],['砂仁',0.3,32.4],['甘草',0.3,19.44],
+   ['青花椒',1,37.8],['花椒粒',1,41.04],['10升金龙鱼非转大豆油',2,237.6],
+   ['狮球吉士粉',1,37.8],['海天上等蚝油1kg',9,110.16],['李锦记排骨酱240g',12,17.28],
+   ['李锦记叉烧酱240g',12,17.28],['李锦记柱侯酱240g',12,15.12],['李锦记海鲜酱240g',12,15.12],
+   ['安格斯黑椒碎',1,41.04],['家乐浓缩鸡汁1kg',6,58.32],['家乐鸡粉2kg',6,73.44],
+   ['味丹味精',1,145.8],['雪天精制盐',50,0.76],['八角',1,18.36],['香叶',0.5,27],
+   ['陈皮',1,9.72],['桂皮',1,19.44],['草果',0.5,34.56],['安琪酵母500g',2,20.52],
+   ['5L金龙鱼非转大豆油',1,118.8],['白糖',1,3.24],['家乐鸡精900g',1,22.68],
+   ['莲花细味精908g',1,14.58],['雪天精制盐',1,1],['白胡椒粉',1,32.4],
+   ['海天金字蚝油6kg',1,37.8],['海天金标生抽1.9L',1,18.9],['海天草菇老抽1.9L',1,21.6],
+   ['十三香45g',2,3.24],['海天料酒450ml',1,5],['香叶',0.2,27],['花椒粒',0.2,41.04],
+   ['八角',0.2,18.36],['小茴香',0.2,15.12],['龙口粉丝7kg',1,71.28],['云耳(好)',0.1,32.4],
+   ['东北酸菜(切丝)',2,7.56],['冠珠龙口粉丝400g',1,9.72],['玉米粒',0.2,7.2],
+   ['牛上脑',2,54],['虾仁',5,42],['生姜',1,6],['包菜',5.5,1.8],['菠菜',2,7],['南瓜',8,1.4],
+   ['黑猪五花肉',4,17.5],['前腿半肥肉',5,13],['五常大米5kg',3,56],['茴香',1,9],
+   ['胡萝卜',1,1.9],['白萝卜',1,1.9],['西葫芦',2,2.4],['香菜',0.1,7.5],['红葱头',1,4.5],
+   ['圆白菜',1,2.2],['大葱',3,1.9],['生姜',1,6],['韭菜',2,3.5],
+   ['食用墨鱼汁',1,65],['紫薯粉',1,23]
+  ],'配送单号 BFXYVa2609100003 · 制单:石江云 · 配送:孙羽纯 · 收货:陈西强 · 虾仁实收5斤(下单2斤) · 五常大米原4包改3包 · 原始下单总额5899.65元(含未收5项)']
+ ];
+ PO_SEED.forEach(([off,sup,items,note],i)=>{
+   const lines=items.map(([n,q,p])=>{const g=ingByName(n);return mkPoLine(g,q,p);});
+   const payable=r2(lines.reduce((a,b)=>a+b.amount,0));
+   const po={id:uid('P'),no:mkNo('CG',dOff(off),i+1),date:dOff(off),supplier:sup,lines,
+     payable,payments:[],note:note||'',method:'现金/转账'};
+   po.payments.push({amount:payable,date:dOff(off),method:po.method});
+   DB.pos.push(po);
+ });
+ /* 销售单：暂无真实销售数据，置空；开业后在「销售收银」页录入 */
+ const S_SEED=[];
+ S_SEED.forEach(([off,ch,items,disc,recv,note],i)=>{
+   const lines=items.map(([n,q,p])=>{const d=DB.dishes.find(x=>x.name===n);return {dish:d.id,qty:q,price:p,amount:r2(q*p)};});
+   const sub=r2(lines.reduce((a,b)=>a+b.amount,0));
+   const recvAmt=r2(sub-disc);
+   const s={id:uid('S'),no:mkNo('XS',dOff(off),i+1),date:dOff(off),ch,lines,sub,
+     discount:disc,receivable:recvAmt,payments:[],note,cost:0};
+   s.payments.push({amount:recv==null?recvAmt:recv,date:dOff(off),method:ch==='外卖'?'平台结算':'现金/扫码'});
+   DB.sales.push(s);
+ });
+ /* 外部报价：暂无真实比价数据，置空；在「外接比价」页录入 */
+ const Q_SEED=[];
+ Q_SEED.forEach(([n,src,price,off,note],i)=>{
+   const g=ingByName(n);
+   DB.quotes.push({id:uid('Q'),ing:g.id,src,price,per:'buy',date:dOff(off),note});
+ });
+ rebuildStock();
+ /* 库存均价重算完成后，再按当前均价快照各销售单食材成本 */
+ DB.sales.forEach(s=>s.cost=r3(calcSaleCost(s)));
+ saveDB();
+}
+/* 盘点/手工调整流水（持久保留；采购、销售、期初流水均由单据重放生成） */
+function mkAdjLog(type,g,dq,inCost,date,ref){
+ return {seq:Date.now()*1000+Math.floor(Math.random()*999),
+   t:new Date().toISOString().slice(0,16).replace('T',' '),
+   date:date||today(),type,ing:g.id,qty:r3(dq),inCost:+inCost||0,cost:g.avg,bal:r3(g.stock),ref:ref||''};
+}
+/* 台账重建：期初基线 → 采购入库 → 手工调整/盘点 → 销售出库，按业务日期顺序重放（移动加权平均）。
+   任何单据新增/修改/删除后调用，保证库存与均价始终可从原始单据完整复算，不存在红冲漂移。 */
+function rebuildStock(){
+ const moves=[];
+ DB.ings.forEach(g=>{
+   g.stock=0;g.avg=0;
+   if(+g.initStock>0)moves.push({o:0,type:'期初',gid:g.id,date:g.initDate||dOff(-10),
+     qty:+g.initStock,cost:+g.initAvg||0,ref:'期初'});
+ });
+ DB.pos.forEach(po=>po.lines.forEach(l=>moves.push(
+   {o:2,type:'采购入库',gid:l.ing,date:po.date,qty:l.qty*l.conv,cost:l.unitCost,ref:po.no})));
+ (DB.logs||[]).forEach(l=>{
+   if(l.type==='盘点调整')moves.push({o:3,type:'盘点调整',gid:l.ing,date:l.date,qty:l.qty,cost:0,ref:l.ref,adj:l});
+   else if(l.type==='手工调整')moves.push({o:1,type:'手工调整',gid:l.ing,date:l.date,qty:l.qty,cost:+l.inCost||0,ref:l.ref,adj:l});
+ });
+ DB.sales.forEach(s=>s.lines.forEach(sl=>{
+   const d=dish(sl.dish);if(!d)return;
+   recipeLines(d.id).forEach(rl=>{const g=ing(rl.ing);if(!g)return;
+     moves.push({o:4,type:'销售出库',gid:g.id,date:s.date,qty:-sl.qty*rl.qty/g.yld,cost:0,ref:s.no});});
+ }));
+ moves.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.o-b.o);
+ let genSeq=1;const gen=[];
+ moves.forEach(mv=>{
+   const g=ing(mv.gid);if(!g)return;
+   if(mv.type==='手工调整'){g.stock=r3(mv.qty);g.avg=+mv.cost||0;}
+   else if(mv.qty>0){
+     const val=g.stock*g.avg+mv.qty*mv.cost;
+     g.stock=r3(g.stock+mv.qty);
+     g.avg=g.stock?r3(val/g.stock):(+mv.cost||0);
+   }else g.stock=r3(g.stock+mv.qty);
+   if(mv.adj){mv.adj.bal=r3(g.stock);mv.adj.cost=g.avg;gen.push(mv.adj);}
+   else gen.push({seq:genSeq++,t:mv.date+' 12:00',date:mv.date,type:mv.type,ing:mv.gid,
+     qty:r3(mv.qty),inCost:mv.cost,cost:g.avg,bal:r3(g.stock),ref:mv.ref});
+ });
+ gen.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+ DB.logs=gen;
+ DB.ings.forEach(g=>g.last=null);
+ DB.pos.slice().sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:(a.no<b.no?1:-1))
+   .forEach(po=>po.lines.forEach(l=>{const g=ing(l.ing);if(g&&g.last==null)g.last=l.price;}));
+}
+function mkPoLine(g,q,p){
+ return {ing:g.id,qty:q,price:p,conv:g.conv,amount:r2(q*p),unitCost:r3(p/g.conv)};
+}
+function mkNo(prefix,date,i){
+ return prefix+date.replace(/-/g,'')+'-'+String(i).padStart(2,'0');
+}
+
+/* ====================== 持久化 ====================== */
+function saveDB(){try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){console.warn(e);}}
+function loadDB(){
+ try{const raw=localStorage.getItem(LS_KEY);if(raw){DB=JSON.parse(raw);return true;}}catch(e){}
+ return false;
+}
+
+/* ====================== 核心计算 ====================== */
+function recipeLines(did){return DB.rec[did]||[];}
+function dishRecipeCost(did){
+ let cost=0;
+ recipeLines(did).forEach(l=>{const g=ing(l.ing);if(g)cost+=(l.qty/g.yld)*g.avg;});
+ return r3(cost);
+}
+function dishCost(d){const ls=recipeLines(d.id);return ls.length?dishRecipeCost(d.id):(+d.est||0);}
+function dishCostType(d){return recipeLines(d.id).length?'配方':'估算';}
+function calcSaleCost(s){
+ let c=0;
+ s.lines.forEach(l=>{const d=dish(l.dish);if(d)c+=dishCost(d)*l.qty;});
+ return r3(c);
+}
+function saleReceived(s){return r2(s.payments.reduce((a,b)=>a+(+b.amount||0),0));}
+function saleDebt(s){return r2(s.receivable-saleReceived(s));}
+function poPaid(po){return r2(po.payments.reduce((a,b)=>a+(+b.amount||0),0));}
+function poDebt(po){return r2(po.payable-poPaid(po));}
+function stockValue(){return r2(DB.ings.reduce((a,g)=>a+g.stock*g.avg,0));}
+function lowStocks(){return DB.ings.filter(g=>g.on&&g.stock<g.safe);}
+
+/* ====================== 通用 UI ====================== */
+let TAB='dash';
+function go(tab){
+ TAB=tab;
+ $$('#nav .tab').forEach(x=>x.classList.toggle('on',x.dataset.tab===tab));
+ $$('section.panel').forEach(p=>p.style.display=p.id==='tab-'+tab?'':'none');
+ refresh();
+}
+$('#nav').addEventListener('click',e=>{const t=e.target.closest('.tab');if(t)go(t.dataset.tab);});
+
+function modal(title,body,footer,wide){
+ const ov=document.createElement('div');ov.className='overlay';
+ ov.innerHTML=`<div class="modal${wide?' wide':''}">
+   <header><b>${title}</b><button class="xclose">×</button></header>
+   <div class="mbody">${body}</div>
+   ${footer!==null?`<footer>${footer||'<button class="btn" data-close>取消</button>'}</footer>`:''}
+ </div>`;
+ document.body.appendChild(ov);
+ const close=()=>ov.remove();
+ ov.addEventListener('click',e=>{if(e.target===ov||e.target.classList.contains('xclose')||e.target.dataset.close!==undefined)close();});
+ return {ov,close};
+}
+function toast(msg,bad){
+ const t=document.createElement('div');
+ t.textContent=msg;
+ t.style.cssText='position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:300;'+
+  'background:'+(bad?'#D93025':'#1f2937')+';color:#fff;padding:9px 20px;border-radius:8px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.2)';
+ document.body.appendChild(t);setTimeout(()=>t.remove(),2200);
+}
+function confirmDlg(msg,cb){
+ const m=modal('请确认',`<div style="padding:6px 4px;font-size:13.5px">${msg}</div>`,
+   `<button class="btn" data-close>取消</button><button class="btn danger" id="cfOk">确认</button>`);
+ m.ov.querySelector('#cfOk').onclick=()=>{m.close();cb();};
+}
+function pricePop(g,extraLabel,extraFn){
+ let links=DB.platforms.map(p=>{
+   const url=p.tpl.includes('{kw}')?p.tpl.replace('{kw}',encodeURIComponent(g.name)):p.tpl;
+   return `<a href="${url}" target="_blank" rel="noopener">🔍 ${esc(p.name)}</a>`;
+ }).join('');
+ return `<details class="pop"><summary class="btn sm">比价 ▾</summary>
+   <div class="popmenu" onclick="event.stopPropagation()">
+     <a href="#" data-quote="${g.id}" style="font-weight:700;color:#2563eb" onclick="return false">＋ 录入/查看报价</a>
+     <hr><div class="pm-h">去外部搜索「${esc(g.name)}」</div>${links}
+   </div></details>`;
+}
+document.addEventListener('click',e=>{
+ const q=e.target.closest('[data-quote]');if(q){e.preventDefault();openQuote(q.dataset.quote);}
+});
+/* 比价弹层：fixed 定位避免被滚动表格裁剪；贴近视口边缘时自动翻转/夹紧；点击外部自动收起 */
+function placePop(d){
+ const sum=d.querySelector('summary'),menu=d.querySelector('.popmenu');
+ const r=sum.getBoundingClientRect();
+ /* toggle 事件瞬间菜单可能尚未完成布局（offsetHeight=0），用保守估算兜底，下一帧再校正 */
+ const mw=menu.offsetWidth||176,mh=menu.offsetHeight||300;
+ let left=r.right-mw,top=r.bottom+6;
+ if(top+mh>innerHeight-8)top=r.top-mh-6; /* 下方放不下则向上翻转 */
+ left=Math.min(Math.max(8,left),Math.max(8,innerWidth-mw-8));
+ top=Math.min(Math.max(8,top),Math.max(8,innerHeight-mh-8)); /* 无论如何夹在视口内 */
+ menu.style.left=left+'px';menu.style.top=top+'px';
+}
+document.addEventListener('toggle',e=>{
+ const d=e.target;
+ if(d.tagName==='DETAILS'&&d.classList.contains('pop')&&d.open){
+   document.querySelectorAll('details.pop[open]').forEach(x=>{if(x!==d)x.open=false;});
+   placePop(d);requestAnimationFrame(()=>placePop(d));setTimeout(()=>placePop(d),30);
+ }
+},true);
+/* 窗口尺寸变化或滚动时，保持已打开弹层的位置正确 */
+window.addEventListener('resize',()=>document.querySelectorAll('details.pop[open]').forEach(placePop));
+document.addEventListener('scroll',()=>document.querySelectorAll('details.pop[open]').forEach(placePop),true);
+document.addEventListener('click',e=>{
+ document.querySelectorAll('details.pop[open]').forEach(d=>{
+   if(!d.contains(e.target))d.open=false;
+ });
+},true);
+
+/* ====================== 经营概览 ====================== */
+let DASH_R=30;
+function inRange(date,r){if(r==='all')return true;return date>=daysAgo(+r-1);}
+function rangeLabel(r){return r==='all'?'全部时间':('近'+r+'天（'+daysAgo(+r-1)+' 至今）');}
+$('#dashRange').addEventListener('click',e=>{
+ const c=e.target.closest('.chip');if(!c)return;
+ DASH_R=c.dataset.r;
+ $$('#dashRange .chip').forEach(x=>x.classList.toggle('on',x===c));
+ renderDash();
+});
+function salesIn(r){return DB.sales.filter(s=>inRange(s.date,r));}
+function paymentsIn(r){
+ let n=0;DB.sales.forEach(s=>s.payments.forEach(p=>{if(inRange(p.date,r))n+=+p.amount||0;}));return r2(n);
+}
+function renderDash(){
+ $('#dashDateTip').textContent=rangeLabel(String(DASH_R));
+ const ss=salesIn(String(DASH_R));
+ const recv=r2(ss.reduce((a,s)=>a+s.receivable,0));
+ const got=paymentsIn(String(DASH_R));
+ const debtAll=r2(DB.sales.reduce((a,s)=>a+saleDebt(s),0));
+ const cost=r3(ss.reduce((a,s)=>a+(s.cost||0),0));
+ const disc=r2(ss.reduce((a,s)=>a+(+s.discount||0),0));
+ const gm=recv?(recv-cost)/recv:0;
+ const pos=r2(DB.pos.filter(p=>inRange(p.date,String(DASH_R))).reduce((a,p)=>a+p.payable,0));
+ const sv=stockValue(),low=lowStocks();
+ const kpis=[
+  ['k1','应收合计（按单日期）',fmt(recv),'元'],
+  ['k2','实收合计（按收款日期）',fmt(got),'元'],
+  ['k3','未收欠款（累计）',fmt(debtAll),'元'],
+  ['k4','销售毛利率',pct(gm),'成本 '+fmt(cost)+' 元'],
+  ['k5','采购应付（本期）',fmt(pos),'元'],
+  ['k6','库存总值',fmt(sv),'元'],
+  ['k7','折扣/抹零（本期）',fmt(disc),'元'],
+  ['k8','低库存预警',low.length+'','种原料']
+ ];
+ $('#dashKpi').innerHTML=kpis.map(k=>
+  `<div class="kpi ${k[0]}"><div class="k">${k[1]}</div><div class="v">${k[2]} <span class="u">${k[3]}</span></div></div>`).join('');
+ /* 14天柱图 */
+ const W=620,H=210,PL=44,PB=38,PT=16;
+ const days=[];for(let i=13;i>=0;i--)days.push(daysAgo(i));
+ const recvMap={},gotMap={};
+ days.forEach(d=>{recvMap[d]=0;gotMap[d]=0;});
+ DB.sales.forEach(s=>{if(recvMap[s.date]!==undefined)recvMap[s.date]+=s.receivable;});
+ DB.sales.forEach(s=>s.payments.forEach(p=>{if(gotMap[p.date]!==undefined)gotMap[p.date]+=+p.amount||0;}));
+ const maxV=Math.max(1,...days.map(d=>Math.max(recvMap[d],gotMap[d])))*1.15;
+ const bw=(W-PL-14)/days.length;
+ const Y=v=>H-PB-v/maxV*(H-PB-PT);
+ let g='';
+ for(let i=0;i<=4;i++){const v=maxV*i/4,yy=Y(v);
+   g+=`<line x1="${PL}" y1="${yy}" x2="${W-10}" y2="${yy}" stroke="#eef1f5"/>`;
+   g+=`<text x="${PL-6}" y="${yy+3.5}" font-size="9.5" fill="#9ca3af" text-anchor="end">${(v/1000).toFixed(1)}k</text>`;}
+ days.forEach((d,i)=>{
+   const x=PL+i*bw+bw*.1;
+   g+=`<rect x="${x}" y="${Y(recvMap[d])}" width="${bw*.36}" height="${H-PB-Y(recvMap[d])}" fill="#3D7EA6" rx="1"/>`;
+   g+=`<rect x="${x+bw*.4}" y="${Y(gotMap[d])}" width="${bw*.36}" height="${H-PB-Y(gotMap[d])}" fill="#1E8E5A" rx="1"/>`;
+   if(recvMap[d]-gotMap[d]>1)g+=`<circle cx="${x+bw*.38}" cy="${Y(recvMap[d])-3}" r="2.4" fill="#D93025"/>`;
+   g+=`<text x="${x+bw*.38}" y="${H-PB+14}" font-size="9" fill="#6b7280" text-anchor="middle">${d.slice(5)}</text>`;
+ });
+ $('#chartDaily').innerHTML=`<svg viewBox="0 0 ${W} ${H}">${g}</svg>`;
+ /* 低库存 */
+ $('#lowStockBox').innerHTML=low.length?
+  `<table><tbody>${low.slice(0,12).map(g=>`<tr><td class="l">${esc(g.name)} <span class="sub">[${g.cat}]</span></td>
+    <td class="neg"><b>${fmt(g.stock,1)} ${g.unit}</b></td><td class="sub">安全 ${g.safe} ${g.unit}</td>
+    <td><button class="btn sm" data-poing="${g.id}">去采购</button></td></tr>`).join('')}</tbody></table>
+    ${low.length>12?`<div class="sub" style="margin-top:6px">等 ${low.length} 种，详见「原料库存」</div>`:''}`
+  :'<div class="note" style="padding:8px 0">所有原料库存均高于安全线 ✅</div>';
+ /* 未收账款 */
+ const unpaids=DB.sales.filter(s=>saleDebt(s)>0.01).sort((a,b)=>a.date<b.date?1:-1);
+ $('#recvBox').innerHTML=unpaids.length?
+  `<div class="tw" style="max-height:260px"><table><tbody>${unpaids.map(s=>`<tr>
+    <td class="l">${s.no.slice(-8)} · ${s.date}<br><span class="sub">${esc(s.note||s.ch)}</span></td>
+    <td>应收 <b>${fmt(s.receivable)}</b></td><td class="neg">欠 ${fmt(saleDebt(s))}</td>
+    <td><button class="btn sm ok" data-get="${s.id}">收款</button></td></tr>`).join('')}</tbody></table></div>`
+  :'<div class="note" style="padding:8px 0">暂无挂账欠款 ✅</div>';
+ /* 菜品毛利排行 近30天 */
+ const agg={};
+ DB.sales.filter(s=>s.date>=daysAgo(29)).forEach(s=>s.lines.forEach(l=>{
+   if(!agg[l.dish])agg[l.dish]={qty:0,rev:0};
+   agg[l.dish].qty+=l.qty;agg[l.dish].rev+=l.amount;
+ }));
+ const rows=Object.entries(agg).map(([id,a])=>{
+   const d=dish(id);if(!d)return null;
+   const c=dishCost(d);return {d,a,gp:a.rev-c*a.qty};
+ }).filter(Boolean).sort((x,y)=>y.gp-x.gp).slice(0,12);
+ $('#topDish').innerHTML=`<thead><tr><th class="l">菜品</th><th>份数</th><th>营收</th><th>毛利</th><th>毛利率</th></tr></thead>
+  <tbody>${rows.map(r=>`<tr><td class="l">${esc(r.d.name)}</td><td>${r.a.qty}</td><td>${fmt(r.a.rev)}</td>
+   <td class="pos"><b>${fmt(r.gp)}</b></td><td>${pct(r.a.rev?r.gp/r.a.rev:0)}</td></tr>`).join('')||
+   '<tr><td colspan="5" class="sub">近30天暂无销售</td></tr>'}</tbody>`;
+ updateBadges();
+}
+document.addEventListener('click',e=>{
+ const pi=e.target.closest('[data-poing]');if(pi)openPo(null,ing(pi.dataset.poing));
+ const gt=e.target.closest('[data-get]');if(gt)openGet('S',gt.dataset.get);
+});
+function updateBadges(){
+ const l=lowStocks().length,u=DB.sales.filter(s=>saleDebt(s)>0.01).length;
+ $('#bgIng').style.display=l?'':'none';$('#bgIng').textContent=l;
+ $('#bgSale').style.display=u?'':'none';$('#bgSale').textContent=u;
+}
+
+/* ====================== 原料库存 ====================== */
+let ING_CAT='',ING_Q='';
+function renderIngCats(){
+ const cats=['',...new Set(DB.ings.map(g=>g.cat))];
+ $('#ingCats').innerHTML=`<div class="chip ${ING_CAT===''?'on':''}" data-c="">全部分类</div>`+
+  cats.filter(Boolean).map(c=>`<div class="chip ${ING_CAT===c?'on':''}" data-c="${c}">${c}</div>`).join('');
+}
+$('#ingCats').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;ING_CAT=c.dataset.c;renderIng();});
+$('#ingSearch').addEventListener('input',e=>{ING_Q=e.target.value.trim();renderIng();});
+function renderIng(){
+ renderIngCats();
+ const q=ING_Q;
+ const list=DB.ings.filter(g=>(!ING_CAT||g.cat===ING_CAT)&&(!q||g.name.includes(q)));
+ $('#ingBody').innerHTML=list.map(g=>{
+   const low=g.stock<g.safe;
+   const spec=g.conv===1?'按 '+g.unit+' 采购':`${g.buy}（${g.spec}）`;
+   const conv=g.conv===1?'—':`1 ${g.buy} = ${g.conv} ${g.unit}`;
+   return `<tr class="${g.on?'':'off'} ${g.stock<0?'negrow':''}">
+    <td class="l"><b>${esc(g.name)}</b></td>
+    <td class="l"><span class="tag gray">${g.cat}</span></td>
+    <td class="l sub">${spec}</td><td class="sub">${conv}</td>
+    <td style="color:${low?'var(--bad)':'inherit'}"><b>${fmt(g.stock,2)}</b> ${g.unit}</td>
+    <td>${g.safe} ${g.unit}</td>
+    <td>${fmt(g.avg)} 元/${g.unit}</td>
+    <td>${g.last?fmt(g.last)+' 元/'+g.buy:'—'}</td>
+    <td>${fmt(g.stock*g.avg)} 元</td>
+    <td>${pct(g.yld,0)}</td>
+    <td>${pricePop(g)} <button class="btn sm" data-ingedit="${g.id}">编辑</button>
+        <button class="btn sm danger" data-ingdel="${g.id}">删除</button></td>
+   </tr>`;
+ }).join('')||'<tr><td colspan="11" class="sub">没有匹配的原料</td></tr>';
+}
+document.addEventListener('click',e=>{
+ const ed=e.target.closest('[data-ingedit]');if(ed)return openIng(ing(ed.dataset.ingedit));
+ const dl=e.target.closest('[data-ingdel]');if(dl)return delIng(ing(dl.dataset.ingdel));
+});
+$('#btnNewIng').onclick=()=>openIng(null);
+function ingForm(g){
+ const f=g||{name:'',cat:'蔬菜',unit:'斤',buy:'斤',conv:1,spec:'',stock:0,avg:0,last:null,safe:0,yld:1,on:true};
+ return `<div class="fgrid">
+  <div class="fld"><label>原料名称 *</label><input id="fName" value="${esc(f.name)}"></div>
+  <div class="fld"><label>分类</label><select id="fCat">
+    ${ING_CATS.map(c=>`<option ${f.cat===c?'selected':''}>${c}</option>`).join('')}</select></div>
+  <div class="fld"><label>是否启用</label><select id="fOn"><option value="1" ${f.on?'selected':''}>启用</option>
+    <option value="0" ${!f.on?'selected':''}>停用</option></select></div>
+  <div class="fld"><label>库存单位 *（斤/个/L…）</label><input id="fUnit" value="${esc(f.unit)}"></div>
+  <div class="fld"><label>采购单位（箱/袋…，相同即可）</label><input id="fBuy" value="${esc(f.buy)}"></div>
+  <div class="fld"><label>换算率：1采购单位 = ?库存单位</label><input type="number" step="0.001" id="fConv" value="${f.conv}"></div>
+  <div class="fld"><label>采购规格说明（如 20L/桶）</label><input id="fSpec" value="${esc(f.spec||'')}"></div>
+  <div class="fld"><label>当前库存（${esc(f.unit)}）</label><input type="number" step="0.01" id="fStock" value="${f.stock}"></div>
+  <div class="fld"><label>库存均价（元/${esc(f.unit)}）</label><input type="number" step="0.01" id="fAvg" value="${f.avg}"></div>
+  <div class="fld"><label>安全库存（${esc(f.unit)}）</label><input type="number" step="0.01" id="fSafe" value="${f.safe}"></div>
+  <div class="fld"><label>出成率（毛料→净料，100%=无损耗）</label><input type="number" step="1" id="fYld" value="${Math.round(f.yld*100)}"></div>
+ </div>
+ <div class="note" style="margin-top:10px">新增原料时，当前库存/均价作为<b>期初建账</b>数据；编辑已有原料时若手工改动库存或均价，将自动生成一条「手工调整」流水。日常盘点建议用「库存流水 → 盘点调整」，可记录盈亏原因。</div>`;
+}
+function readIngForm(){
+ const get=id=>$('#mTmp .overlay #'+id)||$('#'+id);
+ const name=$('#fName').value.trim(),unit=$('#fUnit').value.trim(),buy=$('#fBuy').value.trim()||unit;
+ const conv=Math.max(0.0001,parseFloat($('#fConv').value)||1);
+ return {name,unit,buy,conv,spec:$('#fSpec').value.trim(),cat:$('#fCat').value,
+   stock:parseFloat($('#fStock').value)||0,avg:parseFloat($('#fAvg').value)||0,
+   safe:parseFloat($('#fSafe').value)||0,yld:Math.min(1,Math.max(.05,(parseFloat($('#fYld').value)||100)/100)),
+   on:$('#fOn').value==='1'};
+}
+function openIng(g){
+ const m=modal(g?'编辑原料':'新增原料',ingForm(g),
+  `<button class="btn" data-close>取消</button><button class="btn pri" id="ingSave">保存</button>`);
+ m.ov.querySelector('#ingSave').onclick=()=>{
+   const v=readIngForm();if(!v.name)return toast('请填写原料名称',1);
+   if(DB.ings.some(x=>x.name===v.name&&x!==g))return toast('已存在同名原料',1);
+   if(g){
+     const changed=Math.abs(v.stock-g.stock)>.001||Math.abs(v.avg-g.avg)>.001;
+     Object.assign(g,v);
+     if(changed)DB.logs.push(mkAdjLog('手工调整',g,v.stock,v.avg,today(),'编辑原料时手工校准库存/均价'));
+   }else DB.ings.push({id:uid('I'),last:null,initStock:v.stock,initAvg:v.avg,initDate:today(),
+     ...v,stock:0,avg:0});
+   rebuildStock();saveDB();m.close();refresh();
+ };
+}
+function delIng(g){
+ const usedPo=DB.pos.some(p=>p.lines.some(l=>l.ing===g.id));
+ const usedRec=Object.values(DB.rec).some(ls=>ls.some(l=>l.ing===g.id));
+ if(usedPo||usedRec)return toast('该原料已在采购单或菜品配方中使用，不能删除（可停用）',1);
+ confirmDlg(`确定删除原料「${g.name}」？当前库存 ${fmt(g.stock,2)} ${g.unit} 将一并移除。`,()=>{
+   DB.ings=DB.ings.filter(x=>x!==g);DB.logs=DB.logs.filter(l=>l.ing!==g.id);
+   saveDB();refresh();toast('已删除');
+ });
+}
+
+/* ====================== 采购进货 ====================== */
+function renderPoFilter(){
+ $('#poSupplierFilter').innerHTML='<option value="">全部供应商</option>'+
+  [...new Set(DB.pos.map(p=>p.supplier))].map(s=>`<option ${poFilterSup===s?'selected':''}>${esc(s)}</option>`).join('');
+}
+let poFilterSup='';
+$('#poSupplierFilter').addEventListener('change',e=>{poFilterSup=e.target.value;renderPo();});
+$('#btnNewPo').onclick=()=>openPo(null,null);
+function renderPoKpi(){
+ const ss=DB.pos;
+ const pay=r2(ss.reduce((a,p)=>a+p.payable,0)),got=r2(ss.reduce((a,p)=>a+poPaid(p),0)),d=r2(pay-got);
+ const month=ss.filter(p=>p.date>=daysAgo(29));
+ const mPay=r2(month.reduce((a,p)=>a+p.payable,0));
+ $('#buyKpi').innerHTML=[
+  ['k5','本月采购应付',fmt(mPay),'元'],['k1','累计应付',fmt(pay),'元'],
+  ['k2','累计实付',fmt(got),'元'],['k3','欠供应商',fmt(d),'元']
+ ].map(k=>`<div class="kpi ${k[0]}"><div class="k">${k[1]}</div><div class="v">${k[2]} <span class="u">${k[3]}</span></div></div>`).join('');
+}
+function renderPo(){
+ renderPoFilter();renderPoKpi();
+ const list=DB.pos.filter(p=>!poFilterSup||p.supplier===poFilterSup)
+   .sort((a,b)=>a.date<b.date?1:-1);
+ $('#poCount').textContent=`共 ${list.length} 张采购单`;
+ $('#poBody').innerHTML=list.map(p=>{
+   const paid=poPaid(p),debt=poDebt(p);
+   const detail=p.lines.map(l=>{const g=ing(l.ing);
+     return `<span style="display:inline-block;margin:2px 8px 2px 0">${esc(g?g.name:'?')}
+       ${l.qty}${g?g.buy:''} × ${fmt(l.price)} = ${fmt(l.amount)}元</span>`;}).join('');
+   return `<tr ${debt>0.01?'class="negrow"':''}>
+    <td>${p.no}</td><td>${p.date}</td><td class="l">${esc(p.supplier)}</td>
+    <td class="l" style="white-space:normal">${detail}</td>
+    <td><b>${fmt(p.payable)}</b></td><td>${fmt(paid)}</td>
+    <td class="${debt>0?'neg':''}">${debt>0.01?fmt(debt):'—'}</td>
+    <td>${debt>0.01?'<span class="tag orange">有欠款</span>':'<span class="tag green">已结清</span>'}</td>
+    <td>${debt>0.01?`<button class="btn sm ok" data-pay="${p.id}">补付</button>`:''}
+      <button class="btn sm" data-poedit="${p.id}">编辑</button>
+      <button class="btn sm danger" data-podel="${p.id}">删除</button></td></tr>`;
+ }).join('')||'<tr><td colspan="9" class="sub">暂无采购单</td></tr>';
+}
+document.addEventListener('click',e=>{
+ const a=e.target.closest('[data-pay]');if(a)return openGet('P',a.dataset.pay);
+ const b=e.target.closest('[data-poedit]');if(b)return openPo(DB.pos.find(p=>p.id===b.dataset.poedit));
+ const c=e.target.closest('[data-podel]');if(c)return delPo(DB.pos.find(p=>p.id===c.dataset.podel));
+});
+function poBodyHtml(lines){
+ return lines.map((l,i)=>{
+   const g=ing(l.ing);
+   return `<tr data-i="${i}">
+    <td style="width:38%"><select data-k="ing" style="width:100%">
+      ${DB.ings.map(x=>`<option value="${x.id}" ${x.id===l.ing?'selected':''}>${esc(x.name)}（${x.cat}）</option>`).join('')}
+    </select></td>
+    <td style="width:16%"><input type="number" step="0.01" data-k="qty" value="${l.qty}" style="width:90px"></td>
+    <td class="l sub" data-u="buy">${g?esc(g.buy):''}</td>
+    <td style="width:20%"><input type="number" step="0.01" data-k="price" value="${l.price}" style="width:100px"></td>
+    <td data-k="amount">${fmt(l.qty*l.price)}</td>
+    <td class="sub" data-u="ucost">${g?fmt(l.price/g.conv)+' 元/'+g.unit:''}</td>
+    <td><button class="btn sm danger" data-rmline>删</button></td></tr>`;
+ }).join('');
+}
+function openPo(po,presetIng){
+ const lines=po?po.lines.map(l=>({...l})):(presetIng?[{ing:presetIng.id,qty:presetIng.conv||1,price:presetIng.last||presetIng.avg}]:[]);
+ const body=`
+ <div class="fgrid">
+  <div class="fld"><label>采购日期</label><input type="date" id="poDate" value="${po?po.date:today()}"></div>
+  <div class="fld"><label>供应商</label><input type="text" id="poSup" list="supList" value="${po?esc(po.supplier):''}" placeholder="供应商名称">
+    <datalist id="supList">${DB.suppliers.map(s=>`<option value="${esc(s)}">`).join('')}</datalist></div>
+  <div class="fld"><label>备注</label><input type="text" id="poNote" value="${po?esc(po.note||''):''}"></div>
+ </div>
+ <h3>采购明细（数量/单价均按采购单位）</h3>
+ <table class="lines"><thead><tr><th class="l">原料</th><th>数量</th><th>单位</th><th>单价(元)</th><th>金额</th><th>折库存单位</th><th></th></tr></thead>
+  <tbody id="poLines">${poBodyHtml(lines)}</tbody></table>
+ <div style="margin-top:8px"><button class="btn sm" id="poAddLine">＋ 添加原料</button></div>
+ <div class="totrow"><span>应付合计：<b id="poTotal">0</b> 元</span></div>
+ <h3>本次付款</h3>
+ <div class="fgrid">
+  <div class="fld"><label>实付金额（元，欠款可后续补付） <button type="button" class="btn sm" id="poFull" style="margin-left:4px">按应付全额</button></label><input type="number" step="0.01" id="poPaid" value="${po?poPaid(po):0}"></div>
+  <div class="fld"><label>付款方式</label><select id="poMethod">
+    ${['现金/转账','微信','支付宝','银行转账','部分挂账'].map(x=>`<option ${po&&po.method===x?'selected':''}>${x}</option>`).join('')}</select></div>
+ </div>`;
+ const m=modal(po?'编辑采购单':'新建采购单',body,
+  `<button class="btn" data-close>取消</button><button class="btn pri" id="poSave">确认并入库</button>`,true);
+ const tbody=m.ov.querySelector('#poLines');
+ function sync(){
+   let tot=0;
+   $$('#poLines tr',m.ov).forEach(tr=>{
+     const i=+tr.dataset.i;const l=lines[i];if(!l)return;
+     const g=ing(l.ing);
+     l.qty=parseFloat(tr.querySelector('[data-k=qty]').value)||0;
+     l.price=parseFloat(tr.querySelector('[data-k=price]').value)||0;
+     l.amount=r2(l.qty*l.price);tot+=l.amount;
+     tr.querySelector('[data-k=amount]').textContent=fmt(l.amount);
+     tr.querySelector('[data-u=buy]').textContent=g?g.buy:'';
+     tr.querySelector('[data-u=ucost]').textContent=g?fmt(l.price/g.conv)+' 元/'+g.unit:'';
+   });
+   m.ov.querySelector('#poTotal').textContent=fmt(r2(tot));
+ }
+ tbody.addEventListener('input',sync);
+ tbody.addEventListener('change',e=>{
+   const tr=e.target.closest('tr');const i=+tr.dataset.i;
+   if(e.target.dataset.k==='ing'){lines[i].ing=e.target.value;lines[i].price=ing(lines[i].ing).last||ing(lines[i].ing).avg;
+     tr.querySelector('[data-k=price]').value=lines[i].price;sync();renderRows();}
+ });
+ function renderRows(){tbody.innerHTML=poBodyHtml(lines);sync();}
+ tbody.addEventListener('click',e=>{
+   if(e.target.hasAttribute('data-rmline')){
+     lines.splice(+e.target.closest('tr').dataset.i,1);renderRows();
+   }
+ });
+ m.ov.querySelector('#poAddLine').onclick=()=>{
+   lines.push({ing:DB.ings[0].id,qty:1,price:DB.ings[0].last||DB.ings[0].avg,amount:0,conv:1,unitCost:0});
+   renderRows();
+ };
+ m.ov.querySelector('#poFull').onclick=()=>{m.ov.querySelector('#poPaid').value=m.ov.querySelector('#poTotal').textContent.replace(/,/g,'');};
+ m.ov.querySelector('#poSave').onclick=()=>{
+   const sup=m.ov.querySelector('#poSup').value.trim();
+   if(!sup)return toast('请填写供应商',1);
+   if(!lines.length||lines.some(l=>l.qty<=0||l.price<0))return toast('请检查明细数量/单价',1);
+   const date=m.ov.querySelector('#poDate').value,note=m.ov.querySelector('#poNote').value.trim();
+   const method=m.ov.querySelector('#poMethod').value;
+   lines.forEach(l=>{const g=ing(l.ing);l.conv=g.conv;l.amount=r2(l.qty*l.price);l.unitCost=r3(l.price/g.conv);});
+   const payable=r2(lines.reduce((a,b)=>a+b.amount,0));
+   let paid=r2(parseFloat(m.ov.querySelector('#poPaid').value)||0);
+   paid=Math.min(paid,payable);
+   if(po){po.lines=lines;po.date=date;po.supplier=sup;po.note=note;po.method=method;
+     po.payable=payable;po.payments=paid>0?[{amount:paid,date,method}]:[];}
+   else{
+     const n={id:uid('P'),no:mkNo('CG',date,DB.pos.filter(p=>p.date===date).length+1),date,supplier:sup,
+       lines,payable,payments:paid>0?[{amount:paid,date,method}]:[],note,method};
+     DB.pos.push(n);
+     if(!DB.suppliers.includes(sup))DB.suppliers.push(sup);
+   }
+   rebuildStock();saveDB();m.close();refresh();toast('采购单已入库，台账已更新');
+ };
+ sync();
+}
+function delPo(po){
+ confirmDlg(`删除采购单 ${po.no} 后，系统将按剩余单据重建库存台账（库存与均价自动重算），确定？`,()=>{
+   DB.pos=DB.pos.filter(x=>x!==po);
+   rebuildStock();saveDB();refresh();toast('已删除，台账已重算');
+ });
+}
+/* 补付/收款通用 */
+function openGet(type,id){
+ const isP=type==='P';const doc=isP?DB.pos.find(p=>p.id===id):DB.sales.find(s=>s.id===id);
+ const paid=isP?poPaid(doc):saleReceived(doc);
+ const debt=isP?poDebt(doc):saleDebt(doc);
+ const body=`<div style="line-height:2.1;font-size:13.5px">
+  单据：<b>${doc.no}</b>（${doc.date}）<br>
+  ${isP?'应付':'应收'}：<b>${fmt(isP?doc.payable:doc.receivable)}</b> 元　已${isP?'付':'收'}：${fmt(paid)} 元　
+  欠：<span class="neg"><b>${fmt(debt)}</b></span> 元
+  <div class="fgrid" style="margin-top:8px;max-width:520px">
+   <div class="fld"><label>本次${isP?'付款':'收款'}金额</label><input type="number" step="0.01" id="getAmt" value="${r2(debt)}"></div>
+   <div class="fld"><label>日期</label><input type="date" id="getDate" value="${today()}"></div>
+   <div class="fld"><label>方式</label><select id="getMethod">
+     ${['现金/扫码','微信','支付宝','银行转账','平台结算','挂账转销'].map(x=>`<option>${x}</option>`).join('')}</select></div>
+  </div></div>`;
+ const m=modal(isP?'登记付款':'登记收款',body,
+  `<button class="btn" data-close>取消</button><button class="btn ok" id="getSave">确认</button>`);
+ m.ov.querySelector('#getSave').onclick=()=>{
+   const amt=parseFloat(m.ov.querySelector('#getAmt').value)||0;
+   if(amt<=0||amt>debt+0.01)return toast('金额需在 0 ~ 欠款之间',1);
+   doc.payments.push({amount:r2(amt),date:m.ov.querySelector('#getDate').value,
+     method:m.ov.querySelector('#getMethod').value});
+   saveDB();m.close();refresh();toast('登记成功');
+ };
+}
+
+/* ====================== 菜品配方 ====================== */
+let DISH_CAT='',DISH_Q='';
+$('#dishSearch').addEventListener('input',e=>{DISH_Q=e.target.value.trim();renderDish();});
+$('#dishTabs').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;DISH_CAT=c.dataset.c;renderDish();});
+$('#btnNewDish').onclick=()=>openDish(null);
+function dishSalesAgg(d,daysN){
+ let qty=0,rev=0;
+ DB.sales.filter(s=>s.date>=daysAgo(daysN-1)).forEach(s=>s.lines.forEach(l=>{
+   if(l.dish===d.id){qty+=l.qty;rev+=l.amount;}
+ }));
+ const c=dishCost(d);return {qty,rev,gp:r2(rev-c*qty)};
+}
+function renderDishTabs(){
+ $('#dishTabs').innerHTML=`<div class="chip ${DISH_CAT===''?'on':''}" data-c="">全部</div>`+
+  TYPES.map(t=>`<div class="chip ${DISH_CAT===t?'on':''}" data-c="${t}">${t}</div>`).join('');
+}
+function renderDish(){
+ renderDishTabs();
+ const q=DISH_Q;
+ const list=DB.dishes.filter(d=>(!DISH_CAT||d.cat===DISH_CAT)&&(!q||d.name.includes(q)));
+ $('#dishBody').innerHTML=list.map(d=>{
+   const cost=dishCost(d),ct=dishCostType(d),gm=d.price?(d.price-cost)/d.price:0;
+   const nLines=recipeLines(d.id).length;const a=dishSalesAgg(d,30);
+   return `<tr class="${d.on?'':'off'}">
+    <td class="l"><b>${esc(d.name)}</b></td>
+    <td class="l"><span class="tag bg-${d.cat}">${d.cat}</span></td>
+    <td>${ct==='配方'?'<span class="tag blue">配方</span>':'<span class="tag orange">估算</span>'}
+      ${!d.on?' <span class="tag gray">停售</span>':''}</td>
+    <td>${ct==='配方'?fmt(cost):`<input class="cell" type="number" step="0.5" data-est="${d.id}" value="${d.est}">`}</td>
+    <td><input class="cell" type="number" step="1" data-price="${d.id}" value="${d.price}" style="width:64px"></td>
+    <td style="color:${gm>=.6?'var(--ok)':gm>=.45?'inherit':'var(--bad)'}"><b>${pct(gm,0)}</b></td>
+    <td>${a.qty}</td><td class="${a.gp>0?'pos':''}">${fmt(a.gp)}</td>
+    <td>${nLines?nLines+' 种':'<span class="neg">未配置</span>'}</td>
+    <td><button class="btn sm" data-rec="${d.id}">配/改配方</button>
+        <button class="btn sm" data-dishtoggle="${d.id}">${d.on?'停售':'上架'}</button>
+        <button class="btn sm danger" data-dishdel="${d.id}">删</button></td></tr>`;
+ }).join('')||'<tr><td colspan="10" class="sub">没有匹配的菜品</td></tr>';
+}
+document.addEventListener('change',e=>{
+ const t=e.target;
+ if(t.dataset.est){const d=dish(t.dataset.est);d.est=parseFloat(t.value)||0;saveDB();refresh();}
+ if(t.dataset.price){const d=dish(t.dataset.price);d.price=parseFloat(t.value)||0;saveDB();refresh();}
+});
+document.addEventListener('click',e=>{
+ const r=e.target.closest('[data-rec]');if(r)return openRecipe(dish(r.dataset.rec));
+ const t=e.target.closest('[data-dishtoggle]');if(t){const d=dish(t.dataset.dishtoggle);d.on=!d.on;saveDB();refresh();}
+ const x=e.target.closest('[data-dishdel]');if(x)return delDish(dish(x.dataset.dishdel));
+});
+function openDish(d){
+ const f=d||{name:'',cat:'常规',price:0,est:0,on:true};
+ const m=modal(d?'编辑菜品':'新增菜品',
+  `<div class="fgrid">
+   <div class="fld"><label>菜品名称 *</label><input id="dName" value="${esc(f.name)}"></div>
+   <div class="fld"><label>类型</label><select id="dCat">${TYPES.map(t=>`<option ${f.cat===t?'selected':''}>${t}</option>`).join('')}</select></div>
+   <div class="fld"><label>售价（元）</label><input type="number" step="1" id="dPrice" value="${f.price}"></div>
+   <div class="fld"><label>估算食材成本（元，未配配方时使用）</label><input type="number" step="0.5" id="dEst" value="${f.est}"></div>
+   <div class="fld"><label>状态</label><select id="dOn"><option value="1" ${f.on?'selected':''}>在售</option><option value="0" ${!f.on?'selected':''}>停售</option></select></div>
+  </div>`,`<button class="btn" data-close>取消</button><button class="btn pri" id="dSave">保存</button>`);
+ m.ov.querySelector('#dSave').onclick=()=>{
+   const name=m.ov.querySelector('#dName').value.trim();if(!name)return toast('请填写菜名',1);
+   const v={name,cat:m.ov.querySelector('#dCat').value,price:+m.ov.querySelector('#dPrice').value||0,
+     est:+m.ov.querySelector('#dEst').value||0,on:m.ov.querySelector('#dOn').value==='1'};
+   if(DB.dishes.some(x=>x.name===v.name&&x!==d))return toast('菜名重复',1);
+   if(d)Object.assign(d,v);else DB.dishes.push({id:uid('D'),...v});
+   saveDB();m.close();refresh();
+ };
+}
+function delDish(d){
+ if(DB.sales.some(s=>s.lines.some(l=>l.dish===d.id)))return toast('该菜已有销售记录，不能删除（可停售）',1);
+ confirmDlg(`删除菜品「${d.name}」及其配方？`,()=>{
+   delete DB.rec[d.id];DB.dishes=DB.dishes.filter(x=>x!==d);saveDB();refresh();toast('已删除');
+ });
+}
+/* 配方编辑 */
+function recRowsHtml(d,lines){
+ return lines.map((l,i)=>{
+   const g=ing(l.ing);
+   return `<tr data-i="${i}">
+   <td style="width:44%"><select data-k="ing" style="width:100%">
+     ${DB.ings.map(x=>`<option value="${x.id}" ${x.id===l.ing?'selected':''}>${esc(x.name)}（${x.unit}）</option>`).join('')}
+   </select></td>
+   <td><input type="number" step="0.001" data-k="qty" value="${l.qty}" style="width:90px"></td>
+   <td class="sub">${g?esc(g.unit):''}</td>
+   <td data-k="gross">${g?fmt(l.qty/g.yld,3):''}</td>
+   <td data-k="lc">${g?fmt((l.qty/g.yld)*g.avg):''}</td>
+   <td class="sub">${g?'出成 '+Math.round(g.yld*100)+'%':''}</td>
+   <td><button class="btn sm danger" data-rmline>删</button></td></tr>`;
+ }).join('');
+}
+function openRecipe(d){
+ const lines=(DB.rec[d.id]||[]).map(l=>({...l}));
+ const body=`<h3 style="margin-top:0">${esc(d.name)} <span class="tag bg-${d.cat}">${d.cat}</span>
+   售价 <b id="rPrice">${fmt(d.price)}</b> 元　当前估算成本 ${fmt(d.est)} 元（配配方后以配方为准）</h3>
+ <table class="lines"><thead><tr><th class="l">原料</th><th>每份净料用量</th><th>单位</th>
+   <th>毛料消耗</th><th>成本(元)</th><th></th><th></th></tr></thead>
+   <tbody id="recLines">${recRowsHtml(d,lines)}</tbody></table>
+ <div style="margin:8px 0"><button class="btn sm" id="recAdd">＋ 添加原料</button></div>
+ <div class="totrow">
+   <span>配方成本：<b id="rCost" style="color:#D93025">0</b> 元/份</span>
+   <span>毛利率：<b id="rGm" style="color:#1E8E5A">—</b></span>
+ </div>`;
+ const m=modal('标准食谱卡（BOM）',body,
+  `<button class="btn" data-close>取消</button><button class="btn pri" id="recSave">保存配方</button>`,true);
+ const tbody=m.ov.querySelector('#recLines');
+ function draw(){
+   tbody.innerHTML=recRowsHtml(d,lines);sync();
+ }
+ function sync(){
+   let cost=0;
+   $$('#recLines tr',m.ov).forEach(tr=>{
+     const l=lines[+tr.dataset.i];const g=ing(l.ing);if(!g)return;
+     l.qty=parseFloat(tr.querySelector('[data-k=qty]').value)||0;
+     const gross=l.qty/g.yld,lc=gross*g.avg;cost+=lc;
+     tr.querySelector('[data-k=gross]').textContent=fmt(gross,3);
+     tr.querySelector('[data-k=lc]').textContent=fmt(lc);
+   });
+   cost=r3(cost);
+   m.ov.querySelector('#rCost').textContent=fmt(cost);
+   const gm=d.price?(d.price-cost)/d.price:0;
+   const ge=m.ov.querySelector('#rGm');ge.textContent=pct(gm,0);
+   ge.style.color=gm>=.6?'var(--ok)':gm>=.45?'inherit':'var(--bad)';
+ }
+ tbody.addEventListener('input',sync);
+ tbody.addEventListener('change',e=>{if(e.target.dataset.k==='ing'){lines[+e.target.closest('tr').dataset.i].ing=e.target.value;draw();}});
+ tbody.addEventListener('click',e=>{if(e.target.hasAttribute('data-rmline')){lines.splice(+e.target.closest('tr').dataset.i,1);draw();}});
+ m.ov.querySelector('#recAdd').onclick=()=>{lines.push({ing:DB.ings[0].id,qty:0.1});draw();};
+ m.ov.querySelector('#recSave').onclick=()=>{
+   if(lines.some(l=>l.qty<=0))return toast('每行用量必须大于 0',1);
+   DB.rec[d.id]=lines;saveDB();m.close();refresh();toast('配方已保存，相关菜品成本已刷新');
+ };
+ draw();
+}
+
+/* ====================== 销售收银 ====================== */
+let saleChF='',saleStF='';
+$('#saleChFilter').addEventListener('change',e=>{saleChF=e.target.value;renderSale();});
+$('#saleStFilter').addEventListener('change',e=>{saleStF=e.target.value;renderSale();});
+$('#btnNewSale').onclick=()=>openSale(null);
+function renderSaleKpi(){
+ const all=DB.sales;
+ const recv=r2(all.reduce((a,s)=>a+s.receivable,0));
+ const got=r2(all.reduce((a,s)=>a+saleReceived(s),0));
+ const debt=r2(recv-got);
+ const cost=r3(all.reduce((a,s)=>a+(s.cost||0),0));
+ const m=all.filter(s=>s.date>=daysAgo(29));
+ const mRecv=r2(m.reduce((a,s)=>a+s.receivable,0));
+ $('#saleKpi').innerHTML=[
+  ['k1','本月应收',fmt(mRecv),'元'],['k2','累计实收',fmt(got),'元'],
+  ['k3','未收欠款',fmt(debt),'元'],['k4','累计销售毛利率',pct(recv?(recv-cost)/recv:0),'']
+ ].map(k=>`<div class="kpi ${k[0]}"><div class="k">${k[1]}</div><div class="v">${k[2]} <span class="u">${k[3]}</span></div></div>`).join('');
+}
+function renderSale(){
+ renderSaleKpi();
+ let list=DB.sales.slice().sort((a,b)=>a.date<b.date?1:-1);
+ if(saleChF)list=list.filter(s=>s.ch===saleChF);
+ if(saleStF)list=list.filter(s=>saleStF==='unpaid'?saleDebt(s)>.01:saleDebt(s)<=.01);
+ $('#saleCount').textContent=`共 ${list.length} 张销售单`;
+ $('#saleBody').innerHTML=list.map(s=>{
+   const debt=saleDebt(s),gm=s.receivable?(s.receivable-s.cost)/s.receivable:0;
+   const detail=s.lines.map(l=>{const d=dish(l.dish);
+     return `<span style="display:inline-block;margin:2px 8px 2px 0">${esc(d?d.name:'?')} ×${l.qty}
+       <span class="sub">@${fmt(l.price)}</span></span>`;}).join('');
+   const warn=s.lines.some(l=>!recipeLines(l.dish).length);
+   return `<tr ${debt>0.01?'class="negrow"':''}>
+    <td>${s.no}</td><td>${s.date}</td>
+    <td><span class="tag ${s.ch==='外卖'?'purple':'blue'}">${s.ch}</span></td>
+    <td class="l" style="white-space:normal">${detail}${warn?' <span class="tag orange">含未配配方</span>':''}</td>
+    <td><b>${fmt(s.receivable)}</b></td><td>${fmt(saleReceived(s))}</td>
+    <td class="${debt>0?'neg':''}">${debt>.01?fmt(debt):'—'}</td>
+    <td>${fmt(s.cost)}</td><td>${pct(gm,0)}</td>
+    <td>${debt>.01?'<span class="tag orange">挂账中</span>':'<span class="tag green">已结清</span>'}</td>
+    <td>${debt>.01?`<button class="btn sm ok" data-get="${s.id}">收款</button>`:''}
+      <button class="btn sm" data-saleedit="${s.id}">编辑</button>
+      <button class="btn sm danger" data-saledel="${s.id}">删除</button></td></tr>`;
+ }).join('')||'<tr><td colspan="11" class="sub">暂无销售单</td></tr>';
+}
+document.addEventListener('click',e=>{
+ const a=e.target.closest('[data-saleedit]');if(a)return openSale(DB.sales.find(s=>s.id===a.dataset.saleedit));
+ const b=e.target.closest('[data-saledel]');if(b)return delSale(DB.sales.find(s=>s.id===b.dataset.saledel));
+});
+function saleRowsHtml(lines){
+ return lines.map((l,i)=>{
+   const d=dish(l.dish);
+   return `<tr data-i="${i}">
+    <td style="width:46%"><select data-k="dish" style="width:100%">
+      ${DB.dishes.filter(x=>x.on).map(x=>`<option value="${x.id}" ${x.id===l.dish?'selected':''}>${esc(x.name)}（${x.cat}）</option>`).join('')}
+    </select></td>
+    <td style="width:15%"><input type="number" step="1" data-k="qty" value="${l.qty}" style="width:80px"></td>
+    <td style="width:20%"><input type="number" step="1" data-k="price" value="${l.price}" style="width:90px"></td>
+    <td data-k="amount">${fmt(l.qty*l.price)}</td>
+    <td class="sub" data-k="cost">${d?'成本'+fmt(dishCost(d))+'/份':''}</td>
+    <td><button class="btn sm danger" data-rmline>删</button></td></tr>`;
+ }).join('');
+}
+function openSale(s){
+ const lines=s?s.lines.map(l=>({...l})):[];
+ const body=`
+ <div class="fgrid">
+  <div class="fld"><label>销售日期</label><input type="date" id="sDate" value="${s?s.date:today()}"></div>
+  <div class="fld"><label>渠道</label><select id="sCh">
+    ${['堂食','外卖'].map(x=>`<option ${s&&s.ch===x?'selected':''}>${x}</option>`).join('')}</select></div>
+  <div class="fld"><label>备注（如挂账单位）</label><input type="text" id="sNote" value="${s?esc(s.note||''):''}"></div>
+ </div>
+ <h3>销售明细</h3>
+ <table class="lines"><thead><tr><th class="l">菜品</th><th>数量</th><th>单价</th><th>金额</th><th></th><th></th></tr></thead>
+  <tbody id="sLines">${saleRowsHtml(lines)}</tbody></table>
+ <div style="margin:8px 0"><button class="btn sm" id="sAdd">＋ 添加菜品</button></div>
+ <div class="fgrid" style="max-width:680px">
+  <div class="fld"><label>售价合计</label><input type="number" id="sSub" value="0" readonly></div>
+  <div class="fld"><label>折扣/抹零/平台扣费（元）</label><input type="number" step="0.01" id="sDisc" value="${s?s.discount:0}"></div>
+  <div class="fld"><label>应收合计（自动）</label><input type="number" id="sRecv" value="0" readonly></div>
+  <div class="fld"><label>本次实收（元） <button type="button" class="btn sm" id="sFull" style="margin-left:4px">按应收全额</button></label><input type="number" step="0.01" id="sGot" value="${s?saleReceived(s):0}"></div>
+  <div class="fld"><label>收款方式</label><select id="sMethod">
+    ${['现金/扫码','微信','支付宝','银行转账','平台结算','挂账'].map(x=>`<option>${x}</option>`).join('')}</select></div>
+ </div>
+ <div class="quotebox" id="sWarn" style="display:none"></div>`;
+ const m=modal(s?'编辑销售单':'新建销售单',body,
+  `<button class="btn" data-close>取消</button><button class="btn pri" id="sSave">确认并出库</button>`,true);
+ const tbody=m.ov.querySelector('#sLines');
+ function draw(){tbody.innerHTML=saleRowsHtml(lines);sync();}
+ function sync(){
+   let sub=0,cost=0;const noRec=new Set();
+   $$('#sLines tr',m.ov).forEach(tr=>{
+     const l=lines[+tr.dataset.i];const d=dish(l.dish);if(!d)return;
+     l.qty=parseFloat(tr.querySelector('[data-k=qty]').value)||0;
+     l.price=parseFloat(tr.querySelector('[data-k=price]').value)||0;
+     l.amount=r2(l.qty*l.price);sub+=l.amount;cost+=dishCost(d)*l.qty;
+     if(!recipeLines(d.id).length)noRec.add(d.name);
+     tr.querySelector('[data-k=amount]').textContent=fmt(l.amount);
+     tr.querySelector('[data-k=cost]').textContent='成本'+fmt(dishCost(d))+'/份';
+   });
+   sub=r2(sub);
+   const disc=parseFloat(m.ov.querySelector('#sDisc').value)||0;
+   const recv=r2(sub-disc);
+   m.ov.querySelector('#sSub').value=sub;m.ov.querySelector('#sRecv').value=recv;
+   const w=m.ov.querySelector('#sWarn');
+   if(noRec.size){w.style.display='';w.innerHTML='⚠ 以下菜品未配置配方，确认后<b>不会扣减原料库存</b>，成本按估算值计算：'+[...noRec].map(x=>esc(x)).join('、');}
+   else w.style.display='none';
+ }
+ tbody.addEventListener('input',sync);
+ tbody.addEventListener('change',e=>{
+   if(e.target.dataset.k==='dish'){
+     const tr=e.target.closest('tr');const l=lines[+tr.dataset.i];
+     l.dish=e.target.value;l.price=dish(l.dish).price;draw();
+   }
+ });
+ m.ov.querySelector('#sDisc').addEventListener('input',sync);
+ tbody.addEventListener('click',e=>{if(e.target.hasAttribute('data-rmline')){lines.splice(+e.target.closest('tr').dataset.i,1);draw();}});
+ m.ov.querySelector('#sAdd').onclick=()=>{
+   const d0=DB.dishes.find(x=>x.on);if(!d0)return toast('请先在菜品配方中新增菜品',1);
+   lines.push({dish:d0.id,qty:1,price:d0.price,amount:d0.price});draw();
+ };
+ m.ov.querySelector('#sFull').onclick=()=>{m.ov.querySelector('#sGot').value=m.ov.querySelector('#sRecv').value;};
+ m.ov.querySelector('#sSave').onclick=()=>{
+   if(!lines.length||lines.some(l=>l.qty<=0))return toast('请检查销售明细',1);
+   const date=m.ov.querySelector('#sDate').value,ch=m.ov.querySelector('#sCh').value;
+   const note=m.ov.querySelector('#sNote').value.trim(),method=m.ov.querySelector('#sMethod').value;
+   const sub=r2(lines.reduce((a,b)=>a+b.amount,0));
+   const disc=parseFloat(m.ov.querySelector('#sDisc').value)||0;
+   const recv=r2(sub-disc);
+   let got=r2(parseFloat(m.ov.querySelector('#sGot').value)||0);
+   if(got>recv+0.01)return toast('实收不能大于应收',1);
+   if(s){s.lines=lines;s.date=date;s.ch=ch;s.note=note;s.sub=sub;s.discount=disc;
+     s.receivable=recv;s.payments=got>0?[{amount:got,date,method}]:[];s.cost=r3(calcSaleCost(s));}
+   else{
+     const n={id:uid('S'),no:mkNo('XS',date,DB.sales.filter(x=>x.date===date).length+1),date,ch,lines,
+       sub,discount:disc,receivable:recv,payments:got>0?[{amount:got,date,method}]:[],note,cost:0};
+     n.cost=r3(calcSaleCost(n));DB.sales.push(n);
+   }
+   rebuildStock();saveDB();m.close();refresh();toast('销售单已确认，库存已按配方扣减');
+ };
+ draw();
+}
+function delSale(s){
+ confirmDlg(`删除销售单 ${s.no} 后，系统将按剩余单据重建库存台账（扣减的原料自动回补），确定？`,()=>{
+   DB.sales=DB.sales.filter(x=>x!==s);
+   rebuildStock();saveDB();refresh();toast('已删除，台账已重算');
+ });
+}
+
+/* ====================== 外接比价 ====================== */
+let PRICE_Q='',PRICE_F='';
+$('#priceSearch').addEventListener('input',e=>{PRICE_Q=e.target.value.trim();renderPrice();});
+$('#priceFilter').addEventListener('change',e=>{PRICE_F=e.target.value;renderPrice();});
+$('#btnQuoteAll').onclick=()=>openQuoteList();
+function quotePerStock(q,g){return q.per==='buy'?q.price/g.conv:q.price;}
+function bestQuote(g){
+ const qs=DB.quotes.filter(q=>q.ing===g.id);
+ if(!qs.length)return null;
+ return qs.map(q=>({q,unit:quotePerStock(q,g)})).sort((a,b)=>a.unit-b.unit)[0];
+}
+function renderPrice(){
+ const list=DB.ings.filter(g=>g.on&&(!PRICE_Q||g.name.includes(PRICE_Q)));
+ const rows=list.map(g=>{
+   const b=bestQuote(g);
+   return {g,b,diff:b?b.unit-g.avg:0};
+ }).filter(r=>{
+   if(PRICE_F==='better')return r.b&&r.diff<-0.01;
+   if(PRICE_F==='worse')return r.b&&r.diff>0.01;
+   if(PRICE_F==='none')return !r.b;
+   return true;
+ });
+ $('#priceBody').innerHTML=rows.map(r=>{
+   const {g,b,diff}=r;
+   const qs=DB.quotes.filter(q=>q.ing===g.id).sort((a,b)=>a.date<b.date?-1:1);
+   const tag=!b?'<span class="tag gray">暂无报价</span>':
+     diff<-.01?'<span class="tag green">外价更低</span>':
+     diff>.01?'<span class="tag red">外价更高</span>':'<span class="tag blue">基本持平</span>';
+   return `<tr>
+    <td class="l"><b>${esc(g.name)}</b> <span class="sub">[${g.cat}] ${g.conv>1?'采购 '+g.buy+'='+g.conv+g.unit:''}</span></td>
+    <td>${fmt(g.avg)} 元/${g.unit}</td>
+    <td>${b?`<b>${fmt(b.unit)}</b> 元/${g.unit}<br><span class="sub">${fmt(b.q.price)} 元/${b.q.per==='buy'?g.buy:g.unit}</span>`:'—'}</td>
+    <td>${b?`<span class="${diff<0?'pos':diff>0?'neg':''}"><b>${diff>0?'+':''}${fmt(diff)}</b></span>`:'—'}</td>
+    <td>${b?`${diff<0?'<span class="pos">省 '+pct(-diff/g.avg,0)+'</span>':diff>0?'<span class="neg">高 '+pct(diff/g.avg,0)+'</span>':'—'}`:'—'}</td>
+    <td class="l" style="white-space:normal">${tag} ${qs.slice(-2).reverse().map(q=>
+      `<span class="sub">${esc(q.src)} ${q.date}</span>`).join('；')}</td>
+    <td>${pricePop(g)} <button class="btn sm" data-quotelist="${g.id}">报价记录</button></td></tr>`;
+ }).join('')||'<tr><td colspan="7" class="sub">暂无符合条件的原料</td></tr>';
+}
+document.addEventListener('click',e=>{
+ const a=e.target.closest('[data-quotelist]');if(a){
+   const gid=a.dataset.quotelist;
+   const m=modal('报价记录：'+ing(gid).name,quoteListHtml(gid),
+     `<button class="btn" data-close>关闭</button><button class="btn pri" id="qlAdd">＋ 录入报价</button>`);
+   m.ov.querySelector('#qlAdd').onclick=()=>{m.close();openQuote(gid);};
+ }
+});
+function quoteListHtml(gid){
+ const qs=DB.quotes.filter(q=>q.ing===gid).sort((a,b)=>a.date<b.date?1:-1);
+ return `<table><thead><tr><th style="width:100px">日期</th><th class="l">来源</th>
+   <th>报价</th><th>折${esc(ing(gid).unit)}价</th><th class="l">备注</th><th></th></tr></thead>
+   <tbody>${qs.map(q=>`<tr><td>${q.date}</td><td class="l">${esc(q.src)}</td>
+   <td>${fmt(q.price)} 元/${q.per==='buy'?ing(gid).buy:ing(gid).unit}</td>
+   <td><b>${fmt(quotePerStock(q,ing(gid)))}</b></td>
+   <td class="l sub">${esc(q.note||'')}</td>
+   <td><button class="btn sm danger" data-qdel="${q.id}">删</button></td></tr>`).join('')
+   ||'<tr><td colspan="6" class="sub">暂无报价</td></tr>'}</tbody></table>`;
+}
+document.addEventListener('click',e=>{
+ const d=e.target.closest('[data-qdel]');if(d){
+   DB.quotes=DB.quotes.filter(q=>q.id!==d.dataset.qdel);saveDB();
+   const g=DB.ings.find(x=>DB.quotes.some(q=>q.ing===x.id));
+   e.target.closest('.overlay')?.remove();refresh();
+ }
+});
+function openQuote(gid){
+ const g=ing(gid);
+ const body=`<div style="font-size:13px;line-height:2">
+  原料：<b>${esc(g.name)}</b>　本店库存均价 <b>${fmt(g.avg)}</b> 元/${g.unit}
+  ${g.conv>1?`　采购单位 1 ${g.buy} = ${g.conv} ${g.unit}`:''}
+  <div class="fgrid" style="margin-top:6px;max-width:680px">
+   <div class="fld"><label>报价来源平台/供应商</label>
+     <input type="text" id="qSrc" list="platList" placeholder="如 1688 / 京东 / 某某批发商">
+     <datalist id="platList">${DB.platforms.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist></div>
+   <div class="fld"><label>报价口径</label><select id="qPer">
+     <option value="buy">按采购单位（元/${esc(g.buy)}${g.conv>1?'，'+esc(g.spec):''}）</option>
+     <option value="stock">按库存单位（元/${esc(g.unit)}）</option></select></div>
+   <div class="fld"><label>报价金额（元）</label><input type="number" step="0.01" id="qPrice" value="${g.last||g.avg}"></div>
+   <div class="fld"><label>报价日期</label><input type="date" id="qDate" value="${today()}"></div>
+   <div class="fld full"><label>备注（起批量/运费/规格）</label><input type="text" id="qNote"></div>
+  </div>
+  <div class="quotebox" id="qHint"></div>
+  <div style="margin-top:8px">也可以直接去平台查价：</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+   ${DB.platforms.map(p=>{const u=p.tpl.includes('{kw}')?p.tpl.replace('{kw}',encodeURIComponent(g.name)):p.tpl;
+     return `<a class="btn" target="_blank" rel="noopener" href="${u}">🔍 ${esc(p.name)}</a>`;}).join('')}
+  </div></div>`;
+ const m=modal('录入外部报价',body,
+  `<button class="btn" data-close>取消</button><button class="btn pri" id="qSave">保存报价</button>`);
+ function upd(){
+   const price=parseFloat(m.ov.querySelector('#qPrice').value)||0;
+   const per=m.ov.querySelector('#qPer').value;
+   const unit=per==='buy'?price/g.conv:price;
+   const diff=unit-g.avg;
+   m.ov.querySelector('#qHint').innerHTML=
+    `折算 <b>${fmt(unit)}</b> 元/${g.unit}，与本店均价 ${fmt(g.avg)} 相比：`+
+    (diff<-.01?`<span class="pos"><b>低 ${fmt(-diff)} 元（省 ${pct(-diff/g.avg,0)}）</b></span>`:
+     diff>.01?`<span class="neg"><b>高 ${fmt(diff)} 元（贵 ${pct(diff/g.avg,0)}）</b></span>`:'基本持平');
+ }
+ m.ov.querySelector('#qPrice').addEventListener('input',upd);
+ m.ov.querySelector('#qPer').addEventListener('change',upd);upd();
+ m.ov.querySelector('#qSave').onclick=()=>{
+   const src=m.ov.querySelector('#qSrc').value.trim();
+   const price=parseFloat(m.ov.querySelector('#qPrice').value)||0;
+   if(!src)return toast('请填写报价来源',1);
+   if(price<=0)return toast('请填写报价金额',1);
+   DB.quotes.push({id:uid('Q'),ing:gid,src,price,per:m.ov.querySelector('#qPer').value,
+     date:m.ov.querySelector('#qDate').value,note:m.ov.querySelector('#qNote').value.trim()});
+   saveDB();m.close();refresh();toast('报价已保存');
+ };
+}
+function openQuoteList(){
+ const body=`<div class="tw" style="max-height:560px"><table>
+  <thead><tr><th style="width:100px">日期</th><th class="l">原料</th><th class="l">来源</th>
+  <th>报价</th><th>折库存单位</th><th>对比本店</th><th class="l">备注</th></tr></thead><tbody>
+  ${DB.quotes.slice().sort((a,b)=>a.date<b.date?1:-1).map(q=>{
+    const g=ing(q.ing);if(!g)return '';
+    const u=quotePerStock(q,g),diff=u-g.avg;
+    return `<tr><td>${q.date}</td><td class="l">${esc(g.name)}</td><td class="l">${esc(q.src)}</td>
+     <td>${fmt(q.price)} 元/${q.per==='buy'?g.buy:g.unit}</td><td><b>${fmt(u)}</b> 元/${g.unit}</td>
+     <td class="${diff<0?'pos':diff>0?'neg':''}">${diff>0?'+':''}${fmt(diff)}</td>
+     <td class="l sub">${esc(q.note||'')}</td></tr>`;
+  }).join('')||'<tr><td colspan="7" class="sub">暂无报价记录</td></tr>'}
+  </tbody></table></div>`;
+ modal('全部外部报价记录',body,null,true);
+}
+
+/* ====================== 库存流水 / 盘点 ====================== */
+let LOG_ING='',LOG_TYPE='';
+$('#logIng').addEventListener('change',e=>{LOG_ING=e.target.value;renderStock();});
+$('#logType').addEventListener('change',e=>{LOG_TYPE=e.target.value;renderStock();});
+$('#btnCheck').onclick=()=>openCheck();
+function renderStock(){
+ $('#logIng').innerHTML='<option value="">全部原料</option>'+
+  DB.ings.map(g=>`<option value="${g.id}" ${LOG_ING===g.id?'selected':''}>${esc(g.name)}</option>`).join('');
+ $('#stockVal').textContent=`库存总值：${fmt(stockValue())} 元 · 共 ${DB.ings.length} 种原料`;
+ $('#stockCur').innerHTML=DB.ings.slice().sort((a,b)=>b.stock*b.avg-a.stock*a.avg).map(g=>
+  `<tr class="${g.stock<g.safe?'negrow':''}"><td class="l">${esc(g.name)} <span class="sub">[${g.cat}]</span></td>
+   <td><b>${fmt(g.stock,2)}</b> ${g.unit}</td><td>${fmt(g.avg)}</td>
+   <td>${fmt(g.stock*g.avg)}</td></tr>`).join('');
+ let logs=DB.logs.slice().reverse();
+ if(LOG_ING)logs=logs.filter(l=>l.ing===LOG_ING);
+ if(LOG_TYPE)logs=logs.filter(l=>l.type===LOG_TYPE);
+ $('#logBody').innerHTML=logs.slice(0,400).map(l=>{
+   const g=ing(l.ing);
+   const c={期初:'gray','采购入库':'green','销售出库':'orange','盘点调整':'blue','手工调整':'purple'}[l.type]||'gray';
+   return `<tr><td class="sub">${l.date}</td><td class="l">${g?esc(g.name):'(已删除)'}</td>
+    <td><span class="tag ${c}">${l.type}</span></td>
+    <td class="${l.qty<0?'neg':'pos'}">${l.qty>0?'+':''}${fmt(l.qty,2)}</td>
+    <td>${fmt(l.bal,2)}</td><td class="l sub">${esc(l.ref||'')}</td></tr>`;
+ }).join('')||'<tr><td colspan="6" class="sub">暂无流水</td></tr>';
+}
+function openCheck(){
+ let gid=DB.ings[0]&&DB.ings[0].id;
+ const body=`<div class="fgrid" style="max-width:560px">
+  <div class="fld full"><label>盘点原料</label><select id="ckIng">
+   ${DB.ings.map(g=>`<option value="${g.id}">${esc(g.name)}（账面 ${fmt(g.stock,2)} ${g.unit}）</option>`).join('')}
+  </select></div>
+  <div class="fld"><label>实盘数量（库存单位）</label><input type="number" step="0.01" id="ckActual" value="0"></div>
+  <div class="fld"><label>盘点日期</label><input type="date" id="ckDate" value="${today()}"></div>
+  <div class="fld full"><label>差异原因/备注</label><input type="text" id="ckNote" placeholder="如 损耗、称重误差、漏登"></div>
+ </div><div class="quotebox" id="ckHint"></div>`;
+ const m=modal('库存盘点调整',body,
+  `<button class="btn" data-close>取消</button><button class="btn pri" id="ckSave">生成调整单</button>`);
+ const upd=()=>{
+  const g=ing(m.ov.querySelector('#ckIng').value);
+  const act=parseFloat(m.ov.querySelector('#ckActual').value)||0;
+  const d=r3(act-g.stock);
+  m.ov.querySelector('#ckHint').innerHTML=`账面 ${fmt(g.stock,2)} ${g.unit} → 实盘 ${fmt(act,2)} ${g.unit}，`+
+   `盘${d>=0?'盈':'亏'} <b class="${d<0?'neg':'pos'}">${d>=0?'+':''}${fmt(d,2)} ${g.unit}</b>`;
+ };
+ m.ov.querySelector('#ckIng').addEventListener('change',upd);
+ m.ov.querySelector('#ckActual').addEventListener('input',upd);upd();
+ m.ov.querySelector('#ckSave').onclick=()=>{
+  const g=ing(m.ov.querySelector('#ckIng').value);
+  const act=parseFloat(m.ov.querySelector('#ckActual').value);
+  if(!isFinite(act))return toast('请填写实盘数量',1);
+  const d=r3(act-g.stock);
+  if(Math.abs(d)<0.001)return toast('账实相符，无需调整',1);
+  const note=m.ov.querySelector('#ckNote').value.trim();
+  DB.logs.push(mkAdjLog('盘点调整',g,d,g.avg,m.ov.querySelector('#ckDate').value,
+    '盘点'+(note?('·'+note):'')));
+  rebuildStock();saveDB();m.close();refresh();toast('盘点调整已入账，台账已重算');
+ };
+}
+
+/* ====================== 设置 / 备份 ====================== */
+function renderSet(){
+ $('#setRest').value=DB.rest||'';
+ $('#platTable').innerHTML=
+  '<thead><tr><th class="l">平台名称</th><th class="l">搜索URL（{kw}=关键词）</th><th style="width:70px"></th></tr></thead><tbody>'+
+  DB.platforms.map((p,i)=>`<tr>
+   <td class="l"><input type="text" data-plat="name" data-i="${i}" value="${esc(p.name)}" style="width:150px"></td>
+   <td class="l"><input type="text" data-plat="tpl" data-i="${i}" value="${esc(p.tpl)}" style="width:520px"></td>
+   <td><button class="btn sm danger" data-pldel="${i}">删</button></td></tr>`).join('')+'</tbody>';
+}
+$('#setRest').addEventListener('change',e=>{
+ DB.rest=e.target.value.trim()||'熊猫五福餐厅';
+ $('#restName').textContent=DB.rest+' · 进销存与毛利管理系统';saveDB();
+});
+$('#platTable').addEventListener('change',e=>{
+ const t=e.target;if(t.dataset.plat){DB.platforms[+t.dataset.i][t.dataset.plat]=t.value;saveDB();}
+});
+$('#platTable').addEventListener('click',e=>{
+ if(e.target.dataset.pldel!==undefined){DB.platforms.splice(+e.target.dataset.pldel,1);saveDB();renderSet();}
+});
+$('#btnAddPlat').onclick=()=>{DB.platforms.push({name:'新平台',tpl:'https://www.baidu.com/s?wd={kw}'});saveDB();renderSet();};
+
+function download(name,content,type){
+ const blob=new Blob([content],{type:type||'application/json'});
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+ a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+$('#btnExport').onclick=()=>download('熊猫五福进销存备份_'+today()+'.json',JSON.stringify(DB,null,1));
+function csv(rows){return '\ufeff'+rows.map(r=>r.map(v=>{
+ v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
+}).join(',')).join('\r\n');}
+$('#btnCsvIng').onclick=()=>{
+ const rows=[['原料','分类','采购单位','规格','换算率','库存单位','当前库存','安全库存','均价','最近采购价','出成率']];
+ DB.ings.forEach(g=>rows.push([g.name,g.cat,g.buy,g.spec,g.conv,g.unit,g.stock,g.safe,g.avg,g.last||'',g.yld]));
+ download('原料库存_'+today()+'.csv',csv(rows),'text/csv');
+};
+$('#btnCsvDish').onclick=()=>{
+ const rows=[['菜品','类型','成本来源','食材成本','售价','毛利率','配方原料数','近30天销量','近30天营收']];
+ DB.dishes.forEach(d=>{const a=dishSalesAgg(d,30);
+  rows.push([d.name,d.cat,dishCostType(d),dishCost(d).toFixed(2),d.price,
+   (d.price?(d.price-dishCost(d))/d.price:0).toFixed(4),recipeLines(d.id).length,a.qty,a.rev.toFixed(2)]);});
+ download('菜品成本毛利_'+today()+'.csv',csv(rows),'text/csv');
+};
+$('#btnCsvSale').onclick=()=>{
+ const rows=[['单号','日期','渠道','菜品明细','售价合计','折扣','应收','实收','欠款','食材成本','毛利率','备注']];
+ DB.sales.slice().sort((a,b)=>a.date<b.date?-1:1).forEach(s=>{
+   const detail=s.lines.map(l=>{const d=dish(l.dish);return (d?d.name:'?')+'x'+l.qty;}).join('；');
+   rows.push([s.no,s.date,s.ch,detail,s.sub,s.discount,s.receivable,saleReceived(s),saleDebt(s),
+    s.cost,s.receivable?((s.receivable-s.cost)/s.receivable).toFixed(4):'',s.note||'']);
+ });
+ download('销售应收实收_'+today()+'.csv',csv(rows),'text/csv');
+};
+$('#fileImport').addEventListener('change',e=>{
+ const f=e.target.files[0];if(!f)return;
+ const rd=new FileReader();
+ rd.onload=()=>{try{
+   const o=JSON.parse(rd.result);
+   if(!o.ings||!o.dishes)throw new Error('bad');
+   confirmDlg('导入将<b>完全覆盖</b>当前浏览器中的数据，确定继续？',()=>{
+     DB=o;if(!DB.platforms)DB.platforms=JSON.parse(JSON.stringify(DEF_PLATFORMS));
+     saveDB();init(true);toast('导入成功');
+   });
+ }catch(err){toast('文件格式不正确，导入失败',1);}};
+ rd.readAsText(f);e.target.value='';
+});
+$('#btnReseed').onclick=()=>confirmDlg('将删除当前全部数据并重置为真实采购数据基线（海南菜篮子采购单 2026-09-12），确定？',()=>{
+ seedDB();init(true);toast('已重置为真实数据基线');
+});
+$('#btnClear').onclick=()=>confirmDlg('将清空所有原料/单据/配方（不可恢复，建议先导出备份），确定？',()=>{
+ const plats=DB.platforms,rest=DB.rest;
+ DB={seq:1,v:2,rest,ings:[],dishes:[],rec:{},pos:[],sales:[],logs:[],quotes:[],platforms:plats,suppliers:[]};
+ saveDB();init(true);toast('已清空');
+});
+
+/* ====================== 刷新调度 / 启动 ====================== */
+function refresh(){
+ updateBadges();
+ if(TAB==='dash')renderDash();
+ if(TAB==='ing')renderIng();
+ if(TAB==='buy')renderPo();
+ if(TAB==='dish')renderDish();
+ if(TAB==='sale')renderSale();
+ if(TAB==='price')renderPrice();
+ if(TAB==='stock')renderStock();
+ if(TAB==='set')renderSet();
+}
+function init(keepTab){
+ /* 兼容：旧版本(v1)数据或缺少期初基线字段，重建为真实数据基线 */
+ if(!DB.v||DB.v<2||DB.ings.some(g=>g.initStock===undefined)){seedDB();}
+ rebuildStock();
+ $('#restName').textContent=(DB.rest||'熊猫五福餐厅')+' · 进销存与毛利管理系统';
+ ING_CAT='';ING_Q='';DISH_CAT='';DISH_Q='';poFilterSup='';saleChF='';saleStF='';
+ LOG_ING='';LOG_TYPE='';PRICE_Q='';PRICE_F='';
+ $('#ingSearch').value='';$('#dishSearch').value='';$('#priceSearch').value='';
+ $('#saleChFilter').value='';$('#saleStFilter').value='';
+ if(!keepTab)go('dash');else refresh();
+}
+if(!loadDB())seedDB();
+init(false);
+</script>
+</body>
+</html>

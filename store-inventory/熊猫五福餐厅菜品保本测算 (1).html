@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>熊猫五福餐厅 · 菜品结构保本测算（可调节）</title>
+<style>
+:root{
+  --bg:#f4f6f9; --card:#ffffff; --line:#e3e8ef; --text:#1f2937; --sub:#6b7280;
+  --traffic:#E8734A; --star:#D93025; --profit:#1E8E5A; --image:#6B4C9A; --regular:#3D7EA6;
+  --ok:#1E8E5A; --bad:#D93025; --warn:#B7791F;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);
+  font-family:"Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei","WenQuanYi Micro Hei","PingFang SC",sans-serif;
+  font-size:14px;line-height:1.6;padding:24px 28px 60px}
+.wrap{max-width:1560px;margin:0 auto}
+h1{font-size:22px;font-weight:700}
+h2{font-size:16px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+h2 .hint{font-size:12px;font-weight:400;color:var(--sub)}
+h3{font-size:14px;font-weight:700;margin:14px 0 8px}
+.sub{color:var(--sub);font-size:12.5px}
+header{margin-bottom:18px}
+header .meta{color:var(--sub);font-size:13px;margin-top:4px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:16px}
+/* 指标卡 */
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.kpi{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--regular);
+  border-radius:8px;padding:12px 14px}
+.kpi .k{font-size:12px;color:var(--sub)}
+.kpi .v{font-size:23px;font-weight:700;margin-top:2px;letter-spacing:-.5px}
+.kpi .u{font-size:12px;color:var(--sub);font-weight:400}
+.kpi.k1{border-left-color:var(--star)} .kpi.k2{border-left-color:var(--star)}
+.kpi.k3{border-left-color:var(--regular)} .kpi.k4{border-left-color:var(--profit)}
+.kpi.k5{border-left-color:var(--warn)} .kpi.k6{border-left-color:var(--image)}
+.pos{color:var(--ok)} .neg{color:var(--bad)}
+/* 参数 */
+.params{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.pgroup h3{border-bottom:1px solid var(--line);padding-bottom:6px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0}
+.row label{font-size:13px;color:#374151;flex:1;min-width:0}
+.row .f{display:flex;align-items:center;gap:4px}
+.row input{width:88px;padding:4px 7px;border:1px solid var(--line);border-radius:5px;
+  font-family:inherit;font-size:13px;text-align:right;background:#fffcf5}
+.row input:focus{outline:2px solid #93c5fd;outline-offset:-1px;border-color:#3b82f6}
+.row .u2{font-size:12px;color:var(--sub);width:36px}
+/* 类型卡 */
+.types{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+.tcard{border:1px solid var(--line);border-top:3px solid #ccc;border-radius:8px;padding:10px 12px;background:#fcfdfe}
+.tcard .tn{font-size:13px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.tcard .tn .cnt{font-weight:400;font-size:11.5px;color:var(--sub)}
+.tcard .desc{font-size:11px;color:var(--sub);margin:2px 0 7px;min-height:28px}
+.tcard .tr{display:flex;justify-content:space-between;font-size:12.5px;padding:1.5px 0}
+.tcard .tr b{font-weight:700}
+.t-traffic{border-top-color:var(--traffic)} .t-star{border-top-color:var(--star)}
+.t-profit{border-top-color:var(--profit)} .t-image{border-top-color:var(--image)}
+.t-regular{border-top-color:var(--regular)}
+/* 表格 */
+.tbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{padding:5px 13px;border:1px solid var(--line);background:#fff;border-radius:20px;cursor:pointer;
+  font-size:13px;color:#374151}
+.tab.on{background:#1f2937;color:#fff;border-color:#1f2937}
+.tab.t-traffic.on{background:var(--traffic);border-color:var(--traffic)}
+.tab.t-star.on{background:var(--star);border-color:var(--star)}
+.tab.t-profit.on{background:var(--profit);border-color:var(--profit)}
+.tab.t-image.on{background:var(--image);border-color:var(--image)}
+.tab.t-regular.on{background:var(--regular);border-color:var(--regular)}
+.btn{padding:5px 11px;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;font-size:12.5px;font-family:inherit}
+.btn:hover{background:#f3f4f6}
+select{padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:12.5px;background:#fff}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:5px 8px;border-bottom:1px solid #eef1f5;text-align:right;white-space:nowrap}
+th{background:#f8fafc;font-size:12px;color:#475569;cursor:pointer;position:sticky;top:0;z-index:2;
+  border-bottom:1px solid var(--line);font-weight:600}
+th.l,td.l{text-align:left}
+th.sortable:hover{color:#111}
+.tw{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+tbody tr:hover{background:#f9fafb}
+tbody tr.off{opacity:.4}
+.tag{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;color:#fff;font-weight:600}
+.bg-traffic{background:var(--traffic)} .bg-star{background:var(--star)} .bg-profit{background:var(--profit)}
+.bg-image{background:var(--image)} .bg-regular{background:var(--regular)}
+td input.w60{width:60px;padding:2px 5px;border:1px solid transparent;border-radius:4px;text-align:right;
+  font-family:inherit;font-size:13px;background:transparent}
+td input.w50{width:50px}
+td input.w60:hover{border-color:#cbd5e1;background:#fff}
+td input.w60:focus{outline:2px solid #93c5fd;border-color:#3b82f6;background:#fff}
+.grpbar{background:#f1f5f9;font-weight:700;font-size:12.5px;color:#334155}
+.grpbar td{text-align:left}
+.chk{cursor:pointer}
+.res{color:var(--sub);font-size:11.5px;cursor:pointer;text-decoration:underline dotted}
+/* 图表 */
+.charts{display:grid;grid-template-columns:1.15fr 1fr;gap:20px;margin-top:6px}
+.chart{background:#fcfdfe;border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.chart .ct{font-size:13px;font-weight:700;margin-bottom:6px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--sub);margin-top:6px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle}
+table.mini{font-size:12.5px}
+table.mini th,table.mini td{padding:5px 8px}
+.note{font-size:12px;color:var(--sub);line-height:1.75}
+.note b{color:#374151}
+footer{color:var(--sub);font-size:12px;text-align:center;margin-top:22px}
+@media(max-width:1400px){.kpis{grid-template-columns:repeat(3,1fr)}.params{grid-template-columns:1fr 1fr}.types{grid-template-columns:repeat(3,1fr)}.charts{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>熊猫五福餐厅 · 菜品结构保本测算</h1>
+  <div class="meta">海口世贸雅苑商圈 · 一楼门店 400㎡ · 20人编制 · 86道菜（按爆品 / 引流 / 利润 / 形象 / 常规 五类区分）· 所有黄色输入框均可实时调节</div>
+</header>
+
+<section>
+  <div class="kpis">
+    <div class="kpi k1"><div class="k">预估日营收（含酒水）</div><div class="v" id="kRev">—</div></div>
+    <div class="kpi k2"><div class="k">日保本营收（生死线）</div><div class="v" id="kBE">—</div></div>
+    <div class="kpi k3"><div class="k">预估月利润</div><div class="v" id="kProfit">—</div></div>
+    <div class="kpi k6"><div class="k">保本所需客流</div><div class="v" id="kGuest">—</div></div>
+    <div class="kpi k5"><div class="k">综合食材成本率</div><div class="v" id="kCR">—</div></div>
+    <div class="kpi k4"><div class="k">边际贡献率 / 安全边际</div><div class="v" id="kCM">—</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>一、经营参数 <span class="hint">改动任意参数，下方菜品结构、保本点、盈亏实时重算</span></h2>
+  <div class="params">
+    <div class="pgroup">
+      <h3>固定成本（不随营业额变化）</h3>
+      <div id="pFix"></div>
+    </div>
+    <div class="pgroup">
+      <h3>变动成本率（随营业额变化）</h3>
+      <div id="pVar"></div>
+      <div class="row" style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px">
+        <label><b>变动成本率合计</b></label><div class="f"><span id="vVarRate" style="font-weight:700">—</span></div>
+      </div>
+      <div class="row">
+        <label><b>边际贡献率</b></label><div class="f"><span id="vCM" style="font-weight:700;color:#1E8E5A">—</span></div>
+      </div>
+      <div class="row">
+        <label><b>月固定成本合计</b></label><div class="f"><span id="vFC" style="font-weight:700">—</span></div>
+      </div>
+    </div>
+    <div class="pgroup">
+      <h3>运营与测算口径</h3>
+      <div id="pOp"></div>
+      <h3>本店测算结果</h3>
+      <div class="row"><label>日均点菜份数</label><div class="f"><span id="vQty">—</span><span class="u2">份</span></div></div>
+      <div class="row"><label>日均客流</label><div class="f"><span id="vGuests">—</span><span class="u2">人</span></div></div>
+      <div class="row"><label>人均消费（菜品）</label><div class="f"><span id="vAvgD">—</span><span class="u2">元</span></div></div>
+      <div class="row"><label>人均消费（含酒水）</label><div class="f"><span id="vAvgA">—</span><span class="u2">元</span></div></div>
+      <div class="row"><label>保本综合翻台（120座）</label><div class="f"><span id="vTurn">—</span><span class="u2">次</span></div></div>
+      <div class="row"><label>月营收</label><div class="f"><span id="vMonthRev">—</span><span class="u2">元</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>二、菜品结构（五类角色） <span class="hint">卡片为各类汇总；下方表格可逐个调价、调量、上下架</span></h2>
+  <div class="types" id="typeCards"></div>
+  <div class="chart" style="margin-bottom:14px">
+    <div class="ct">各类菜品：营收占比 vs 毛利占比（识别"卖得多却不赚钱"的结构问题）</div>
+    <div id="typeChart"></div>
+    <div class="legend" id="typeLegend"></div>
+  </div>
+  <div class="tbar">
+    <div class="tabs" id="tabs"></div>
+    <span style="flex:1"></span>
+    <span class="sub">批量调价</span>
+    <select id="bulkScope">
+      <option value="__all">全部菜品</option><option value="引流">引流款</option><option value="爆品">爆品</option>
+      <option value="利润">利润款</option><option value="形象">形象款</option><option value="常规">常规款</option>
+    </select>
+    <button class="btn" data-bulk="p-10">-10%</button>
+    <button class="btn" data-bulk="p-5">-5%</button>
+    <button class="btn" data-bulk="p5">+5%</button>
+    <button class="btn" data-bulk="p10">+10%</button>
+    <span class="sub" style="margin-left:8px">批量调量</span>
+    <button class="btn" data-bulk="q-20">-20%</button>
+    <button class="btn" data-bulk="q20">+20%</button>
+    <button class="btn" data-bulk="on">全部上架</button>
+    <button class="btn" data-bulk="reset">恢复默认</button>
+  </div>
+  <div class="tw">
+    <table>
+      <thead><tr>
+        <th class="l" style="width:34px"></th>
+        <th class="l sortable" data-s="n">菜品名称</th>
+        <th class="l sortable" data-s="t" style="width:88px">类型</th>
+        <th class="sortable" data-s="c" style="width:74px">食材成本</th>
+        <th class="sortable" data-s="p" style="width:74px">售价</th>
+        <th class="sortable" data-s="cr" style="width:70px">成本率</th>
+        <th class="sortable" data-s="gm" style="width:70px">毛利率</th>
+        <th class="sortable" data-s="q" style="width:74px">日销量</th>
+        <th class="sortable" data-s="rev" style="width:86px">日营收</th>
+        <th class="sortable" data-s="gp" style="width:86px">日毛利额</th>
+        <th style="width:70px">操作</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="note" style="margin-top:8px">
+    点击表头可排序；<b>成本 / 售价 / 日销量</b> 三列可直接编辑；取消勾选即模拟"下架该菜"，用于测试精简菜单（SKU）对保本点的影响。
+  </div>
+</section>
+
+<section>
+  <h2>三、保本测算与盈亏 <span class="hint">保本营业额 = 月固定成本 ÷ 边际贡献率 ÷ 营业天数</span></h2>
+  <div class="charts">
+    <div class="chart">
+      <div class="ct">日营收 vs 保本线</div>
+      <div id="beChart"></div>
+      <div class="legend">
+        <span><i style="background:#3D7EA6"></i>预估日营收</span>
+        <span><i style="background:#D93025"></i>保本线</span>
+        <span><i style="background:#1E8E5A"></i>安全边际（超出部分）</span>
+      </div>
+    </div>
+    <div class="chart">
+      <div class="ct">月营收成本结构（占营收 %）</div>
+      <div id="costChart"></div>
+      <div class="legend" id="costLegend"></div>
+    </div>
+  </div>
+  <div class="charts" style="margin-top:16px">
+    <div class="chart">
+      <div class="ct">客流情景模拟（以当前菜品销量为 1.00 倍）</div>
+      <div id="sceneChart"></div>
+    </div>
+    <div class="chart">
+      <div class="ct">分情景经营结果</div>
+      <table class="mini" id="sceneTable"></table>
+      <div class="note" style="margin-top:8px" id="sceneNote"></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>四、结论与经营建议</h2>
+  <div class="note" id="advice"></div>
+</section>
+
+<footer>测算口径：线性量本利模型 · 菜品食材成本基于海口 2026 年市场行情与酒店协议价估算 · 正式定价前请以实际采购报价与标准食谱卡（净料率、损耗）复核</footer>
+</div>
+
+<script>
+const TYPES=[
+ {k:'引流',cls:'traffic',name:'引流款',desc:'低价高频，降低进店门槛、提升点单率，毛利中等但拉客流'},
+ {k:'爆品',cls:'star',name:'爆品（核心）',desc:'招牌与高销菜品，营收主力，决定翻台与复购'},
+ {k:'利润',cls:'profit',name:'利润款',desc:'高毛利菜品，靠结构与出品溢价贡献利润'},
+ {k:'形象',cls:'image',name:'形象款',desc:'高档硬菜，树品牌与拉高客单，销量低但拉高客单价'},
+ {k:'常规',cls:'regular',name:'常规款',desc:'补齐菜单结构，满足多样化点单需求'}
+];
+const TC={引流:'#E8734A',爆品:'#D93025',利润:'#1E8E5A',形象:'#6B4C9A',常规:'#3D7EA6'};
+const RAW=[
+['引流','老虎菜',4.5,18,4],['引流','酸辣蕨根粉',5,22,3],['引流','酸辣藕片',4.5,20,3],
+['引流','老醋花生',4,18,6],['引流','酱黄瓜',4,16,5],['引流','爽口莴笋',4.5,20,3],
+['引流','泡萝卜',3,14,4],['引流','冰花煎饺',11,32,5],['引流','宫廷定胜糕',5,18,3],
+['引流','熊猫豆沙包',5,18,6],['引流','红烩牛肉饭',15,42,6],['引流','儿童黑椒牛排套餐',26,68,5],
+['爆品','白切文昌鸡',38,98,12],['爆品','招牌捞叶炒鸡',36,98,12],['爆品','地胆头鸡汤',46,128,7],
+['爆品','糟粕醋火锅',78,198,5],['爆品','海南全家福煲',46,128,6],['爆品','东坡肉',18,58,7],
+['爆品','五福饺子',13,38,9],['爆品','水晶虾饺',16,42,8],['爆品','黑金流沙包',8,26,9],
+['爆品','全家福水饺',13,38,6],['爆品','椰子鸡',58,158,4],['爆品','东山羊(红焖)',62,168,4],
+['利润','捞汁秋葵',8,28,3],['利润','果蔬沙拉',10,36,2],['利润','老北京豆酱',7,28,2],
+['利润','京味大拉皮',6.5,26,3],['利润','椰汁木瓜',11,38,2],['利润','青椒皮蛋',7,26,3],
+['利润','冰沙清补凉',6,26,5],['利润','脆薯角',5,18,3],['利润','缤纷冰淇淋',8,28,3],
+['利润','笑脸薯饼拼盘',8,28,3],['利润','番茄肉酱意面',12,38,3],['利润','奶油蘑菇意面',10,36,2],
+['利润','芝士海鲜焗饭',18,52,2],['利润','御膳什锦果盆',26,68,2],['利润','阿胶烤梨羹',12,38,2],
+['利润','厚椰乳燕窝粥',30,88,1],['利润','椰香燕麦花胶粥',24,68,2],['利润','羊肚菌鸽子汤',42,118,2],
+['利润','滋补双胶',45,128,1],['利润','党参肉苁蓉鸽子汤',34,98,2],['利润','人参蛹虫草鸡汤',40,118,2],
+['利润','阿胶黄精土鸡汤',42,128,2],
+['形象','清蒸石斑鱼',68,178,3],['形象','白灼大角虾',92,228,1],['形象','鲍鱼花胶文昌鸡煲',105,268,1],
+['形象','东山羊打边炉',105,268,1],['形象','御膳烤鸭',78,208,2],['形象','宫廷烤鸭',74,198,1],
+['形象','葱烧海参',68,188,1],['形象','迷你佛跳墙',82,218,1],['形象','宫廷烤羊排',68,178,1],
+['形象','清汤燕窝羹',42,128,1],
+['常规','麻酱糖拌白碟',5,22,2],['常规','芥末鸭掌',10,38,2],['常规','老醋蜇头',13,48,2],
+['常规','捞汁牛百叶',22,68,2],['常规','翡翠滑虾片',20,58,1],['常规','黄流老鸭汤',48,138,2],
+['常规','葱油捞白切猪脚',26,78,3],['常规','琼式扣羊',58,158,1],['常规','冠早馅饼',7,22,2],
+['常规','求醋元宵',5,18,1],['常规','桃胶粽子',8,26,1],['常规','琼式海香肠',28,78,1],
+['常规','抓炒大虾',38,98,2],['常规','抓炒鱼片',18,52,2],['常规','抓炒里脊',14,42,2],
+['常规','抓炒腰片',22,62,1],['常规','铁板牛排',32,88,3],['常规','咖喱牛肉',24,68,2],
+['常规','预制酱牛肉',34,88,2],['常规','大通全家福',44,118,1],['常规','罐焖红烩牛肉',24,68,2],
+['常规','清炖蟹粉狮子头',28,78,2],['常规','乌鱼蛋汤',18,58,1],['常规','墨云水饺',15,42,2],
+['常规','海胆蒸饺',22,58,1],['常规','翡翠白薯饺',10,32,2],['常规','墨玉锅贴',13,36,2],
+['常规','菲力小牛排',48,128,1],['常规','黑椒牛肋排',58,158,1],['常规','香煎龙利鱼',18,52,2]
+];
+const DEF=RAW.map(r=>({t:r[0],n:r[1],c:r[2],p:r[3],q:r[4],on:true}));
+let D=DEF.map(o=>({...o}));
+
+const PFIX=[
+ ['area','营业面积',400,'㎡'],['rentPsm','租金单价',75,'元/㎡'],['propFee','物业费',4,'元/㎡'],
+ ['staff','人员编制',20,'人'],['laborPer','人均月综合成本',6355,'元'],
+ ['fit','装修投入',800000,'元'],['fitM','装修摊销月数',60,'月'],
+ ['eq','设备家具投入',500000,'元'],['eqM','设备摊销月数',60,'月'],
+ ['utilFix','能耗（固定部分）',6000,'元/月'],['other','其他固定费用',6500,'元/月']
+];
+const PVAR=[
+ ['bevRatio','酒水占营收比',0.15,''],['bevCost','酒水成本率',0.40,''],
+ ['pack','包材/一次性用品率',0.012,''],['takeout','外卖占营收比',0.15,''],
+ ['comm','外卖平台佣金率',0.21,''],['mkt','营销推广费率',0.025,''],
+ ['utilVar','能耗变动费率',0.015,''],['misc','洗涤维修杂费率',0.01,''],['fee','支付手续费率',0.006,'']
+];
+const POP=[
+ ['dishPerGuest','每客平均点菜',1.65,'份'],['days','月营业天数',30,'天'],
+ ['seats','可容纳餐位',120,'个'],['targetProfit','目标月净利润',80000,'元']
+];
+const P={};
+function buildParams(){
+  const mk=(host,arr,pct)=>{
+    let h='';
+    arr.forEach(([k,label,v,u])=>{
+      P[k]=v;
+      const step=pct?0.005:(k==='area'||k==='staff'||k==='seats'||k==='days'||k==='fitM'||k==='eqM'?1:
+                 (k==='fit'||k==='eq'?10000:100));
+      const disp=pct?(v*100).toFixed(1):v;
+      h+=`<div class="row"><label>${label}</label><div class="f">
+        <input type="number" data-p="${k}" data-pct="${pct?1:0}" value="${disp}" step="${step}">
+        <span class="u2">${pct?'%':u}</span></div></div>`;
+    });
+    document.getElementById(host).innerHTML=h;
+  };
+  mk('pFix',PFIX,false);mk('pVar',PVAR,true);mk('pOp',POP,false);
+}
+document.addEventListener('input',e=>{
+  const el=e.target;
+  if(el.dataset.p){
+    const v=parseFloat(el.value);
+    P[el.dataset.p]=isNaN(v)?0:(el.dataset.pct==='1'?v/100:v);
+    calc();
+  }else if(el.dataset.i!==undefined){
+    const d=D[+el.dataset.i],f=el.dataset.f,v=parseFloat(el.value);
+    if(!isNaN(v)&&v>=0) d[f]=v;
+    calc();updateRow(+el.dataset.i);
+  }
+});
+document.addEventListener('change',e=>{
+  if(e.target.dataset.i!==undefined&&e.target.dataset.f==='on'){}
+});
+
+let FILTER='全部',SORT='rev',SORTDESC=true;
+const fmt=(n,d=0)=>n==null||!isFinite(n)?'—':n.toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=(n,d=1)=>!isFinite(n)?'—':(n*100).toFixed(d)+'%';
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+/* ---------- 计算 ---------- */
+let R={};
+function calc(){
+  const act=D.filter(d=>d.on);
+  let revDish=0,costDish=0,qty=0;
+  act.forEach(d=>{revDish+=d.p*d.q;costDish+=d.c*d.q;qty+=d.q;});
+  const crDish=revDish?costDish/revDish:0;
+  const crAll=(1-P.bevRatio)*crDish+P.bevRatio*P.bevCost;
+  const varRate=crAll+P.pack+P.takeout*P.comm+P.mkt+P.utilVar+P.misc+P.fee;
+  const cm=1-varRate;
+  const rent=P.area*P.rentPsm, prop=P.area*P.propFee, labor=P.staff*P.laborPer;
+  const amort=P.fit/P.fitM+P.eq/P.eqM;
+  const fc=rent+prop+labor+amort+P.utilFix+P.other;
+  const beDay=cm>0?fc/cm/P.days:Infinity;
+  const guests=qty/P.dishPerGuest;
+  const avgDish=guests?revDish/guests:0;
+  const avgAll=avgDish*(1+P.bevRatio);
+  const revAllDay=revDish*(1+P.bevRatio);
+  const monthRev=revAllDay*P.days;
+  const monthProfit=(monthRev-beDay*P.days)*cm;
+  const beGuests=avgAll?beDay/avgAll:0;
+  const safety=revAllDay?(revAllDay-beDay)/revAllDay:0;
+  R={act,revDish,costDish,qty,crDish,crAll,varRate,cm,rent,prop,labor,amort,fc,beDay,guests,
+     avgDish,avgAll,revAllDay,monthRev,monthProfit,beGuests,safety,
+     costBev:revAllDay*P.bevRatio*P.bevCost,
+     varOther:revAllDay*(P.pack+P.takeout*P.comm+P.mkt+P.utilVar+P.misc+P.fee),
+     varOtherM:revAllDay*P.days*(P.pack+P.takeout*P.comm+P.mkt+P.utilVar+P.misc+P.fee)};
+  renderKPI();renderParams();renderTypes();renderCharts();renderScene();renderAdvice();updateGroups();
+}
+function renderKPI(){
+  const ok=R.revAllDay>=R.beDay;
+  document.getElementById('kRev').innerHTML=fmt(R.revAllDay)+' <span class="u">元</span>';
+  document.getElementById('kBE').innerHTML=fmt(R.beDay)+' <span class="u">元</span>';
+  document.getElementById('kProfit').innerHTML=
+    '<span class="'+(R.monthProfit>=0?'pos':'neg')+'">'+fmt(R.monthProfit)+'</span> <span class="u">元</span>';
+  document.getElementById('kGuest').innerHTML=fmt(R.beGuests)+' <span class="u">人/天</span>';
+  document.getElementById('kCR').textContent=pct(R.crAll);
+  document.getElementById('kCM').innerHTML=pct(R.cm)+' <span class="u">/ '+
+    (ok?'<span class="pos">'+pct(R.safety,0)+'</span>':'<span class="neg">'+pct(R.safety,0)+'</span>')+'</span>';
+}
+function renderParams(){
+  document.getElementById('vVarRate').textContent=pct(R.varRate);
+  document.getElementById('vCM').textContent=pct(R.cm);
+  document.getElementById('vFC').textContent=fmt(R.fc);
+  document.getElementById('vQty').textContent=fmt(R.qty,1);
+  document.getElementById('vGuests').textContent=fmt(R.guests);
+  document.getElementById('vAvgD').textContent=fmt(R.avgDish,1);
+  document.getElementById('vAvgA').textContent=fmt(R.avgAll,1);
+  document.getElementById('vTurn').textContent=R.seats?fmt(R.guests/P.seats,2):'—';
+  document.getElementById('vMonthRev').textContent=fmt(R.monthRev);
+}
+
+/* ---------- 类型汇总 ---------- */
+function typeStats(){
+  return TYPES.map(t=>{
+    const ds=D.filter(d=>d.t===t.k&&d.on);
+    let rev=0,cost=0,q=0;
+    ds.forEach(d=>{rev+=d.p*d.q;cost+=d.c*d.q;q+=d.q;});
+    return {t:t.k,name:t.name,cls:t.cls,desc:t.desc,n:ds.length,q,rev,cost,
+      cr:rev?cost/rev:0,gp:rev-cost};
+  });
+}
+function renderTypes(){
+  const S=typeStats();
+  const totRev=S.reduce((a,b)=>a+b.rev,0),totGP=S.reduce((a,b)=>a+b.gp,0),totQ=S.reduce((a,b)=>a+b.q,0);
+  document.getElementById('typeCards').innerHTML=S.map(s=>`
+    <div class="tcard t-${s.cls}">
+      <div class="tn"><span style="color:${TC[s.t]}">${s.name}</span><span class="cnt">${s.n} 道</span></div>
+      <div class="desc">${s.desc}</div>
+      <div class="tr"><span>日销量</span><b>${fmt(s.q,0)} 份</b></div>
+      <div class="tr"><span>销量占比</span><b>${pct(totQ?s.q/totQ:0,0)}</b></div>
+      <div class="tr"><span>日营收</span><b>${fmt(s.rev)} 元</b></div>
+      <div class="tr"><span>营收占比</span><b>${pct(totRev?s.rev/totRev:0,0)}</b></div>
+      <div class="tr"><span>成本率</span><b>${pct(s.cr,0)}</b></div>
+      <div class="tr"><span>日毛利额</span><b style="color:${TC[s.t]}">${fmt(s.gp)} 元</b></div>
+      <div class="tr"><span>毛利占比</span><b>${pct(totGP?s.gp/totGP:0,0)}</b></div>
+    </div>`).join('');
+  // 分组柱图
+  const W=880,H=210,PL=48,PB=42,PT=14,bw=54,gap=44;
+  const maxV=Math.max(...S.map(s=>Math.max(s.rev/totRev||0,s.gp/totGP||0)),0.01);
+  const y=v=>H-PB-(v/maxV)*(H-PB-PT);
+  let g='';
+  S.forEach((s,i)=>{
+    const x0=PL+i*(bw*2+gap);
+    const r1=s.rev/totRev||0,g1=s.gp/totGP||0;
+    g+=`<rect x="${x0}" y="${y(r1)}" width="${bw}" height="${H-PB-y(r1)}" fill="${TC[s.t]}" opacity=".85" rx="2"/>`;
+    g+=`<rect x="${x0+bw}" y="${y(g1)}" width="${bw}" height="${H-PB-y(g1)}" fill="${TC[s.t]}" rx="2"/>`;
+    g+=`<text x="${x0}" y="${y(r1)-5}" font-size="11" fill="#374151" text-anchor="middle">${pct(r1,0)}</text>`;
+    g+=`<text x="${x0+bw}" y="${y(g1)-5}" font-size="11" font-weight="700" fill="#111" text-anchor="middle">${pct(g1,0)}</text>`;
+    g+=`<text x="${x0+bw}" y="${H-PB+16}" font-size="11.5" fill="#374151" text-anchor="middle">${s.name}</text>`;
+    g+=`<text x="${x0+bw}" y="${H-PB+30}" font-size="10.5" fill="#9ca3af" text-anchor="middle">${s.n}道 · 成本率${pct(s.cr,0)}</text>`;
+  });
+  for(let i=0;i<=4;i++){
+    const v=maxV*i/4,yy=y(v);
+    g+=`<line x1="${PL-6}" y1="${yy}" x2="${PL+5*(bw*2+gap)}" y2="${yy}" stroke="#eef1f5"/>`;
+    g+=`<text x="${PL-10}" y="${yy+4}" font-size="10" fill="#9ca3af" text-anchor="end">${(v*100).toFixed(0)}%</text>`;
+  }
+  document.getElementById('typeChart').innerHTML=`<svg viewBox="0 0 ${W} ${H}">${g}</svg>`;
+  document.getElementById('typeLegend').innerHTML=
+    '<span>每组：<i style="background:#9ca3af;opacity:.45"></i>左=营收占比　<i style="background:#333"></i>右=毛利占比</span>'+
+    '<span style="color:#B7791F">若某类「营收占比 &gt; 毛利占比」，说明该类卖得多但贡献利润少，需提价或压缩</span>';
+}
+
+/* ---------- 菜品表 ---------- */
+function sortedIdx(){
+  let idx=D.map((d,i)=>i);
+  if(FILTER!=='全部') idx=idx.filter(i=>D[i].t===FILTER);
+  const key=SORT;
+  idx.sort((a,b)=>{
+    const A=D[a],B=D[b];let va,vb;
+    if(key==='n'||key==='t'){va=A[key];vb=B[key];return SORTDESC?String(vb).localeCompare(String(va),'zh'):String(va).localeCompare(String(vb),'zh');}
+    if(key==='cr'){va=A.p?A.c/A.p:9;vb=B.p?B.c/B.p:9;}
+    else if(key==='gm'){va=A.p?1-A.c/A.p:-9;vb=B.p?1-B.c/B.p:-9;}
+    else if(key==='rev'){va=A.p*A.q;vb=B.p*B.q;}
+    else if(key==='gp'){va=(A.p-A.c)*A.q;vb=(B.p-B.c)*B.q;}
+    else {va=A[key];vb=B[key];}
+    return SORTDESC?vb-va:va-vb;
+  });
+  return idx;
+}
+function renderTable(){
+  const idx=sortedIdx();
+  let h='',cur=null;
+  const S=typeStats();
+  idx.forEach(i=>{
+    const d=D[i];
+    if(d.t!==cur){
+      cur=d.t;const s=S.find(x=>x.t===cur);
+      h+=`<tr class="grpbar" data-t="${cur}"><td colspan="11">${s.name} · ${s.n} 道 · 日营收 ${fmt(s.rev)} 元 · 成本率 ${pct(s.cr,0)} · 日毛利 ${fmt(s.gp)} 元</td></tr>`;
+    }
+    const cr=d.p?d.c/d.p:0,gm=1-cr,rev=d.p*d.q,gp=(d.p-d.c)*d.q;
+    h+=`<tr class="${d.on?'':'off'}" data-r="${i}">
+      <td class="l"><input type="checkbox" class="chk" data-i="${i}" data-f="on" ${d.on?'checked':''}></td>
+      <td class="l">${esc(d.n)}</td>
+      <td class="l"><span class="tag bg-${TYPES.find(t=>t.k===d.t).cls}">${d.t}</span></td>
+      <td><input class="w60 w50" type="number" step="0.5" data-i="${i}" data-f="c" value="${d.c}"></td>
+      <td><input class="w60 w50" type="number" step="1" data-i="${i}" data-f="p" value="${d.p}"></td>
+      <td data-cell="cr">${pct(cr,0)}</td>
+      <td data-cell="gm" style="color:${gm>=0.6?'#1E8E5A':gm>=0.45?'#374151':'#D93025'}">${pct(gm,0)}</td>
+      <td><input class="w60 w50" type="number" step="1" data-i="${i}" data-f="q" value="${d.q}"></td>
+      <td data-cell="rev">${fmt(rev)}</td>
+      <td data-cell="gp">${fmt(gp)}</td>
+      <td><span class="res" data-reset="${i}">重置</span></td>
+    </tr>`;
+  });
+  document.getElementById('tbody').innerHTML=h;
+}
+function updateRow(i){
+  const tr=document.querySelector(`tr[data-r="${i}"]`);if(!tr)return;
+  const d=D[i],cr=d.p?d.c/d.p:0,gm=1-cr;
+  tr.querySelector('[data-cell="cr"]').textContent=pct(cr,0);
+  const g=tr.querySelector('[data-cell="gm"]');
+  g.textContent=pct(gm,0);g.style.color=gm>=0.6?'#1E8E5A':gm>=0.45?'#374151':'#D93025';
+  tr.querySelector('[data-cell="rev"]').textContent=fmt(d.p*d.q);
+  tr.querySelector('[data-cell="gp"]').textContent=fmt((d.p-d.c)*d.q);
+}
+document.getElementById('tbody').addEventListener('click',e=>{
+  const t=e.target;
+  if(t.dataset.reset!==undefined){
+    const i=+t.dataset.reset;D[i]={...DEF[i]};calc();renderTable();
+  }
+});
+document.getElementById('tbody').addEventListener('change',e=>{
+  const t=e.target;
+  if(t.dataset.f==='on'){D[+t.dataset.i].on=t.checked;calc();renderTable();}
+});
+document.querySelectorAll('th.sortable').forEach(th=>{
+  th.addEventListener('click',()=>{
+    const s=th.dataset.s;
+    if(SORT===s)SORTDESC=!SORTDESC;else{SORT=s;SORTDESC=true;}
+    renderTable();
+  });
+});
+document.getElementById('tabs').innerHTML=
+  `<div class="tab ${FILTER==='全部'?'on':''}" data-f="全部">全部 ${D.length}</div>`+
+  TYPES.map(t=>`<div class="tab t-${t.cls} ${FILTER===t.k?'on':''}" data-f="${t.k}">${t.name} ${D.filter(d=>d.t===t.k).length}</div>`).join('');
+document.getElementById('tabs').addEventListener('click',e=>{
+  const el=e.target.closest('.tab');if(!el)return;
+  FILTER=el.dataset.f;
+  document.querySelectorAll('#tabs .tab').forEach(x=>x.classList.toggle('on',x.dataset.f===FILTER));
+  renderTable();
+});
+document.querySelectorAll('[data-bulk]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    const m=b.dataset.bulk,sc=document.getElementById('bulkScope').value;
+    D.forEach((d,i)=>{
+      if(sc!=='__all'&&d.t!==sc)return;
+      if(m==='p-10')d.p=Math.round(d.p*0.9);
+      else if(m==='p-5')d.p=Math.round(d.p*0.95);
+      else if(m==='p5')d.p=Math.round(d.p*1.05);
+      else if(m==='p10')d.p=Math.round(d.p*1.1);
+      else if(m==='q-20')d.q=Math.max(0,+(d.q*0.8).toFixed(1));
+      else if(m==='q20')d.q=+(d.q*1.2).toFixed(1);
+      else if(m==='on')d.on=true;
+      else if(m==='reset')D[i]={...DEF[i]};
+    });
+    calc();renderTable();
+  });
+});
+
+function updateGroups(){
+  const S=typeStats();
+  document.querySelectorAll('tr.grpbar').forEach(tr=>{
+    const s=S.find(x=>x.t===tr.dataset.t);if(!s)return;
+    tr.firstElementChild.textContent=`${s.name} · ${s.n} 道 · 日营收 ${fmt(s.rev)} 元 · 成本率 ${pct(s.cr,0)} · 日毛利 ${fmt(s.gp)} 元`;
+  });
+}
+
+/* ---------- 保本图 ---------- */
+function renderCharts(){
+  const W=560,H=150,PL=8;
+  const max=Math.max(R.revAllDay,R.beDay)*1.18||1;
+  const bw=W-PL-10;
+  const w1=bw*R.revAllDay/max, w2=bw*R.beDay/max;
+  const ok=R.revAllDay>=R.beDay;
+  let g='';
+  g+=`<rect x="${PL}" y="26" width="${Math.max(w1,1)}" height="34" fill="#3D7EA6" rx="3"/>`;
+  g+=`<text x="${PL+Math.max(w1,1)+8}" y="49" font-size="12.5" fill="#3D7EA6" font-weight="700">预估 ${fmt(R.revAllDay)} 元/天</text>`;
+  g+=`<rect x="${PL}" y="76" width="${Math.max(w2,1)}" height="34" fill="#D93025" rx="3" opacity=".9"/>`;
+  g+=`<text x="${PL+Math.max(w2,1)+8}" y="99" font-size="12.5" fill="#D93025" font-weight="700">保本线 ${fmt(R.beDay)} 元/天</text>`;
+  g+=`<line x1="${PL+w2}" y1="20" x2="${PL+w2}" y2="${H-18}" stroke="#D93025" stroke-dasharray="4 3" stroke-width="1.2"/>`;
+  const diff=R.revAllDay-R.beDay;
+  g+=`<text x="${PL}" y="132" font-size="13" font-weight="700" fill="${ok?'#1E8E5A':'#D93025'}">`+
+     `${ok?'安全边际':'缺口'} ${fmt(Math.abs(diff))} 元/天（${pct(Math.abs(R.safety),0)}）</text>`;
+  g+=`<text x="${PL}" y="${H-2}" font-size="11" fill="#6b7280">`+
+     `${ok?'相当于每天可少做 '+fmt(Math.abs(diff))+' 元仍不亏损':'需每天多卖 '+fmt(Math.abs(diff))+' 元才能保本'}</text>`;
+  document.getElementById('beChart').innerHTML=`<svg viewBox="0 0 ${W} ${H}">${g}</svg>`;
+  // 成本结构
+  const mr=R.monthRev||1;
+  const items=[
+    ['食材+酒水成本',R.crAll*mr,'#D93025'],['其他变动成本(外卖佣金/营销/能耗/杂费)',R.varOtherM,'#E8734A'],
+    ['人工成本',R.labor,'#6B4C9A'],['租金',R.rent,'#3D7EA6'],['物业',R.prop,'#7BA7C4'],
+    ['装修设备摊销',R.amort,'#B7791F'],['能耗(固定)',P.utilFix,'#9CA3AF'],['其他固定',P.other,'#C4C4C4']
+  ];
+  const used=items.reduce((a,b)=>a+b[1],0);
+  const prof=mr-used;
+  if(prof>=0)items.push(['净利润',prof,'#1E8E5A']);else items.push(['亏损',-prof,'#7F1D1D']);
+  const tot=items.reduce((a,b)=>a+b[1],0)||1;
+  let x=0,seg='',lg='';
+  items.forEach(([n,v,c])=>{
+    const w=(v/tot)*(W-16);
+    seg+=`<rect x="${8+x}" y="34" width="${Math.max(w,0.6)}" height="40" fill="${c}"/>`;
+    if(w>46)seg+=`<text x="${8+x+w/2}" y="59" font-size="10.5" fill="#fff" text-anchor="middle" font-weight="600">${(v/tot*100).toFixed(0)}%</text>`;
+    lg+=`<span><i style="background:${c}"></i>${n} ${fmt(v)}（${pct(v/mr,1)}）</span>`;
+    x+=w;
+  });
+  document.getElementById('costChart').innerHTML=
+    `<svg viewBox="0 0 ${W} 108"><text x="8" y="20" font-size="11.5" fill="#6b7280">月营收 ${fmt(mr)} 元 · 100% 分解</text>${seg}
+     <text x="8" y="96" font-size="12" font-weight="700" fill="${prof>=0?'#1E8E5A':'#D93025'}">${prof>=0?'月净利润 '+fmt(prof)+' 元（净利率 '+pct(prof/mr,1)+'）':'月亏损 '+fmt(-prof)+' 元'}</text></svg>`;
+  document.getElementById('costLegend').innerHTML=lg;
+}
+
+/* ---------- 情景 ---------- */
+const SCENES=[
+ {n:'爬坡期(1-3月)',k:0.55,c:'#9CA3AF'},{n:'培育期(4-6月)',k:0.75,c:'#3D7EA6'},
+ {n:'当前设定',k:1.00,c:'#B7791F'},{n:'稳定期(7-12月)',k:1.15,c:'#1E8E5A'},
+ {n:'成熟期(次年起)',k:1.30,c:'#6B4C9A'}
+];
+function sceneCalc(k){
+  const rev=R.revAllDay*k,monthRev=rev*P.days;
+  const profit=(monthRev-R.beDay*P.days)*R.cm;
+  return {k,rev,monthRev,profit,guests:R.guests*k,ok:rev>=R.beDay};
+}
+function renderScene(){
+  const rows=SCENES.map(s=>({...s,...sceneCalc(s.k)}));
+  document.getElementById('sceneTable').innerHTML=
+    `<tr><th class="l">情景</th><th>客流系数</th><th>日客流</th><th>日营收</th><th>月营收</th><th>月利润</th><th>净利率</th></tr>`+
+    rows.map(r=>`<tr><td class="l"><b style="color:${r.c}">${r.n}</b></td><td>${r.k.toFixed(2)}</td>
+      <td>${fmt(r.guests)} 人</td><td>${fmt(r.rev)}</td><td>${fmt(r.monthRev)}</td>
+      <td class="${r.profit>=0?'pos':'neg'}"><b>${fmt(r.profit)}</b></td>
+      <td>${pct(r.monthRev?r.profit/r.monthRev:0,1)}</td></tr>`).join('');
+  const W=560,H=230,PL=52,PB=46,PT=16;
+  const ks=[];for(let k=0.3;k<=1.65;k+=0.05)ks.push(k);
+  const vals=ks.map(k=>({k,p:(R.revAllDay*k*P.days-R.beDay*P.days)*R.cm}));
+  const maxP=Math.max(...vals.map(v=>v.p),P.targetProfit,1)*1.1;
+  const minP=Math.min(...vals.map(v=>v.p),0)*1.1;
+  const X=k=>PL+(k-0.3)/(1.65-0.3)*(W-PL-14);
+  const Y=p=>PT+(maxP-p)/(maxP-minP)*(H-PB-PT);
+  let g='';
+  [0,maxP/2,maxP].forEach(v=>{
+    g+=`<line x1="${PL}" y1="${Y(v)}" x2="${W-14}" y2="${Y(v)}" stroke="#eef1f5"/>`;
+    g+=`<text x="${PL-8}" y="${Y(v)+4}" font-size="10" fill="#9ca3af" text-anchor="end">${fmt(v/10000,1)}万</text>`;
+  });
+  g+=`<line x1="${PL}" y1="${Y(0)}" x2="${W-14}" y2="${Y(0)}" stroke="#D93025" stroke-width="1.4"/>`;
+  g+=`<text x="${W-14}" y="${Y(0)-6}" font-size="10.5" fill="#D93025" text-anchor="end">盈亏平衡线</text>`;
+  if(P.targetProfit>0&&P.targetProfit<maxP){
+    g+=`<line x1="${PL}" y1="${Y(P.targetProfit)}" x2="${W-14}" y2="${Y(P.targetProfit)}" stroke="#1E8E5A" stroke-dasharray="4 3"/>`;
+    g+=`<text x="${PL+4}" y="${Y(P.targetProfit)-5}" font-size="10" fill="#1E8E5A">目标利润 ${fmt(P.targetProfit)}</text>`;
+  }
+  let path='';
+  vals.forEach((v,i)=>{path+=(i?'L':'M')+X(v.k)+' '+Y(v.p);});
+  g+=`<path d="${path}" fill="none" stroke="#3D7EA6" stroke-width="2.4"/>`;
+  const breakK=R.revAllDay?R.beDay/R.revAllDay:0;
+  if(breakK>0.3&&breakK<1.65){
+    g+=`<circle cx="${X(breakK)}" cy="${Y(0)}" r="5" fill="#D93025"/>`;
+    g+=`<text x="${X(breakK)}" y="${Y(0)+18}" font-size="10.5" fill="#D93025" text-anchor="middle">保本 ${breakK.toFixed(2)}×</text>`;
+  }
+  rows.forEach(r=>{
+    g+=`<circle cx="${X(r.k)}" cy="${Y(r.p)}" r="4.5" fill="${r.c}" stroke="#fff" stroke-width="1.5"/>`;
+    g+=`<text x="${X(r.k)}" y="${Y(r.p)-10}" font-size="10" fill="#374151" text-anchor="middle">${fmt(r.p/10000,1)}万</text>`;
+  });
+  [0.4,0.7,1.0,1.3,1.6].forEach(k=>{
+    g+=`<text x="${X(k)}" y="${H-PB+18}" font-size="10.5" fill="#6b7280" text-anchor="middle">${k.toFixed(1)}×</text>`;
+  });
+  g+=`<text x="${(PL+W)/2}" y="${H-6}" font-size="11" fill="#9ca3af" text-anchor="middle">客流系数（1.00 = 当前菜品销量设定）</text>`;
+  document.getElementById('sceneChart').innerHTML=`<svg viewBox="0 0 ${W} ${H}">${g}</svg>`;
+  const bk=breakK;
+  document.getElementById('sceneNote').innerHTML=
+    `当前设定相当于保本客流的 <b>${(1/bk).toFixed(2)} 倍</b>（保本系数 ${bk.toFixed(2)}×）。`+
+    `即客流只要达到当前设定的 <b>${pct(bk,0)}</b> 即可保本；`+
+    `若要实现目标月利润 ${fmt(P.targetProfit)} 元，需客流系数约 <b>${((R.beDay*P.days+P.targetProfit/R.cm)/(R.revAllDay*P.days)).toFixed(2)}×</b>，`+
+    `对应日均 <b>${fmt(R.guests*((R.beDay*P.days+P.targetProfit/R.cm)/(R.revAllDay*P.days)))} 人</b>。`+
+    `<br><span style="color:#B7791F">注：表中利润为线性模型理论值（固定成本不随客流变化）。实际客流超过保本线 1.5 倍后通常需增派人手、加大营销，净利率会回落至行业优秀水平 10%-15%，请以该区间作保守预期。</span>`;
+}
+
+/* ---------- 建议 ---------- */
+function renderAdvice(){
+  const S=typeStats();
+  const totRev=S.reduce((a,b)=>a+b.rev,0),totGP=S.reduce((a,b)=>a+b.gp,0)||1;
+  const worst=S.map(s=>({n:s.name,r:s.rev/totRev||0,g:s.gp/totGP||0}))
+    .sort((a,b)=>(b.r-b.g)-(a.r-a.g))[0];
+  const highCR=D.filter(d=>d.on&&d.p&&d.c/d.p>0.45).sort((a,b)=>(b.c/b.p)-(a.c/a.p)).slice(0,5);
+  const adv=[];
+  adv.push(`<b>1. 保本底线：</b>每天需做到 <b style="color:#D93025">${fmt(R.beDay)} 元</b>（月 ${fmt(R.beDay*P.days)} 元），`+
+    `相当于 <b>${fmt(R.beGuests)} 人/天</b>（人均 ${fmt(R.avgAll,1)} 元），120 个餐位做到综合翻台 <b>${fmt(R.guests/P.seats,2)} 次</b>。`+
+    R.monthProfit>=0
+      ? `当前设定下月利润 <b class="pos">${fmt(R.monthProfit)} 元</b>，安全边际 ${pct(R.safety,0)}，处于安全区间。`
+      : `当前设定下<b class="neg">月亏损 ${fmt(-R.monthProfit)} 元</b>，需立即提价、提量或压缩固定成本。`);
+  adv.push(`<b>2. 成本结构：</b>月固定成本 ${fmt(R.fc)} 元中，人工 ${fmt(R.labor)} 元（${pct(R.labor/R.fc,0)}）、`+
+    `租金 ${fmt(R.rent)} 元（${pct(R.rent/R.fc,0)}）、摊销 ${fmt(R.amort)} 元（${pct(R.amort/R.fc,0)}）。`+
+    `人工是最大刚性支出，20 人编制建议按客流分阶段到位：爬坡期可先配 15-16 人，稳定期再补至 20 人。`);
+  adv.push(`<b>3. 菜品结构：</b>${worst?`<b>${worst.n}</b> 营收占比 ${pct(worst.r,0)}，但毛利占比仅 ${pct(worst.g,0)}，`+
+    `属于"卖得多、赚得少"，建议对其提价 5%-10% 或优化份量与成本。`:'结构较为均衡。'}`+
+    ` 爆品（${S[1].n} 道）贡献营收 ${pct(S[1].rev/totRev,0)}、毛利 ${pct(S[1].gp/totGP,0)}，是保本的主力，应保证供应稳定与出品一致性。`+
+    ` 形象款销量低但客单价高（${pct(S[3].rev/totRev,0)} 营收），适合做套餐绑定提升人均。`);
+  if(highCR.length){
+    adv.push(`<b>4. 高成本率菜品（成本率 &gt; 45%，建议优先复核定价）：</b>`+
+      highCR.map(d=>`${d.n}（${pct(d.c/d.p,0)}）`).join('、')+
+      `。这些菜要么提价，要么改用成本更低的替代原料或调整份量。`);
+  }
+  adv.push(`<b>5. 敏感性提示：</b>食材成本率每上升 1 个百分点，日保本线上升约 <b>${fmt(R.fc/(1-(R.varRate+0.01))/P.days-R.beDay)} 元</b>；`+
+    `租金单价每上涨 10 元/㎡，日保本线上升约 <b>${fmt((P.area*10)/R.cm/P.days)} 元</b>；`+
+    `人均消费下降 10%（至 ${fmt(R.avgAll*0.9,1)} 元），保本客流将从 ${fmt(R.beGuests)} 人升至约 ${fmt(R.beDay/(R.avgAll*0.9))} 人/天。`);
+  adv.push(`<b>6. 使用建议：</b>先用「恢复默认」回到基准，再逐个尝试：①给爆品提价 5% 看利润变化；②下架成本率高且销量低的常规款，观察 SKU 精简对保本点的影响；③把"每客平均点菜"从 1.65 调到 1.8，模拟套餐/加单策略的效果。`);
+  document.getElementById('advice').innerHTML=adv.map(a=>`<div style="margin-bottom:7px">${a}</div>`).join('');
+}
+
+buildParams();renderTable();calc();
+</script>
+</body>
+</html>

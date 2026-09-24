@@ -1,0 +1,273 @@
+# 架构演进历史 (Architecture Changelog)
+
+> AI在修改任何模块前，必须查阅此文件，了解历史决策与废弃逻辑，避免引入过时方案。
+> 采用追加式记录，禁止覆盖历史条目。
+
+## [2026-09-12 21:00] v1.0.0 - 真实数据基线建立
+
+- 背景: 原系统内置演示数据(虚构采购单/销售单/报价/原料)，与真实经营数据不符
+- 决策: 用真实采购单(海南菜篮子实业 BFXYVa2609100003 2026-09-12)的84行实收明细替换 PO_SEED；用采购单中74种真实商品替换 ING_TUPLES；清空 RECIPES(无食谱卡)、S_SEED、Q_SEED；LS_KEY 升级 v1→v2 强制清缓存
+- 影响范围: seedDB() 函数、ING_TUPLES/ING_SPECIAL/ING_CATS、RECIPES、PO_SEED、S_SEED、Q_SEED、供应商列表
+- AI避坑提示: 禁止恢复演示数据；禁止使用虚构供应商(海口东门/罗牛山/新港水产/金盛鑫)；配方为空时菜品成本回退到 est 估算值
+- 回档方案: 设置页「重置为真实数据基线」按钮；或 localStorage.removeItem('panda_inv_v2')
+
+## [2026-09-12 21:30] v1.1.0 - 建立文档骨架
+
+- 背景: 项目是大系统中的一个功能模块，需对齐《模块化组合式架构规范》与《AI协作工程方案》
+- 决策: 创建 docs/ 目录及 ARCHITECTURE.md、CHANGELOG.md、AGENTS.md、modules/、scripts/、bugs/、decisions/
+- 影响范围: 仅新增文档，未改动业务代码
+- AI避坑提示: 修改代码前必须先查阅对应 modules/[模块名].md；高风险操作需输出 [EDIT_PLAN]
+- 回档方案: 删除 docs/ 目录即可
+
+## [2026-09-12 22:50] v1.2.0 - 结构测算模块（只读测算层）
+
+- 背景: 用户要求「保本测算中的功能也应该在进销存系统中体现」，同时「菜品配方的管理应与毛利测算功能做隔离处理」。原「熊猫五福餐厅菜品保本测算.html」是独立单页工具，与进销存系统的菜品数据脱节
+- 决策:
+  1. 新增独立 Tab「结构测算」，与「菜品配方」并列，移植保本测算的量本利模型（固定成本/变动成本率/运营口径 24 项参数、保本点、边际贡献率、保本客流、成本结构 100% 分解、五类角色结构分析、客流情景模拟、六条经营建议）
+  2. **只读隔离**：测算层维护独立内存副本 `SD[]`（由 `DB.dishes` 深拷贝派生，成本口径取 `dishCost(d)`），所有调价/调量/上下架只改 `SD`，**绝不调用 `saveDB()`，不写 `DB.rec`/`DB.ings`/`DB.pos`/`DB.sales`**；参数对象 `CALC_P` 仅存内存不落库
+  3. 菜品主数据补 `q`（日均销量，来自保本测算第5列），`seedDB()` 菜品入库行补 `q:r[4]`
+  4. `LS_KEY` 升级 v2→v3 强制清缓存；`DB.v` 同步升为 3；`init()` 兼容判断改为 `DB.v<3` 并校验 `d.q===undefined`
+  5. 菜品配方列表**保持现状**（不加列、不改渲染），`q` 仅供测算页使用
+- 影响范围: `seedDB()`（新增 q 字段 + v:3）、`LS_KEY`、`init()` 兼容判断、`refresh()` 新增 calc 分支、导航 Tab、新增 `#tab-calc` 面板与 CSS、新增结构测算 JS 模块（`CT/CT_COLOR/P_FIX/P_VAR/P_OP/CALC_P/SD/SC_FILTER/SC_SORT/CR` + `syncCalc/buildCalcParams/calcModel/renderCalc` 等）、设置页通道表、页脚文案
+- AI避坑提示:
+  - **禁止**把测算页的任何结果（调价/调量/上下架）写回 `DB` 或调用 `saveDB()`，这会破坏「配方管理与毛利测算隔离」的设计前提
+  - 禁止给菜品配方列表添加销量相关列（用户明确要求保持现状）
+  - 禁止恢复演示/虚构数据
+  - 新增测算相关全局变量统一使用 `CT_`/`SC_`/`CALC_`/`SD`/`CR` 前缀，避免与 `D`/`P`/`R`/`TYPES`/`TC` 冲突
+- 回档方案: 设置页「重置为真实数据基线」按钮；或 `localStorage.removeItem('panda_inv_v3')`；或回退 LS_KEY 至 `panda_inv_v2`
+
+## [2026-09-13 11:30] v1.3.0 - 外接比价「一键比价」自动化通道
+
+- 背景: 原「外接比价」为纯人工辅助（跳转平台→人工看价→手工录入报价），74 种原料逐条查价效率低；`脚本文本.txt` 中已给出 1688 `item_search` API 的调用示例，需要落地为可用的一键流程
+- 决策:
+  1. 采用**三段式离线流水线**：前端导出 `待比价任务.json` → 外部 Python 脚本 `比价脚本/fetch_quotes.py` 调 1688 接口抓价 → 产出 `比价结果.json` → 前端「导入比价结果」回填。前端不发起跨域请求、不持有 API 密钥，与当前无后端架构一致
+  2. **复用 `DB.quotes` 单一数据模型**：脚本结果在导入时映射为与手工录入完全相同的 `{id,ing,src,price,per:'buy',date,note}`，故 `quotePerStock()`/`bestQuote()`/`renderPrice()`/`quoteListHtml()` 全部零改动生效
+  3. 任务清单携带 `conv`/`avg` 快照；导入时前端按 `price/conv` 再做一次权威折算
+  4. 导入为**追加 + 去重**（按「原料+来源+价格」），不删除/覆盖既有报价；`ingId` 未命中、价格 ≤ 0、日期非法的条目分别计数并提示
+  5. 关键词自动净化（去规格/容量后缀，如「东古一品鲜500ml」→「东古一品鲜」），并支持 `config.json` 全局后缀
+  6. 换算率 ≠ 1 的原料脚本默认跳过（1688 报价口径难以自动对齐），可设 `allow_conv_grab: true` 强制抓取后人工核对
+  7. 脚本产出 `比价结果.xlsx`（商品标题/批发价/起订量/供应商/发货地/链接/折算库存单价/与本店差价/差价率），折算与差价列使用 Excel 公式，改价即自动重算
+- 影响范围:
+  - `熊猫五福餐厅进销存系统_真实数据版.html`：`#tab-price` 工具条新增按钮「① 生成本次比价任务」「② 导入比价结果」「查看待比价清单」+ 状态提示 `#priceTaskTip` + 流程说明；JS「外接比价」区块新增 `QUOTE_TASK_TYPE`/`QUOTE_RESULT_TYPE`/`quoteKeyword()`/`exportQuoteTask()`/`quoteTaskText()`/`renderPriceTaskTip()`/`openQuotePlan()`/`importQuoteResult()` 及事件绑定；`refresh()` 增加一行 `renderPriceTaskTip()`；设置页「模块数据输入通道一览」更新「外接比价」行
+  - 新增 `比价脚本/`：`fetch_quotes.py`、`config.json`、`requirements.txt`、`运行比价.bat`、`生成任务说明.md`
+  - `docs/modules/外接比价.md`（新增一键通道流程与文件契约）、`docs/scripts/README.md`（新增脚本与按钮条目）、本文件、`docs/decisions/ADR-001-真实数据基线.md`（新增 ADR-003）
+- AI避坑提示:
+  - **原有手工比价功能一行未改**：`openQuote()`/`openQuoteList()`/`pricePop()`/`renderPrice()`/平台管理不得因本次改动而重写或删除
+  - 一键通道只允许写 `DB.quotes`；**禁止**写入 `DB.logs`/`DB.ings.stock`/`DB.ings.avg`/`DB.rec`，**禁止**触碰 `rebuildStock()`/`dishRecipeCost()`/`calcSaleCost()`/`seedDB()`/`LS_KEY`（本次未升级，仍为 `panda_inv_v3`）
+  - 任务的 `type` 为 `panda-quote-task`、结果的 `type` 为 `panda-quote-result`，字段契约见 `docs/modules/外接比价.md` 第 3 节，改动字段必须前后端 + 脚本三处同步
+  - `比价脚本/config.json` 含 API 密钥，禁止外发或提交到公开仓库
+  - 1688 报价常不含运费/不含税、规格单位不一，**禁止**在脚本里自动换算跨单位价格（conv≠1 一律跳过）
+- 回档方案: 删除 `比价脚本/` 目录；前端回退方式为移除 `#tab-price` 新增按钮与「外接比价」区块中 `一键比价（脚本自动化通道）` 段落（自 `const QUOTE_TASK_TYPE` 起至 `$('#fileQuoteImport').addEventListener(...)` 结束）；已导入的报价在「报价记录」逐条删除或导入 JSON 备份整体回滚
+
+## [2026-09-13 15:10] v1.4.0 - 采购进货 / 菜品配方 批量导入（新原料自动入库）
+
+- 背景: 采购单与食谱卡此前只能手工逐条录入（采购单 84 行需逐行选择原料并填数量/单价）；更关键的是「配方编辑」的原料只能从既有原料下拉选择，若标准食谱卡中出现系统里没有的新原料，只能被静默跳过，新原料无法进入原料库存，导致配方不完整、成本失真
+- 决策:
+  1. 「采购进货」新增「📥 批量导入采购单」与「下载导入模板」；「菜品配方」新增「📥 批量导入食谱卡」与「下载导入模板」
+  2. 输入格式统一支持 `.csv`（Excel「另存为 CSV」直接可用，UTF-8 优先、出现替换符时自动回退 GBK）与 `.json`；**不引入 XLSX 解析库、不新增外部依赖**，与单文件无构建架构一致
+  3. **导入前一律预览确认**（解析单数/条数、无效行数、将新增的原料/菜品清单、前若干行明细），点「确认导入」才写 DB；取消不产生任何副作用
+  4. **新原料自动入库（本需求核心）**：原料按名称精确匹配，未匹配到即由 `createIngFromImport()` 新建原料（`stock/avg=0`、`initStock=0`，单位取文件/默认「斤」，分类取文件/默认「其他」），确保标准食谱卡中的新原料一定出现在「原料库存」；采购单导入后由 `rebuildStock()` 按移动加权平均生成均价，成本随之生效
+  5. 采购单导入复用 `mkPoLine()` + `rebuildStock()`，与手工「新建采购单」完全同源；CSV 中同一「供应商+日期」的行自动合并为一张采购单；付款默认挂账，可勾选「按应付全额登记付款」
+  6. 食谱卡按菜品分组；未匹配菜品按「常规」新建（`price/est/q=0`，可后续补齐）；同名菜已有配方默认「覆盖」，可取消勾选改为「按原料合并用量」
+  7. `ING_CATS` 新增「其他」分类，承接导入产生、尚未归类的原料
+- 影响范围:
+  - `熊猫五福餐厅进销存系统_真实数据版.html`：`#tab-buy`/`#tab-dish` 工具条新增按钮与 `#filePoImport`/`#fileRecImport` 文件输入、页内说明 note；`ING_CATS` 增「其他」；JS 新增「批量导入（采购单 / 食谱卡）」区块（`parseCsv/csvMap/pick/numOr/normDate/findIngByName/findDishByName/createIngFromImport/createDishFromImport/readImportFile/parsePoInput/parseRecInput/previewPoImport/commitPoImport/previewRecImport/commitRecImport/downloadPoTemplate/downloadRecTemplate` 及事件绑定）；设置页「各功能模块数据输入通道一览」更新原料库存/采购进货/菜品配方三行
+  - `docs/modules/采购进货.md`、`docs/modules/菜品配方.md`、`docs/modules/原料库存.md`、`docs/scripts/README.md`、本文件
+- AI避坑提示:
+  - 本次**未触碰** `rebuildStock()`/`dishRecipeCost()`/`calcSaleCost()`/`seedDB()`/`LS_KEY`（仍为 `panda_inv_v3`，未升版）；导入只**调用** `rebuildStock()` 与 `saveDB()`
+  - **禁止**把预览阶段的解析结果直接写库：所有写入必须发生在预览确认后的 `commitPoImport()`/`commitRecImport()` 内
+  - **禁止**恢复演示/虚构数据；导入产生的新原料/新菜品属真实业务数据，不得在 `seedDB()` 中覆盖
+  - 无 XLSX 解析库，**不接受 `.xlsx` 直传**，需在 Excel 中「另存为 CSV(逗号分隔)」
+  - 手工「新建采购单」`openPo()` 与「配方编辑」`openRecipe()` 一行未改，不得因本次改动而重写
+- 回档方案: 移除 `#tab-buy`/`#tab-dish` 两组按钮与 note、`ING_CATS` 的「其他」、以及 JS「批量导入（采购单 / 食谱卡）」整段区块；已导入数据在对应列表逐条删除或用 JSON 备份整体回滚
+
+## [2026-09-13 16:40] v1.5.0 - 外接比价新增 Selenium 浏览器抓价引擎 + 清单询价转换
+
+- 背景: v1.3.0 落地的一键比价依赖第三方聚合接口（onebound）的 1688 `item_search`，实际使用中「1688 开放平台上的功能不符合预期」（额度/数据质量/可用性），需要改为 Selenium 模拟真实浏览器行为直接搜 `s.1688.com`。同时用户希望把待比价任务转成 1688「清单询价」可用的文档，用于人工询价兜底
+- 决策:
+  1. 新增**浏览器引擎** `比价脚本/fetch_quotes_selenium.py`，与接口引擎**共用同一份任务/结果 JSON 契约与写出逻辑**（直接 `import fetch_quotes` 复用 `find_task_file`/`load_task`/`write_json`/`write_excel`），前端 `importQuoteResult()` 与 `DB.quotes` 结构**零改动**；两个引擎产出的 `比价结果.json` 对前端完全等价，仅 `source` 标签不同（`1688(API)` / `1688(网页)`）
+  2. **节奏控制**：每次浏览器操作间隔默认 2.5s（`delay` 可配，`jitter=0.35` 抖动），与用户要求「响应时间控制在 2.5 秒左右」一致；可用 `--delay`/`config.json` 调整
+  3. **登录态持久化**：独立 Chrome 用户目录 `比价脚本/chrome_profile/`，首次扫码登录后长期免登录；每次运行前检测登录（cookie + DOM 双判），未登录则暂停并轮询等待人工扫码（`login_wait`，默认 300s）
+  4. **反自动化检测**：`--disable-blink-features=AutomationControlled` + `excludeSwitches:["enable-automation"]` + `useAutomationExtension:False` + CDP `Page.addScriptToEvaluateOnNewDocument` 覆写 `navigator.webdriver` / `languages` / `plugins`
+  5. **选择器多套兜底**：商品卡片/标题/价格/供应商/起订量/发货地各配 3~7 套候选选择器（1688 前端改版频繁），命中的选择器打印到日志便于定位失效项
+  6. **拦截处理**：识别登录页与滑块/安全验证（`#nc_1_wrapper` 等），命中即暂停提示人工处理后轮询继续；超时自动存现场截图到 `比价脚本/debug/`；每 10 个原料落一次中间结果
+  7. **浏览器回落**：本机无 Chrome 时可 `--browser edge` 用系统自带 Edge 内核，或 `--binary <exe路径>` 指定内核
+  8. 新增 `比价脚本/make_quote_list.py`：把 `待比价任务.json` 转成 1688「清单询价」可上传的 Excel（按类目拆 sheet、采购数量列留空待填、正整数/正小数数据校验、冻结首行、自动筛选、使用说明页）+ Markdown 说明文档，输出到项目根目录 `询价清单/`
+  9. `config.json` 新增 `selenium` 配置段（不影响原有接口引擎字段）；`requirements.txt` 增补 `selenium`/`webdriver-manager`
+- 影响范围:
+  - 新增 `比价脚本/fetch_quotes_selenium.py`、`比价脚本/运行比价-网页版.bat`、`比价脚本/make_quote_list.py`
+  - 修改 `比价脚本/config.json`（新增 `selenium` 段）、`比价脚本/requirements.txt`（新增 selenium/webdriver-manager）、`比价脚本/生成任务说明.md`（补充两引擎说明）
+  - `docs/modules/外接比价.md`（一键通道流程改为双引擎、新增引擎选择表与清单询价转换说明、已知限制补充）、`docs/scripts/README.md`、本文件、`docs/decisions/ADR-001-真实数据基线.md`（新增 ADR-004）
+  - **前端 HTML 一行未改**（`熊猫五福餐厅进销存系统_真实数据版.html` 本次零改动）
+- AI避坑提示:
+  - **前端本次零改动**，`exportQuoteTask()`/`importQuoteResult()`/`renderPrice()` 等不得因本次改动而重写；两个引擎的结果文件必须保持同构
+  - `比价脚本/chrome_profile/` 与 `比价脚本/debug/` 是运行时目录，含个人登录凭据与现场截图，**禁止外发/提交仓库**
+  - **禁止**把浏览器引擎的 `delay` 调到 1s 以下（触发风控会拿不到数据）；遇到滑块必须人工处理，**禁止**尝试自动化绕过验证码
+  - `s.1688.com` 改版会使选择器失效，修的是 `fetch_quotes_selenium.py` 顶部的 `CARD_SEL`/`TITLE_SEL`/`PRICE_SEL` 常量，**不要**改任务/结果 JSON 契约
+  - 未触碰 `rebuildStock()`/`dishRecipeCost()`/`calcSaleCost()`/`seedDB()`/`LS_KEY`（仍为 `panda_inv_v3`）
+- 回档方案: 删除 `比价脚本/fetch_quotes_selenium.py`、`比价脚本/运行比价-网页版.bat`、`比价脚本/make_quote_list.py`、`比价脚本/chrome_profile/`、`比价脚本/debug/`、`询价清单/`；`config.json` 的 `selenium` 段与 `requirements.txt` 的 selenium 行可直接删除（不影响接口引擎）；前端无需回退
+
+## [2026-09-14 10:00] v1.6.0 - 结算单（采购付款审批单）
+
+- 背景: 采购进货已有完整应付/已付/欠款数据，但付款时缺一张能直接交给老板/财务审批、随付款凭证归档的单据；对照线下「财务支出报表」（报销日期/支出用途/数量/单价/小写合计/人民币大写/三签字栏），需要把该要素在系统内一键生成
+- 决策（用户逐项确认）:
+  1. **单据性质**：内部付款审批单（给老板/财务，凭此向供应商付款），非供应商对账单
+  2. **汇总维度**：**1 张采购单 → 1 张结算单**，入口挂在采购进货列表行内「结算单」按钮
+  3. **输出**：A4 打印版式（浏览器打印 → 另存 PDF / 截图）+ Excel(CSV)
+  4. **模板存储**：**独立 localStorage key `panda_settle_tpl_v1`**，不占 `DB` 结构、不影响 `LS_KEY`（仍 `panda_inv_v3`）、零迁移
+  5. **明细逐条列原料**；抬头「小写合计 / 人民币大写」取**应付全额 `payable`**，另附列已付/欠款
+  6. 打印采用**隐藏 iframe + `contentWindow.print()`**，规避弹窗拦截；结算单样式内联在 iframe 文档内，**主页面不新增 `@media print`**
+- 影响范围:
+  - `熊猫五福餐厅进销存系统_真实数据版.html`：
+    - `#tab-buy` 操作列新增「结算单」按钮（`data-posettle`，挂到既有 document 事件委托），操作列宽 150→230px
+    - 新增 JS 区块「结算单（采购付款审批单）」：`SETTLE_TPL_KEY/DEF_SETTLE_TPL/loadSettleTpl/saveSettleTpl/numToCn/settleNo/buildSettleData/buildSettleHtml/printSettle/exportSettleCsv/openSettle`
+    - 设置页新增「结算单模板」配置区块（标题/抬头/地址/电话/税号/默认支出用途/收款单位/开户行/账号/签字栏/页脚 + 保存/恢复默认）、`renderSet` 内新增 `renderSettleTplForm()` 回填、新增两个按钮事件
+    - 设置页「各功能模块数据输入通道一览」新增「结算单」行
+  - 新增 `docs/modules/结算单.md`、`docs/ARCHITECTURE.md`（模块索引 + L3 分层表）、本文件
+- AI避坑提示:
+  - 本模块是**只读输出层**：**禁止**向 `DB` 写入任何字段（含给结算单加 `DB.settle` 之类）；模板一律走独立 key `panda_settle_tpl_v1`
+  - **禁止**改写 `rebuildStock()`/`dishRecipeCost()`/`calcSaleCost()`/`seedDB()`/`LS_KEY`（本次均未触碰）
+  - 手工「新建采购单」`openPo()` 与列表既有「补付/编辑/删除」逻辑不得因本次改动而重写
+  - 金额口径是**应付全额 `payable`**（用户明确选择），若要改为欠款口径需用户确认
+  - 主页面**不要**加 `@media print`，否则会影响主站整体打印
+- 回档方案: 删除采购进货操作列的「结算单」按钮、document 事件委托中的 `data-posettle` 分支、JS「结算单（采购付款审批单）」整段区块、设置页「结算单模板」区块与 `renderSettleTplForm`/两个按钮事件、通道表「结算单」行；`localStorage.removeItem('panda_settle_tpl_v1')` 清除模板
+
+## [2026-09-14 11:30] v1.6.1 - 结算单批量生成
+
+- 背景: 单张结算单已可用，但一次要给付款人一批单子（几十张采购单）时逐张点开打印太慢，需要在采购进货工具条加「批量生成结算单」
+- 决策:
+  1. **批量 ≠ 合并成一张**：单据粒度仍保持「1 张采购单 → 1 张结算单」，批量只是把多张单**打包成一次输出**
+  2. **批量打印**：N 张 → N 个 `.sheet`（`page-break-after:always`）的单个文档，一次打印/另存为**一个连续 PDF**；每张页脚标注「第 n/N 张」
+  3. **批量导出**：合并为**一个 CSV**（顶部批量汇总 + 顺序堆叠每张单明细）
+  4. 弹窗支持 行勾选 / 全选 / 全不选 / **仅选有欠款** / 实时合计（已选张数·应付合计·欠款合计）
+  5. 批量弹窗**沿用当前供应商筛选** `poFilterSup`（筛选了供应商就只批量该供应商）
+- 影响范围（同一 HTML 文件）:
+  - 采购进货工具条新增按钮 `#btnSettleBatch`（`下载导入模板` 与 `供应商:` 之间），事件绑定在 `#btnPoTpl` 附近
+  - **重构**：`buildSettleHtml` 拆为 `SETTLE_CSS` + `settleSheet()` + `settleDocHtml()` + `buildSettleHtml()`，使单张/批量共用版式；`buildSettleHtml` 输出契约不变（仍是完整文档）
+  - **新增**：`buildSettleBatchHtml` / `printHtmlDoc` / `printSettleBatch` / `exportSettleBatchCsv` / `openSettleBatch`
+  - `printSettle` 改为 `printHtmlDoc(buildSettleHtml(...))` 一行委托，行为不变
+  - 上传 `docs/modules/结算单.md`（流程图/函数清单/ADR/限制）、本文件
+- AI避坑提示:
+  - **不要**把批量实现成「把多张采购单金额合并成一张结算单」——用户明确要求 1:1 单据粒度
+  - **不要**为批复印制第二份 CSS，一律复用 `SETTLE_CSS` + `settleSheet()`
+  - 本模块仍是**只读输出层**：批量逻辑同样**禁止**写 `DB`；模板仍走独立 key `panda_settle_tpl_v1`
+  - 批量弹窗里的复选框查询必须限定在 `m.ov` 作用域内（`m.ov.querySelectorAll('.stbChk')`），不要用全局 `$$`，否则多弹窗并存时会误选
+- 回档方案: 删除工具条 `#btnSettleBatch` 按钮与其 `.onclick`、`exportSettleBatchCsv`/`openSettleBatch` 两个函数；将 `buildSettleHtml`/`printSettle` 还原为 v1.6.0 的单体写法（即把 `SETTLE_CSS`+`settleSheet`+`settleDocHtml` 内联合并回 `buildSettleHtml`）
+
+## [2026-09-14 17:40] v1.6.3 - 结算单导出 PDF
+
+- 背景: 需以 PDF 发微信群传阅，HTML 预览差
+- 决策: 前端自造 PDF 字节流（Canvas 光栅化 + 极简 PDF 容器）
+- 影响: 新增 PDF 相关 6 个函数与 downloadBlob；弹窗加 #stPdf/#stbPdf，打印按钮降为次要
+- 验证: 无头 Edge 实跑生成 PDF 成功，pypdf 独立解析 A4=210x297mm
+- AI避坑: 改 `settleSheet` 版式必须同步 `settlePageModel`；xref 条目数 = 3+3N（勿多写）；不要用 window.open
+- 回档方案: 删除 6 个 PDF 函数与 #stPdf/#stbPdf 按钮，`download` 内联恢复
+
+## [2026-09-14 12:10] v1.6.2 - 结算单导出电子版
+
+- 背景: 结算单此前只有「打印（另存 PDF 需手动）」和「CSV（丢版式）」两条出路；用户要求保留打印的同时提供**导出电子版**的途径
+- 决策:
+  1. 电子版 = **自包含 HTML 单文件**（就是打印文档本身，含 `SETTLE_CSS`）：任何设备浏览器可打开、微信可直接发送留档、打开后 `Ctrl+P` 仍可再转 PDF
+  2. 不做「不经打印对话框直接导出 PDF」——浏览器环境做不到；HTML 是最保真的电子载体
+  3. 单张/批量弹窗各加一个「导出电子版」按钮，与打印/CSV 并列；批量电子版 = N 张合一个文件（每张一页，同批量打印）
+  4. 文件名：单张 `结算单_JS-单号_报表日期.html`；批量 `结算单_批量_报表日期_N张.html`
+- 影响范围（同一 HTML 文件）:
+  - `openSettle` 弹窗按钮行新增 `#stFile` + 处理器（`download(..., 'text/html')`）
+  - `openSettleBatch` 弹窗按钮行新增 `#stbFile` + 处理器；弹窗底部提示文案同步更新
+  - **零新函数、零数据结构变化**：完全复用 `buildSettleHtml`/`buildSettleBatchHtml`/`download`
+  - 上传 `docs/modules/结算单.md`、本文件
+- AI避坑提示:
+  - **不要**为电子版再造一套版式/样式，必须复用 `buildSettleHtml`/`buildSettleBatchHtml`，保证电子版与打印版逐像素一致
+  - **不要**用 `window.open` 导出（会被弹窗拦截），统一走 `download()` 的 Blob 下载
+  - `download()` 传 `type:'text/html'`；内容已含 `<meta charset="UTF-8">`，无需 BOM（BOM 只加在 `csv()` 里）
+- 回档方案: 删除两个弹窗中的 `#stFile`/`#stbFile` 按钮及其 `.onclick` 处理器，恢复批量弹窗提示文案
+
+## [2026-09-15 16:40] v1.7.0 - 本地数据库持久化（SQLite）+ 离线兜底 + 双机合并
+
+- 背景: 业务数据原先只存在于浏览器 localStorage（`panda_inv_v3`），清缓存/换电脑/把 HTML 发给别人都会丢数据或看不到新数据；用户要求"配置一个本地数据库"，且存在店/家两台电脑切换使用的场景
+- 决策:
+  1. **双存储**：新增 `server/`（Python 标准库 `http.server` + `sqlite3`，零第三方依赖）存整库 JSON 到 `data/餐厅系统.db`；`localStorage` 保留为**离线兜底**，服务未启动时页面照常可用，改动暂存浏览器、下次启动自动补传
+  2. **不动业务代码**：`saveDB()` / `loadDB()` 签名与调用点全部保持不变，8 个 tab 零改动；持久化改造集中在原「持久化」段落
+  3. **rev 乐观锁 + 三向合并**：库带单调递增 `rev`；版本不一致时由服务端用 `base(快照)/mine(本机)/theirs(库)` 做**记录级**合并，两台机器各录各的互不覆盖
+  4. **派生值不采信**：`stock/avg` 由 `rebuildStock()` 重放得出，任何来自数据库的数据落地后强制重算，计价核心不受同步影响
+  5. **可回滚**：每次写入前后各留一版快照（库内 `snapshots` 表），每次启动服务做一次整库冷备份到 `data/backups/`
+  6. **全局唯一 id 尚未改造**：`uid()` 仍为单机自增（`p+seq++`），当前靠"两端各自新增 → id 不同视为不同记录"规避；正式启用双机同时录入前需改为 `p+机器码+seq+随机`，老数据 id 保持不变（已列入待办）
+- 影响范围:
+  - 新增 `server/app.py`（HTTP API + 静态服务 + CORS）、`server/db.py`（Store/rev/快照/冷备份）、`server/merge.py`（三向合并）、`server/config.json`、`server/README.md`、`启动系统.bat`
+  - 同一 HTML：`saveDB/loadDB` 段落扩展为同步客户端（约 180 行）；顶栏新增状态灯 `#syncLamp`；设置页新增「数据同步」区块（服务地址/本机标识/立即同步/打快照/以库为准/以本机为准/快照回滚表）；页脚与备份说明文案更新
+  - 新增 `docs/modules/数据同步与备份.md`；更新 `docs/ARCHITECTURE.md`、本文件
+- 验证: 存储层与合并逻辑 7 项断言全通过；起真实服务跑 HTTP 冒烟 11 步全通过（含首写/409 冲突/首次并集合并/三向合并/快照/回滚/静态首页）；HTML 内联脚本语法校验通过、无重复 id
+- AI避坑提示:
+  - **禁止**在同步/合并流程里直接修改 `rebuildStock()` / `dishRecipeCost()` / `seedDB()`——只能调用，不能改写
+  - **禁止**把 `stock/avg` 这类派生字段写回数据库后再直接采信，落地必须重放
+  - 新增的同步变量统一 `SYNC` 对象或 `api*/stamp*/render*` 前缀；**不要**定义名为 `sync` 的全局函数（代码中已存在同名函数）
+  - 合并规则改动必须同步更新 `server/merge.py` 与 `docs/modules/数据同步与备份.md`
+  - `toast(msg, bad)` 第二参是布尔（红色告警），不要传数字
+- 回档方案: 关掉服务即回到纯 localStorage 模式（页面功能完全不受影响）；如需移除，删除 `server/` 与 `启动系统.bat`，并把 HTML 中「持久化 + 本地数据库同步」段落还原为原 4 行 `saveDB/loadDB`、`init(false)` 后去掉 `startSync()`
+
+## [2026-09-17] v1.7.1 - 全新客户端启动保护 + 移植工具链
+
+- 背景: 项目需整体搬迁到新电脑。排查发现**换机会脏数据**：新机器 localStorage 为空 → `loadDB()` 失败 → `seedDB()` 生成示例原料/菜品 → `startSync()` 照常 `pushNow()` 时服务端因 `baseRev=0` 走 `server/app.py` 的 `first-merge` 分支并做 `merge({}, 种子数据, 库数据)` = **并集**，把示例数据写进真实库（id 随机生成 → 大量重复记录）
+- 决策:
+  1. 新增 `isFreshClient()`：本机无 `LS_KEY` **且**无有效 `REV_KEY` 时判定为全新客户端
+  2. `startSync()` 改三分支：空库→灌入；**全新客户端→直接 `applyRemote()` 以数据库为准落地（不发起任何写入）**；其余→`pushNow()`
+  3. `server/config.json` 的 `open_browser` 改 `true`，启动即自动打开 `http://127.0.0.1:8765/`（服务端已内置静态托管），规避 `file://` 的 `null` origin 问题
+  4. 新增根目录 `自检.bat`：检查 Python 版本 / 核心文件完整性 / 数据库文件 / 服务端语法（`py_compile`）/ 8765 端口占用
+  5. 新增 `docs/移植说明.md`：打包清单、排除项（`chrome_profile` 等）、环境准备、首次同步、验证清单、FAQ
+- 影响范围: 同一 HTML 的同步层（`isFreshClient()` + `startSync()` 新增约 15 行）；`server/config.json`；新增 `自检.bat`、`docs/移植说明.md`；更新 `server/README.md`、`docs/ARCHITECTURE.md`、`docs/modules/数据同步与备份.md`、本文件
+- **未改动**: `pushNow()` 常规流程、`server/merge.py` 合并规则、`server/db.py` 的 rev/快照机制、`rebuildStock()` 等受保护逻辑
+- AI避坑提示:
+  - **禁止**用"预置 `panda_rev_v1` = 服务端 rev"来替代本方案 —— 那会命中 `PUT /api/db` 分支，用种子数据**整体覆盖**真实库，危害远大于重复记录
+  - `isFreshClient()` 中 `localStorage` 访问必须包 `try/catch`（隐私模式下会抛异常），异常时返回 `false` 退回常规流程
+  - 迁移/清缓存场景下**不要**手工改写 `panda_inv_v3` / `panda_rev_v1` 两个 key 的值，否则判定失效
+- 回档方案: 删掉 `isFreshClient()` 并把 `startSync()` 还原为 v1.7.0 的 `if(doc.empty){initStamps();saveLocal();} await pushNow();`；删除 `自检.bat` 与 `docs/移植说明.md`
+
+## [2026-09-21] v2.0.0 - 经营闭环：外部销售接入 + 结构测算真实销量口径 + 补货闭环
+
+- 背景: 系统此前「进得来、算不准、补不了」：销售只有手工单（美团等平台数据进不来）、结构测算跑在假设的 `q` 上、
+  采购与收货分离后没有「什么时候该补货」的决策支持。v1.7.x 的持久化/同步架构（SQLite + localStorage 兜底 +
+  三向合并）**保持不变**，本次只在业务层补齐「销售 → 耗量 → 测算 → 补货 → 收货」闭环。
+- 决策与落地（分期 S1~S7，详见 `docs/补货闭环进度.md`）:
+  1. **S1 真二进制 `.xls` 解析**：`oleStreamBytes`（OLE2/CFB）+ `parseSstParts`（中文 SST、跨 CONTINUE、半个汉字暂存、
+     GBK 兜底）+ `parseBiff`（BOUNDSHEET/XF/FORMAT 日期/LABELSST/LABEL/RSTRING/NUMBER/RK/MULRK/FORMULA 缓存值/空单元格）
+     + `parseXls`（OLE 失败回落裸 BIFF 流）；失败先试 HTML/CSV，再回落「手动指定列」，**不拒收**；`openColMap` 增「粘贴表格内容」兜底
+  2. **S2 采购单状态体系 + 单向回流**：新增 `orderLineSt/orderSt/orderStTag/orderRecvProg/setOrderLinesSt/openOrderQty/
+     syncOrderRecv/syncAllOrderRecv/closeOrder/voidOrder/restoreOrder`；进货单新增**可选** `po` 关联，
+     采购单 `recvQty` 为**派生值**（每次启动/每次进货单变动全量重算，落地不采信远端值）；采购页加「收货状态」列与状态筛选
+  3. **S3 日均耗量 + 批量设置**：`ingUseIn/ingDailyUse/dailyUseMap`（口径与 `rebuildStock()` 销售出库完全一致，只读）；
+     `openIngBatch()` 批量设置安全库存/出成率；修复 `#btnIngBatch` **按钮未接线**的缺陷；概览「去采购」改跳采购管理并带出原料
+  4. **S4 外部销售接入（P1）**：新增「外部销售数据接入（美团等平台）」整段；`SALE_CHS` 增「美团外卖」；
+     列定义 `IMP_SALE_DEFS`；`detail/sum` 两种解析；三级菜名匹配 `matchSaleDish`（别名→精确→归一化，**不做模糊包含**）+ 别名管理 `openAliasMap`；
+     金额口径 `resolveSaleAmt()` A~E 五档（扣费与优惠统一进 `discount`，冗余存 `amtMode`/`srcAmt`）；
+     幂等 `saleDupKeyOf` + 整批撤回 `delSaleBatch`；未结算形成平台待结算欠款；事后重算 `openSaleAmtRecalc` **只改金额不动明细与库存**；
+     **唯一写入口** `commitSaleImport()`，预览禁写库
+  5. **S5 结构测算真实销量口径（P2）**：新增 `SC_QMODES/SC_QMODE/SC_QFALLBACK/scQDays/dishRealQty/calcQtyOf`，改写 `syncCalc/calcStatText`；
+     真实口径 = 近 N 天总销量 ÷ N（**与配方页 `dishSalesAgg` 同源**），无销量回落 `d.q`（兜底可关）；
+     **绝不写回 `DB.dishes.q`**；UI 加「日销量口径」下拉 `#scQMode` + 兜底勾选 `#scQFb`，表头与页尾文案随口径同步
+  6. **S6 补货建议（P3，挂采购管理内、不新增 Tab）**：新增 `restockCfg/restockLineOf/restockLines/autoRestockPlan/
+     genRestockPlan/syncPlanStatus/renderRestock/readRestockRows/restockToOrders/restockIgnore/openRestockCfg`；
+     缺口 = `日均×(提前期+配送间隔)+安全库存−现有−[可关]在途`，再 `÷conv → 套 moq → 按 pack 向上取整`；
+     **自动生成 ≠ 自动下单**（无待处理单才生成 BY 单，转 CG 单必须人工勾选）；按供应商拆单生成 `DB.orders`，
+     供应商/起订/整包记回 `DB.ings`；建议单状态随关联采购单收货进度派生推进（采购单删了行回退 `pending`）
+  7. **S7 文档同步**：新增 `docs/modules/补货建议.md`；更新 销售收银 / 原料库存 / 采购进货 / 采购管理 / 菜品配方 / 结构测算 / ARCHITECTURE / 本文件
+- 影响范围:
+  - 同一 HTML 新增区块：「外部销售数据接入」「补货建议（挂采购管理内）」「采购单状态 + 单向回流」，
+    另在结构测算页、原料页、销售页、采购页有局部改动；脚本块由 4022 行增至约 4744 行
+  - 新增数据集合 `DB.plans` / `DB.restock` / `DB.dishAlias`，新增可选字段 `ing.sup/moq/pack`、`sale.src/srcNo/batch/amtMode/srcAmt/settled`、
+    `recv.po`、`order.status/line.st/line.recvQty`；**全部可选 + 读时兜底，`migrateV4()` 内守卫**
+  - `docs/` 文档 8 处更新 + 1 篇新增；新增/更新回归脚本 `_tmp_rstest.js`、`_tmp_calctest.js`、`_tmp_saletest.js`、`_tmp_ordtest.js`、`_tmp_xlsgen.js`
+- 验证: `node --check` 通过；静态 id 检查 278 声明 / 252 引用，无缺失无重复；
+  `_tmp_xlsgen.js`(14) / `_tmp_ordtest.js`(15) / `_tmp_saletest.js`(38) / `_tmp_calctest.js`(33) / `_tmp_rstest.js`(35) 全部 0 失败
+- AI避坑提示:
+  - **红线不变**：`rebuildStock()` / `dishRecipeCost()` / `calcSaleCost()` / `seedDB()` / `LS_KEY`（仍 `panda_inv_v3`）**禁止改写**；`DB.v` 仍为 4，未升版
+  - **采购单绝不进库存**：转补货单、结案、作废、恢复都只碰 `DB.orders`，**禁止**在这些路径里调 `rebuildStock()`
+  - **外部销售唯一写入口**是 `commitSaleImport()`；预览阶段（`previewSaleImport`）禁止写库
+  - **自动生成 ≠ 自动下单**：`autoRestockPlan()` 只允许 push `DB.plans`，回归断言已固定「自动生成后 `DB.orders.length === 0`」
+  - 补货的**单位口径**：`need/cur/safe/daily/onway` 是库存单位，`sug/qty/moq/pack` 是采购单位；换算顺序 `need÷conv → moq → pack`
+  - 结构测算的 `q` 在真实口径下是**日均**（总销量÷N），不是总销量；与配方页「近N天销量」同源但维度不同，勿当成 bug
+  - 同步集合 `SYNC_COLL` / `server/merge.py` 的 `COLL_KEY` **仍未包含** `recv`/`orders`/`plans`/`restock`（沿用 v1.6 已知限制），
+    双机同时录单仍可能被整表覆盖，修复需四处一并改
+- 回档方案: 按 `docs/补货闭环进度.md` 第 3 节的「回档锚点」整段删除三段新区块（销售接入 / 补货建议 / 采购单状态回流），
+  并还原 `renderOrders()` 末尾两行、`syncAllOrderRecv()` 末尾的 `syncPlanStatus()`、`init()` 中的 `autoRestockPlan()`、
+  结构测算页 `syncCalc/calcStatText` 与 `#tab-calc` 工具条/页尾文案；`DB.plans/restock/dishAlias` 为可选字段，不删亦可正常运行
+

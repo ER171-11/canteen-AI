@@ -1,0 +1,13 @@
+{
+  "port": 8765,
+  "host": "127.0.0.1",
+  "db_path": "data/餐厅系统.db",
+  "backup_dir": "data/backups",
+  "machine_id": "SHOP",
+  "snapshot_keep_days": 30,
+  "snapshot_keep_count": 200,
+  "serve_static": true,
+  "static_root": ".",
+  "index_file": "熊猫五福餐厅进销存系统_真实数据版.html",
+  "open_browser": true
+}

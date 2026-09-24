@@ -1,0 +1,16 @@
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+/* AI 强调渐变文字（品牌标识 / 登录标题） */
+.ai-gradient-text {
+  background: linear-gradient(135deg, #f48fb1 0%, #9b6bbf 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}

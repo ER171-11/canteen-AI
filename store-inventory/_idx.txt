@@ -1,0 +1,159 @@
+﻿752|function seedDB(){
+840|function mkAdjLog(type,g,dq,inCost,date,ref){
+847|function rebuildStock(){
+885|function mkPoLine(g,q,p){
+888|function mkNo(prefix,date,i){
+906|function apiBase(){try{return (localStorage.getItem(API_BASE_KEY)||'').trim()||DEFAULT_API;}catch(e){return DEFAULT_API;}}
+907|function machineId(){try{return (localStorage.getItem(MACHINE_KEY)||'').trim();}catch(e){return '';}}
+908|function localRev(){try{return +(localStorage.getItem(REV_KEY)||0)||0;}catch(e){return 0;}}
+909|function saveLocal(){try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){console.warn(e);}}
+913|function rkey(coll,r){return coll+':'+(r.id!=null?r.id:(r.seq!=null?r.seq:''));}
+914|function rsig(r){const o={};Object.keys(r).forEach(k=>{if(k!=='_u')o[k]=r[k];});return JSON.stringify(o);}
+915|function stampDB(){
+932|function initStamps(){ /* 首次入库前给存量记录补时间戳，后续合并才有比较基准 */
+937|function resetStampCache(){__HC.clear();}
+941|function setLamp(cls,text){
+945|function renderSyncInfo(){
+966|function saveDB(){stampDB();saveLocal();scheduleSync();}
+967|function loadDB(){
+985|function applyRemote(data){
+1023|function scheduleSync(){clearTimeout(SYNC.timer);SYNC.timer=setTimeout(pushNow,800);}
+1024|function startRetry(){if(SYNC.retry)return;SYNC.retry=setInterval(()=>{if(SYNC.pending>0)pushNow();},30000);}
+1027|function isFreshClient(){
+1099|function recipeLines(did){return DB.rec[did]||[];}
+1100|function dishRecipeCost(did){
+1105|function dishCost(d){const ls=recipeLines(d.id);return ls.length?dishRecipeCost(d.id):(+d.est||0);}
+1106|function dishCostType(d){return recipeLines(d.id).length?'配方':'估算';}
+1107|function calcSaleCost(s){
+1112|function saleReceived(s){return r2(s.payments.reduce((a,b)=>a+(+b.amount||0),0));}
+1113|function saleDebt(s){return r2(s.receivable-saleReceived(s));}
+1114|function recvPaid(po){return r2(po.payments.reduce((a,b)=>a+(+b.amount||0),0));}
+1115|function recvDebt(po){return r2(po.payable-recvPaid(po));}
+1116|function stockValue(){return r2(DB.ings.reduce((a,g)=>a+g.stock*g.avg,0));}
+1117|function lowStocks(){return DB.ings.filter(g=>g.on&&g.stock<g.safe);}
+1121|function go(tab){
+1129|function modal(title,body,footer,wide){
+1141|function toast(msg,bad){
+1148|function confirmDlg(msg,cb){
+1153|function pricePop(g,extraLabel,extraFn){
+1168|function placePop(d){
+1197|function inRange(date,r){if(r==='all')return true;return date>=daysAgo(+r-1);}
+1198|function rangeLabel(r){return r==='all'?'全部时间':('近'+r+'天（'+daysAgo(+r-1)+' 至今）');}
+1205|function salesIn(r){return DB.sales.filter(s=>inRange(s.date,r));}
+1206|function paymentsIn(r){
+1209|function renderDash(){
+1289|function updateBadges(){
+1297|function renderIngCats(){
+1304|function renderIng(){
+1332|function ingForm(g){
+1351|function readIngForm(){
+1360|function openIng(g){
+1375|function delIng(g){
+1387|function renderRecvFilter(){
+1402|function renderRecvKpi(){
+1412|function renderRecv(){
+1440|function docBodyHtml(lines){
+1459|function openDocForm(doc,presetIng,cfg){
+1552|function openRecv(recv,presetIng){
+1559|function openOrder(order){
+1565|function delRecv(recv){
+1572|function renderOrderFilter(){
+1576|function renderOrderKpi(){
+1586|function renderOrders(){
+1607|function delOrder(order){
+1614|function openGet(type,id){
+2172|function dishSalesAgg(d,daysN){
+2179|function renderDishTabs(){
+2183|function renderDish(){
+2215|function openDish(d){
+2234|function delDish(d){
+2241|function recRowsHtml(d,lines){
+2256|function openRecipe(d){
+2311|function parseCsv(text){
+2329|function pick(o){const keys=[].slice.call(arguments,1);for(let i=0;i<keys.length;i++){const v=o[keys[i]];if(v!=null&&String(v).trim()!=='')return String(v).trim();}return '';}
+2330|function numOr(v){const n=parseFloat(String(v==null?'':v).replace(/[^\d.\-]/g,''));return isFinite(n)?n:NaN;}
+2331|function normDate(s){
+2345|function cleanName(s){return String(s==null?'':s).replace(/^[\s\u3000*＊·・]+/,'').replace(/[\s\u3000*＊]+$/,'').trim();}
+2351|function recvQty(recv,order,plain){
+2362|function findIngByName(n){n=String(n||'').trim();return n?DB.ings.find(g=>g.name===n)||null:null;}
+2363|function findDishByName(n){n=String(n||'').trim();return n?DB.dishes.find(d=>d.name===n)||null:null;}
+2365|function createIngFromImport(name,unit,cat){
+2372|function createDishFromImport(name,cat){
+2378|function openNewIngForPo(onOk){
+2409|function sniffFormat(buf){
+2416|function decodeText(buf){
+2425|function looksHtml(t){const s=String(t||'');return /<table[\s>]/i.test(s.slice(0,8000))||/^\s*(<!doctype\s+html|<html)/i.test(s);}
+2426|function xmlUnesc(s){
+2432|function joinTags(s){let out='',m;const re=/<t\b[^>]*>([\s\S]*?)<\/t>/g;while((m=re.exec(s)))out+=xmlUnesc(m[1]);return out;}
+2433|function colIndex(s){if(!s)return -1;let n=0;for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);if(c<65||c>90)return -1;n=n*26+(c-64);}return n-1;}
+2467|function sheetRows(xml,shared){
+2512|function cellText(td){return String(td.textContent||'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim();}
+2513|function parseHtmlTables(html){
+2533|function normHeader(s){
+2536|function findHeaderRow(rows,defs,anyGroups){
+2556|function rowsToObjs(rows,defs,hit){
+2571|function pickTable(src,defs,anyGroups){
+2582|function metaFromText(text){
+2645|function parseRecvTable(src,ov){
+2679|function parseRecTable(src,ov){
+2708|function impDefsOf(kind){return kind==='po'?IMP_PO_DEFS:IMP_REC_DEFS;}
+2709|function impSheets(src){return (src&&src.sheets&&src.sheets.length)?src.sheets:[{name:'数据',rows:(src&&src.rows)||[]}];}
+2710|function colLetter(n){let s='';n=n+1;while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=Math.floor((n-1)/26);}return s;}
+2712|function guessHeaderRow(rows){
+2722|function openColMap(src,kind,warn){
+2787|function readImportFile(file,kind){
+2805|function parseRecvJson(text){
+2826|function previewRecvImport(r,src){
+2885|function commitRecvImport(docs,markPaid){
+2909|function parseRecJson(text){
+2944|function previewRecImport(groups,src){
+2989|function commitRecImport(groups,overwrite){
+3013|function downloadPoTemplate(){
+3019|function downloadRecTemplate(){
+3073|function paramBaseline(){
+3086|function syncCalc(){
+3092|function calcStatText(){
+3098|function calcParamRow(k,label,v,u,pctFlag,step){
+3103|function calcStep(k){
+3108|function buildCalcParams(){
+3118|function calcTypeStats(list){
+3126|function calcModel(){
+3157|function renderCalcKpi(){
+3168|function renderCalcParams(){
+3181|function renderCalcTypes(){
+3224|function calcSortedIdx(){
+3241|function renderCalcTabs(){
+3246|function renderCalcTable(){
+3275|function updateCalcRow(i){
+3285|function updateCalcGroups(){
+3294|function renderCalcCharts(){
+3346|function renderCalcScene(){
+3414|function renderCalcAdvice(){
+3449|function renderCalc(){
+3531|function renderSaleKpi(){
+3544|function renderSale(){
+3573|function saleRowsHtml(lines){
+3587|function openSale(s){
+3666|function delSale(s){
+3678|function quotePerStock(q,g){return q.per==='buy'?q.price/g.conv:q.price;}
+3679|function bestQuote(g){
+3684|function renderPrice(){
+3720|function quoteListHtml(gid){
+3738|function openQuote(gid){
+3784|function openQuoteList(){
+3811|function quoteKeyword(g){
+3818|function exportQuoteTask(){
+3831|function quoteTaskText(){
+3837|function renderPriceTaskTip(){
+3840|function openQuotePlan(){
+3859|function importQuoteResult(file){
+3922|function renderStock(){
+3942|function openCheck(){
+3977|function renderSet(){
+3988|function renderSettleTplForm(){
+4034|function downloadBlob(name,blob){
+4038|function download(name,content,type){
+4042|function csv(rows){return '\ufeff'+rows.map(r=>r.map(v=>{
+4089|function refresh(){
+4107|function migrateV4(){
+4118|function init(keepTab){

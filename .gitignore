@@ -1,0 +1,38 @@
+# 环境变量 / 密钥（绝不入库）
+.env
+bff/.env
+*.env
+!.env.example
+
+# 依赖
+node_modules/
+
+# BFF 运行时数据（审计/队列/快照，不入库）
+bff/data/
+
+# 构建产物
+dist/
+build/
+*.apk
+*.ipa
+apps/android-app/.gradle/
+apps/android-app/**/build/
+kmp-shared/build/
+kmp-shared/.gradle/
+.local/
+
+# Python
+__pycache__/
+*.pyc
+
+# 店内系统运行时（备份/临时文件）
+store-inventory/data/backups/
+store-inventory/_tmp_*
+store-inventory/_p1prof/
+
+# 系统 / 编辑器
+.DS_Store
+*.log
+.idea/
+.vscode/
+餐厅系统.zip

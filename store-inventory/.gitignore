@@ -1,0 +1,21 @@
+# 依赖目录（体积大，不入库）
+node_modules/
+**/node_modules/
+
+# 日志与临时文件
+*.log
+*.tmp
+~$*
+
+# 比价脚本运行产物
+比价脚本/*/output/
+比价脚本/**/*.download/
+
+# IDE / 工具数据
+.codebuddy/
+
+# 运行时数据库（每次操作都会变，二进制不入库）
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

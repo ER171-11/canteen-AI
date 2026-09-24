@@ -1,0 +1,43 @@
+-- POS 并拆单撤销栈（红线：仅存撤销记录，不含业务数据写入）
+CREATE TABLE undo_stack (
+    session_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    op_type TEXT NOT NULL,
+    before TEXT NOT NULL,
+    after TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    reverted INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, seq)
+);
+
+-- 本地待办草稿（AI 预测/建议等未确认内容暂存；确认后走 ConfirmGateway → /api/actions）
+CREATE TABLE draft_todo (
+    id TEXT NOT NULL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0
+);
+
+insertUndo:
+INSERT INTO undo_stack(session_id, seq, op_type, before, after, ts, reverted)
+VALUES (?, ?, ?, ?, ?, ?, 0);
+
+selectPendingBySession:
+SELECT * FROM undo_stack WHERE session_id = ? AND reverted = 0 ORDER BY seq DESC;
+
+markReverted:
+UPDATE undo_stack SET reverted = 1 WHERE session_id = ? AND seq = ?;
+
+clearSession:
+DELETE FROM undo_stack WHERE session_id = ?;
+
+insertDraft:
+INSERT INTO draft_todo(id, kind, payload, created_at, resolved)
+VALUES (?, ?, ?, ?, 0);
+
+selectOpenDrafts:
+SELECT * FROM draft_todo WHERE resolved = 0 ORDER BY created_at DESC;
+
+resolveDraft:
+UPDATE draft_todo SET resolved = 1 WHERE id = ?;
