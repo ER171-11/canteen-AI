@@ -143,6 +143,8 @@ export interface ReportDaily {
   rev?: number | string | null
   generated_at?: string | null
   kitchen?: { workorders_total?: number; workorders_done?: number }
+  /** 保本实况（代理A新增）：无此字段时前端回落 baoben_summary.kpi 静态价盘 */
+  breakeven?: { be_day?: number; today_rev?: number; attain_pct?: number } | null
 }
 
 /** 审批中心动作四态（BFF 实际下发中文状态，渲染层做双语映射） */
@@ -326,10 +328,30 @@ export interface ListResp<T> {
 
 export type RecipesResp = ListResp<RecipeItem>
 
+/** 成本卡 BOM 行（均价口径动态成本） */
+export interface CostCardLine {
+  name: string
+  qty_text?: string
+  line_cost?: number
+  /** 原料已建档且有均价 */
+  matched?: boolean
+}
+
+/** GET /api/kitchen/recipes/{sku} → cost_card（代理A新增，未上线时为 null） */
+export interface CostCard {
+  bom_lines?: CostCardLine[]
+  batch_cost?: number
+  unit_cost?: number
+  price?: number
+  gross_margin?: number
+  missing_ings?: string[]
+}
+
 export interface RecipeDetailResp {
   ok: boolean
   item: RecipeItem
   steps: SopStep[]
+  cost_card?: CostCard | null
 }
 
 export interface WorkorderResp {
@@ -393,6 +415,59 @@ export interface InventoryDoc {
 
 /** data.recv 历史别名：动态字段兼容 Kimi 验货态 */
 export type RecvRecord = InventoryDoc | Record<string, unknown>
+
+/* ---------------- 经营分析（/api/modules/analysis） ---------------- */
+
+/** 保本测算 KPI（静态价盘） */
+export interface BaobenKpi {
+  day_rev?: number
+  day_cost?: number
+  dish_cost_rate?: number
+  all_cost_rate?: number
+  var_rate?: number
+  contribution_margin?: number
+  fixed_month?: number
+  /** 日保本额（元） */
+  be_day?: number
+  /** 保本客流（人/日） */
+  be_guests?: number
+  guests?: number
+  avg_ticket?: number
+  month_rev?: number
+  /** 月利润预测（元） */
+  month_profit?: number
+  /** 安全边际（%） */
+  safety?: number
+  rent?: number
+  labor?: number
+  amort?: number
+}
+
+/** 菜品类型营收/毛利占比（保本价盘口径） */
+export interface BaobenType {
+  k?: string
+  name?: string
+  desc?: string
+  n?: number
+  qty?: number
+  rev?: number
+  cost?: number
+  gp?: number
+  cost_rate?: number
+  rev_share?: number
+  gp_share?: number
+}
+
+/** 菜品矩阵行（四象限） */
+export interface MatrixRow {
+  name: string
+  price?: number
+  volume?: number
+  /** 毛利率 0-1 */
+  margin?: number
+  quadrant?: 'star' | 'puzzle' | 'cow' | 'dog' | string
+  dish_type?: string
+}
 
 /** data.logs 库存流水 */
 export interface StockLogItem {
@@ -597,6 +672,23 @@ export interface FoodsafeResp {
 }
 
 /* 分析模块 GET /api/modules/analysis（与 App/KMP 同源） */
+export interface AnalysisTrendRow {
+  date?: string
+  week?: string
+  revenue?: number
+  orders?: number
+  gross_rate?: number
+}
+export interface BaobenSummary {
+  brand?: string
+  source?: string
+  count?: number
+  params?: Record<string, number>
+  kpi?: BaobenKpi
+  types?: BaobenType[]
+  scenes?: unknown[]
+  advice?: string[]
+}
 export interface AnalysisForecastRestock {
   ingredientId?: string
   name?: string
@@ -619,12 +711,12 @@ export interface AnalysisForecast {
 export interface AnalysisResp {
   ok: boolean
   rev?: number | string
-  trend?: Array<Record<string, unknown>>
+  trend?: AnalysisTrendRow[]
   heatmap?: Array<Record<string, unknown>>
-  matrix?: Array<Record<string, unknown>>
+  matrix?: MatrixRow[]
   efficiency?: Record<string, unknown>
   forecast?: AnalysisForecast | null
-  baoben_summary?: Record<string, unknown> | null
+  baoben_summary?: BaobenSummary | null
   baoben_types?: Array<Record<string, unknown>> | null
   mock?: boolean
   note?: string

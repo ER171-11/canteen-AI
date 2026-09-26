@@ -406,8 +406,8 @@ function applyDailyReport(report) {
             kind === 'restock'
               ? 'restock.create'
               : kind === 'settle'
-                ? 'settlement.approve'
-                : 'boss.confirm';
+                ? 'finance.approve'
+                : 'boss.confirm'; // 通用待办确认：KNOWN_TYPES 无通用确认类型，保留并在批2总结中列明
           const safeText = String(text).replace(/\\/g, '').replace(/'/g, '').slice(0, 80);
           return (
             '<div class="swipe-row"><div class="swipe-act">' +
@@ -592,8 +592,9 @@ function applyInventory(snap) {
           const wrap = document.createElement('div');
           wrap.className = 'swipe-row';
           wrap.innerHTML =
-            `<div class="swipe-act"><button class="act-btn act-yes" onclick='bossConfirmAction("order.confirm",${JSON.stringify({
-              id: no,
+            `<div class="swipe-act"><button class="act-btn act-yes" onclick='bossConfirmAction("order.mark",${JSON.stringify({
+              order_id: no,
+              status: '已发',
             })},"确认采购单")'>确认</button>` +
             `<button class="act-btn act-no" onclick="this.closest('.swipe-row').remove();toast('已忽略')">删除</button></div>` +
             '<div class="swipe-cnt"><div class="po-row" style="border:none">' +

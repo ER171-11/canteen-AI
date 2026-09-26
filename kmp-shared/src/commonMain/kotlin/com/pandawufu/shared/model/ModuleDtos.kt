@@ -216,7 +216,10 @@ data class AnalysisMatrixDto(
     val volume: Double? = null,
     val margin: Double? = null,
     val quadrant: String? = null,
-    @SerialName("dish_type") val dishType: String? = null
+    @SerialName("dish_type") val dishType: String? = null,
+    /** 菜品主数据 id（写动作 dish.price / dish.set_active 用）；BFF 未带时为 null */
+    val id: String? = null,
+    @SerialName("dish_id") val dishId: String? = null
 )
 
 @Serializable

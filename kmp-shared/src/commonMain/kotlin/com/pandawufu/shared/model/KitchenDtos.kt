@@ -180,11 +180,34 @@ data class SopStepDto(
     val params: JsonObject? = null
 )
 
+/** 成本卡 BOM 行（GET /api/kitchen/recipes/{sku} → cost_card.bom_lines） */
+@Serializable
+data class RecipeCostBomLineDto(
+    val name: String? = null,
+    @SerialName("qty_text") val qtyText: String? = null,
+    @SerialName("line_cost") val lineCost: Double? = null,
+    /** 是否匹配到库存/档案价；false 计入 missing_ings */
+    val matched: Boolean? = null
+)
+
+/** 菜谱成本卡（BFF 批2 新增；未部署时整条为 null，UI 不渲染） */
+@Serializable
+data class RecipeCostCardDto(
+    @SerialName("bom_lines") val bomLines: List<RecipeCostBomLineDto> = emptyList(),
+    @SerialName("batch_cost") val batchCost: Double? = null,
+    @SerialName("unit_cost") val unitCost: Double? = null,
+    val price: Double? = null,
+    /** 可能为比率（0.62）或百分数（62），展示侧兜底 */
+    @SerialName("gross_margin") val grossMargin: Double? = null,
+    @SerialName("missing_ings") val missingIngs: List<String> = emptyList()
+)
+
 @Serializable
 data class RecipeDetailResponse(
     val ok: Boolean = false,
     val item: RecipeDto? = null,
     val steps: List<SopStepDto> = emptyList(),
+    @SerialName("cost_card") val costCard: RecipeCostCardDto? = null,
     val rev: JsonElement? = null
 ) {
     fun revText(): String = rev.asRevText()

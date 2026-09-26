@@ -13,6 +13,7 @@ const RULES: Record<Role, (path: string) => boolean> = {
     path === '/platform/org' ||
     path === '/dashboard' ||
     path === '/ops/analysis' ||
+    path === '/ops/weekly' ||
     path === '/inventory/loss',
   厨房: (path) =>
     path.startsWith('/kitchen') ||
@@ -24,7 +25,8 @@ const RULES: Record<Role, (path: string) => boolean> = {
     path.startsWith('/member') ||
     path === '/platform/actions' ||
     path === '/dashboard' ||
-    path === '/ops/analysis',
+    path === '/ops/analysis' ||
+    path === '/ops/weekly',
   只读: () => true,
 }
 

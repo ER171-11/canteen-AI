@@ -8,6 +8,7 @@ import com.pandawufu.shared.model.BoardTakeoutDto
 import com.pandawufu.shared.model.KitchenDemandDto
 import com.pandawufu.shared.model.PosTableDto
 import com.pandawufu.shared.model.QcRecordDto
+import com.pandawufu.shared.model.RecipeCostCardDto
 import com.pandawufu.shared.model.RecipeDto
 import com.pandawufu.shared.model.SopStepDto
 import com.pandawufu.shared.model.WorkorderDto
@@ -55,6 +56,8 @@ class KitchenViewModel(
         val baobenSummary: BaobenSummaryDto? = null,
         val selectedRecipe: RecipeDto? = null,
         val selectedSteps: List<SopStepDto> = emptyList(),
+        /** 菜谱成本卡（BFF 未部署 cost_card 时为 null，UI 不渲染） */
+        val selectedCostCard: RecipeCostCardDto? = null,
         val detailLoading: Boolean = false,
         /** 菜谱换算：下剂个数（默认一批 ≈67 个，非堂食「份」） */
         val scaleQty: Int = 67,
@@ -105,7 +108,7 @@ class KitchenViewModel(
             is KitchenIntent.SelectRecipe -> selectRecipe(intent.skuId)
             KitchenIntent.CloseRecipe ->
                 _state.update {
-                    it.copy(selectedRecipe = null, selectedSteps = emptyList(), scaleQty = 67)
+                    it.copy(selectedRecipe = null, selectedSteps = emptyList(), selectedCostCard = null, scaleQty = 67)
                 }
             is KitchenIntent.SetScaleQty ->
                 _state.update { it.copy(scaleQty = intent.qty.coerceIn(1, 2000)) }
@@ -207,6 +210,7 @@ class KitchenViewModel(
                         detailLoading = false,
                         selectedRecipe = item,
                         selectedSteps = resp.steps,
+                        selectedCostCard = resp.costCard,
                         highlightSkuId = skuId,
                         scaleQty = if (resetScaleToBatch) batch else it.scaleQty.coerceIn(1, 2000),
                         error = null

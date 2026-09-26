@@ -212,10 +212,17 @@ async function handle(req, res, ctx, pathname) {
       return true;
     }
     const stepsSku = found.item.sku_id;
+    // BOM 成本卡（只读）：ings.avg × config.ing_alias，口径见 lib/recipe_cost.js
+    let costCard = null;
+    try {
+      const { buildCostCard } = require('../lib/recipe_cost');
+      costCard = buildCostCard(found.item, (snap && snap.data) || {});
+    } catch (e) { costCard = null; }
     ctx.sendJSON(res, 200, {
       ok: true,
       rev,
       item: found.item,
+      cost_card: costCard,
       steps: stepsFor(ext, stepsSku),
       source: found.item.source || found.meta.source,
       ...soft

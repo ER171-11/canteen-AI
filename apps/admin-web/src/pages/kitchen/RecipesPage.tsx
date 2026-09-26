@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -13,13 +14,14 @@ import {
   Select,
   Space,
   Switch,
+  Table,
   Tag,
   Timeline,
   Typography,
   message,
 } from 'antd'
-import { fetchKitchenRecipes, fetchSnapshot, submitConfirmedAction } from '../../api'
-import type { RecipeItem } from '../../api/types'
+import { fetchAdminDishes, fetchKitchenRecipe, fetchKitchenRecipes, fetchSnapshot, submitConfirmedAction } from '../../api'
+import type { CostCard, Dish, RecipeItem } from '../../api/types'
 import ColorBadge from './components/ColorBadge'
 import BomTable from './components/BomTable'
 import MockAlert from './components/MockAlert'
@@ -55,6 +57,9 @@ export default function RecipesPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<RecipeItem | null>(null)
+  const [costCard, setCostCard] = useState<CostCard | null>(null)
+  const [costCardMiss, setCostCardMiss] = useState(false)
+  const [dishes, setDishes] = useState<Dish[]>([])
   const [form] = Form.useForm()
 
   const load = useCallback(() => {
@@ -80,12 +85,36 @@ export default function RecipesPage() {
         )
       })
       .catch(() => setIngs([]))
+    fetchAdminDishes()
+      .then((resp) => setDishes(resp.items ?? []))
+      .catch(() => setDishes([]))
   }, [selectedId])
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /* 选中配方后拉取成本卡（cost_card 未上线时回落静态价盘） */
+  useEffect(() => {
+    if (!selectedId || isMock) {
+      setCostCard(null)
+      setCostCardMiss(false)
+      return
+    }
+    setCostCardMiss(false)
+    fetchKitchenRecipe(selectedId)
+      .then((resp) => {
+        setCostCard(resp.cost_card ?? null)
+        setCostCardMiss(!resp.cost_card)
+      })
+      .catch(() => {
+        setCostCard(null)
+        setCostCardMiss(true)
+      })
+  }, [selectedId, isMock])
+
+  const selected = items.find((r) => r.sku_id === selectedId) ?? null
 
   const grouped = useMemo(() => {
     const map = new Map<string, RecipeItem[]>()
@@ -102,7 +131,19 @@ export default function RecipesPage() {
     return keys.map((k) => ({ color: k, list: map.get(k)! }))
   }, [items])
 
-  const selected = items.find((r) => r.sku_id === selectedId) ?? null
+  /** 静态价盘：按 sku_id/名称匹配菜品库 */
+  const staticDish = useMemo(() => {
+    if (!selected) return null
+    const bySku = dishes.find(
+      (d) => String((d as Dish & { sku_id?: string }).sku_id || '') === selected.sku_id,
+    )
+    if (bySku) return bySku
+    return (
+      dishes.find((d) => d.name === selected.name) ??
+      dishes.find((d) => d.name && selected.name.includes(d.name)) ??
+      null
+    )
+  }, [dishes, selected])
 
   const openEdit = (r: RecipeItem | null) => {
     setEditing(r)
@@ -211,6 +252,122 @@ export default function RecipesPage() {
                 <div className="ai-gradient-text" style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>
                   寓意 · {selected.blessing}
                 </div>
+              )}
+
+              <Typography.Title level={5}>
+                成本卡
+                {costCard ? (
+                  <Tag color={COLORS.green} style={{ marginLeft: 8 }}>
+                    动态均价
+                  </Tag>
+                ) : (
+                  <Tag color={COLORS.yellow} style={{ marginLeft: 8 }}>
+                    静态价盘
+                  </Tag>
+                )}
+              </Typography.Title>
+              {costCardMiss && !costCard && (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="成本卡接口未下发 cost_card（BFF 待上线），以下展示菜品库静态价盘"
+                />
+              )}
+              {costCard || staticDish ? (
+                <Row gutter={16} style={{ marginBottom: 8 }}>
+                  {costCard && (
+                    <Col xs={24} md={12}>
+                      <Descriptions
+                        bordered
+                        size="small"
+                        column={2}
+                        title={<span style={{ fontSize: 13 }}>动态成本（进销存均价）</span>}
+                      >
+                        <Descriptions.Item label="批成本">
+                          {costCard.batch_cost != null ? `¥${Number(costCard.batch_cost).toFixed(2)}` : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="份成本">
+                          {costCard.unit_cost != null ? `¥${Number(costCard.unit_cost).toFixed(2)}` : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="售价">
+                          {costCard.price != null ? `¥${Number(costCard.price).toFixed(2)}` : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="毛利率">
+                          {costCard.gross_margin != null
+                            ? `${(Number(costCard.gross_margin) * 100).toFixed(1)}%`
+                            : '-'}
+                        </Descriptions.Item>
+                      </Descriptions>
+                    </Col>
+                  )}
+                  {staticDish && (
+                    <Col xs={24} md={costCard ? 12 : 24}>
+                      <Descriptions
+                        bordered
+                        size="small"
+                        column={2}
+                        title={<span style={{ fontSize: 13 }}>静态价盘（菜品库）</span>}
+                      >
+                        <Descriptions.Item label="成本估">
+                          {staticDish.est != null ? `¥${Number(staticDish.est).toFixed(2)}` : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="售价">
+                          {staticDish.price != null ? `¥${Number(staticDish.price).toFixed(2)}` : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="毛利率">
+                          {staticDish.price
+                            ? `${(((Number(staticDish.price) - Number(staticDish.est ?? 0)) / Number(staticDish.price)) * 100).toFixed(1)}%`
+                            : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="状态">
+                          {staticDish.on ? '上架中' : '已下架'}
+                        </Descriptions.Item>
+                      </Descriptions>
+                    </Col>
+                  )}
+                </Row>
+              ) : (
+                <Typography.Text type="secondary">暂无成本数据</Typography.Text>
+              )}
+              {costCard && (costCard.missing_ings?.length ?? 0) > 0 && (
+                <Alert
+                  type="error"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message={`${costCard.missing_ings!.length} 项原料未建档/无均价：${costCard.missing_ings!.join('、')}`}
+                />
+              )}
+              {costCard && (costCard.bom_lines?.length ?? 0) > 0 && (
+                <Table
+                  size="small"
+                  rowKey={(r, i) => `${r.name}-${i}`}
+                  dataSource={costCard.bom_lines}
+                  pagination={false}
+                  style={{ marginBottom: 16 }}
+                  columns={[
+                    { title: '原料', dataIndex: 'name' },
+                    { title: '用量', dataIndex: 'qty_text', width: 140, render: (v) => v ?? '-' },
+                    {
+                      title: '行成本',
+                      dataIndex: 'line_cost',
+                      width: 100,
+                      align: 'right',
+                      render: (v) => (v != null ? `¥${Number(v).toFixed(2)}` : '-'),
+                    },
+                    {
+                      title: '均价',
+                      dataIndex: 'matched',
+                      width: 110,
+                      render: (v: boolean | undefined) =>
+                        v ? (
+                          <Tag color={COLORS.green}>已匹配</Tag>
+                        ) : (
+                          <Tag color={COLORS.red}>未建档/无均价</Tag>
+                        ),
+                    },
+                  ]}
+                />
               )}
 
               <Typography.Title level={5}>面皮（色源）face_main</Typography.Title>

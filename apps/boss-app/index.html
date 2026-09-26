@@ -231,10 +231,10 @@
 
         <div class="sub-page" id="inv-po">
           <div class="card">
-            <div class="card-h"><div class="ttl"><i class="em"></i>采购单</div><button class="pbtn" onclick="openSheet('confirm',{kind:'generic',title:'新建采购单',desc:'手工创建采购单草稿，可引用补货建议一键带入',actionType:'po.create',confirmLabel:'创建草稿'})">+ 新建</button></div>
-            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('order.confirm',{from:'swipe'},'确认采购单')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="po-row" style="border:none"><div style="flex:1"><div class="no">PO-0924-01</div><div class="dt">张记调料 · 草稿</div></div><span class="tag warn">待发</span><div class="am">¥384</div></div></div></div>
-            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('order.confirm',{from:'swipe'},'确认采购单')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="po-row" style="border:none"><div style="flex:1"><div class="no">PO-0923-02</div><div class="dt">海南菜篮子 · 已发</div></div><span class="tag ok">已发</span><div class="am">¥1,260</div></div></div></div>
-            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('order.confirm',{from:'swipe'},'确认采购单')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="po-row" style="border:none"><div style="flex:1"><div class="no">PO-0922-05</div><div class="dt">张记 · 已收货</div></div><span class="tag ok">已收</span><div class="am">¥520</div></div></div></div>
+            <div class="card-h"><div class="ttl"><i class="em"></i>采购单</div><button class="pbtn" onclick="openSheet('confirm',{kind:'generic',title:'新建采购单',desc:'手工创建采购单草稿，可引用补货建议一键带入',actionType:'restock.create',actionPayload:{supplier:'未指定供应商',note:'手工建单草稿（待补明细）',items:[{name:'待定原料',qty:1}]},confirmLabel:'创建草稿'})">+ 新建</button></div>
+            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('order.mark',{from:'swipe',order_id:'PO-0924-01',status:'已发'},'确认采购单')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="po-row" style="border:none"><div style="flex:1"><div class="no">PO-0924-01</div><div class="dt">张记调料 · 草稿</div></div><span class="tag warn">待发</span><div class="am">¥384</div></div></div></div>
+            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('order.mark',{from:'swipe',order_id:'PO-0923-02',status:'已发'},'确认采购单')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="po-row" style="border:none"><div style="flex:1"><div class="no">PO-0923-02</div><div class="dt">海南菜篮子 · 已发</div></div><span class="tag ok">已发</span><div class="am">¥1,260</div></div></div></div>
+            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('order.mark',{from:'swipe',order_id:'PO-0922-05',status:'已发'},'确认采购单')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="po-row" style="border:none"><div style="flex:1"><div class="no">PO-0922-05</div><div class="dt">张记 · 已收货</div></div><span class="tag ok">已收</span><div class="am">¥520</div></div></div></div>
           </div>
         </div>
 
@@ -313,7 +313,7 @@
               <div class="calc-line"><span>预估总成本</span><span class="g">¥ 1,710</span></div>
             </div>
             <div class="note" style="margin-top:8px">⚠ 色源锁定：红色必须火龙果，不可替换；辅料荸荠不足时 AI 仅建议调量并备注影响。</div>
-            <div class="chip-row" style="margin-top:8px"><span class="chip act" onclick="openSheet('confirm',{kind:'generic',title:'转采购清单',desc:'将本次换算用量（500 份红饺）生成采购清单草稿，与现有库存冲抵后列缺口',actionType:'kitchen.recipe2po',confirmLabel:'生成采购清单'})">转采购清单</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'转厨房工单',desc:'将本次换算用量生成厨房工单，含面/馅分批与醒发计时',actionType:'kitchen.recipe2wo',confirmLabel:'生成工单'})">转厨房工单</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'缺料替换',desc:'色源锁定：红色火龙果汁不可替换；辅料荸荠不足时仅建议调量并备注影响',actionType:'kitchen.substitute',confirmLabel:'提交替换申请'})">缺料替换</span></div>
+            <div class="chip-row" style="margin-top:8px"><span class="chip act" onclick="openSheet('confirm',{kind:'generic',title:'转采购清单',desc:'将本次换算用量（500 份红饺）生成采购清单草稿，与现有库存冲抵后列缺口',actionType:'restock.create',actionPayload:{supplier:'菜谱换算',note:'菜谱转采购清单草稿（待补明细）',items:[{name:'待定原料',qty:1}]},confirmLabel:'生成采购清单'})">转采购清单</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'转厨房工单',desc:'将本次换算用量生成厨房工单，含面/馅分批与醒发计时',actionType:'workorder.create',actionPayload:{note:'菜谱换算转厨房工单'},confirmLabel:'生成工单'})">转厨房工单</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'缺料替换',desc:'色源锁定：红色火龙果汁不可替换；辅料荸荠不足时仅建议调量并备注影响',actionType:'recipe.substitute',confirmLabel:'提交替换申请'})">缺料替换</span></div>
           </div>
         </div>
 
@@ -423,7 +423,7 @@
 
       <!-- ============ 模块 1：经营分析 ============ -->
       <section class="screen-body hide" id="p-m-analysis">
-        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">经营分析</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'导出周报',desc:'导出本周经营周报（营收/毛利/矩阵/人效），只读输出层不写 DB',actionType:'report.export',confirmLabel:'导出周报'})">导出周报</div></div>
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">经营分析</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'导出周报',desc:'导出本周经营周报（营收/毛利/矩阵/人效），只读输出层不写 DB',actionType:'analysis.export_week',confirmLabel:'导出周报'})">导出周报</div></div>
         <div class="pill-grp" id="an-pills"><div class="pill on" data-sp="an-trend">趋势</div><div class="pill" data-sp="an-heat">时段</div><div class="pill" data-sp="an-mx">菜单矩阵</div><div class="pill" data-sp="an-eff">效率</div><div class="pill" data-sp="an-fcst">AI 销量预测</div></div>
 
         <div class="sub-page on" id="an-trend">
@@ -584,7 +584,7 @@
 
       <!-- ============ 模块 2：排班员工 ============ -->
       <section class="screen-body hide" id="p-m-staff">
-        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">排班员工</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增排班',desc:'选择员工与班次（A 早 / B 中 / C 晚）后生成排班草稿，店长确认后生效',actionType:'staff.schedule',confirmLabel:'生成排班草稿'})">+ 排班</div></div>
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">排班员工</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增排班',desc:'选择员工与班次（A 早 / B 中 / C 晚）后生成排班草稿，店长确认后生效',actionType:'staff.shift_upsert',confirmLabel:'生成排班草稿'})">+ 排班</div></div>
         <div class="pill-grp" id="st-pills"><div class="pill on" data-sp="st-sched">排班</div><div class="pill" data-sp="st-clock">打卡</div><div class="pill" data-sp="st-perf">绩效</div><div class="pill" data-sp="st-train">培训</div></div>
 
         <div class="sub-page on" id="st-sched">
@@ -673,7 +673,7 @@
 
       <!-- ============ 模块 3：会员营销 ============ -->
       <section class="screen-body hide" id="p-m-vip">
-        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">会员营销</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'发放优惠券',desc:'选择券模板与目标会员分组后发放，企微自动触达',actionType:'vip.coupon',confirmLabel:'发券'})">+ 发券</div></div>
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">会员营销</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'发放优惠券',desc:'选择券模板与目标会员分组后发放，企微自动触达',actionType:'vip.campaign',actionPayload:{type:'活动',note:'券模板发放（企微触达）'},confirmLabel:'发券'})">+ 发券</div></div>
         <div class="pill-grp" id="vip-pills"><div class="pill on" data-sp="vip-overview">概览</div><div class="pill" data-sp="vip-balance">储值</div><div class="pill" data-sp="vip-coupon">优惠券</div><div class="pill" data-sp="vip-birthday">生日</div></div>
 
         <div class="sub-page on" id="vip-overview">
@@ -852,15 +852,15 @@
           <div class="card">
             <div class="card-h"><div class="ttl"><i class="em"></i>差评回复</div></div>
             <div class="note">用户评价："等了快20分钟，下次不来了。"</div>
-            <div class="ask-bar" style="margin-top:8px"><div class="ask"><input placeholder="输入回复…"><button class="send" onclick="bossConfirmAction('review.reply',{from:'takeout'},'已提交回复')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
-            <div class="chip-row" style="margin-top:8px"><span class="chip act" onclick="openSheet('confirm',{kind:'generic',title:'差评回复 · 致歉+红包',desc:'策略：公开致歉 + 私信补偿红包 ¥10，24h 内跟进回访',actionType:'review.reply',actionPayload:{strategy:'apology_redpack'},confirmLabel:'提交回复'})">致歉+红包</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'差评回复 · 邀复购',desc:'策略：致歉 + 赠 8 折复购券（7 天有效），邀再次到店体验',actionType:'review.reply',actionPayload:{strategy:'repurchase'},confirmLabel:'提交回复'})">邀复购</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'差评回复 · 升级投诉',desc:'策略：升级店长专线处理，2h 内电话回访并记录工单',actionType:'review.reply',actionPayload:{strategy:'escalate'},confirmLabel:'升级处理'})">升级投诉</span></div>
+            <div class="ask-bar" style="margin-top:8px"><div class="ask"><input placeholder="输入回复…"><button class="send" onclick="bossConfirmAction('review.followup',{from:'takeout'},'已提交回复')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
+            <div class="chip-row" style="margin-top:8px"><span class="chip act" onclick="openSheet('confirm',{kind:'generic',title:'差评回复 · 致歉+红包',desc:'策略：公开致歉 + 私信补偿红包 ¥10，24h 内跟进回访',actionType:'review.followup',actionPayload:{strategy:'apology_redpack'},confirmLabel:'提交回复'})">致歉+红包</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'差评回复 · 邀复购',desc:'策略：致歉 + 赠 8 折复购券（7 天有效），邀再次到店体验',actionType:'review.followup',actionPayload:{strategy:'repurchase'},confirmLabel:'提交回复'})">邀复购</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'差评回复 · 升级投诉',desc:'策略：升级店长专线处理，2h 内电话回访并记录工单',actionType:'review.followup',actionPayload:{strategy:'escalate'},confirmLabel:'升级处理'})">升级投诉</span></div>
           </div>
         </div>
       </section>
 
       <!-- ============ 模块 6：预订排队 ============ -->
       <section class="screen-body hide" id="p-m-booking">
-        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">预订排队</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增预订',desc:'录入时段 / 人数 / 电话后生成预订单，到店自动叫号关联',actionType:'booking.create',confirmLabel:'创建预订'})">+ 预订</div></div>
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">预订排队</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增预订',desc:'录入时段 / 人数 / 电话后生成预订单，到店自动叫号关联',actionType:'booking.upsert',confirmLabel:'创建预订'})">+ 预订</div></div>
         <div class="pill-grp" id="bk-pills"><div class="pill on" data-sp="bk-today">今日预订</div><div class="pill" data-sp="bk-queue">排队叫号</div><div class="pill" data-sp="bk-turn">翻台预估</div></div>
 
         <div class="sub-page on" id="bk-today">
@@ -912,7 +912,7 @@
 
       <!-- ============ 模块 7：食安证照 ============ -->
       <section class="screen-body hide" id="p-m-foodsafe">
-        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">食安证照</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增留样',desc:'登记菜品 / 克重 / 留样时间，48h 到期自动提醒',actionType:'foodsafe.sample',confirmLabel:'登记留样'})">+ 留样</div></div>
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">食安证照</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增留样',desc:'登记菜品 / 克重 / 留样时间，48h 到期自动提醒',actionType:'sample.log',confirmLabel:'登记留样'})">+ 留样</div></div>
         <div class="pill-grp" id="fs-pills"><div class="pill on" data-sp="fs-cert">证照</div><div class="pill" data-sp="fs-trace">溯源</div><div class="pill" data-sp="fs-sample">留样</div><div class="pill" data-sp="fs-disinfect">消毒</div></div>
 
         <div class="sub-page on" id="fs-cert">
@@ -976,7 +976,7 @@
 
       <!-- ============ 模块 8：设备能耗 ============ -->
       <section class="screen-body hide" id="p-m-equipment">
-        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">设备能耗</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'设备报修',desc:'选择设备与故障描述，生成维修工单并通知维保商',actionType:'equipment.repair',confirmLabel:'提交报修'})">+ 报修</div></div>
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">设备能耗</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'设备报修',desc:'选择设备与故障描述，生成维修工单并通知维保商',actionType:'equipment.maintain',actionPayload:{kind:'维修'},confirmLabel:'提交报修'})">+ 报修</div></div>
         <div class="pill-grp" id="eq-pills"><div class="pill on" data-sp="eq-temp">温度</div><div class="pill" data-sp="eq-energy">能耗</div><div class="pill" data-sp="eq-maintain">维保</div></div>
 
         <div class="sub-page on" id="eq-temp">
@@ -1023,7 +1023,7 @@
 
       <!-- ============ 模块 9：财务税务 ============ -->
       <section class="screen-body hide" id="p-m-finance">
-        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">财务税务</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'手动入账',desc:'录入收支条目（金额 / 类别 / 凭证），进入财务待审队列后入账',actionType:'finance.entry',confirmLabel:'提交入账'})">+ 入账</div></div>
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">财务税务</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'手动入账',desc:'录入收支条目（金额 / 类别 / 凭证），进入财务待审队列后入账',actionType:'finance.recon',actionPayload:{note:'手动入账（老板端原型）'},confirmLabel:'提交入账'})">+ 入账</div></div>
         <div class="pill-grp" id="fin-pills"><div class="pill on" data-sp="fin-invoice">发票</div><div class="pill" data-sp="fin-tax">税务</div><div class="pill" data-sp="fin-cash">现金流</div><div class="pill" data-sp="fin-split">分账</div></div>
 
         <div class="sub-page on" id="fin-invoice">
@@ -1096,7 +1096,7 @@
 
       <!-- ============ 模块 10：供应链 ============ -->
       <section class="screen-body hide" id="p-m-supply">
-        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">供应链</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'发起询价',desc:'选择原料向已建档供应商群发询价，回报后自动比价',actionType:'supply.inquiry',confirmLabel:'发起询价'})">+ 询价</div></div>
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">供应链</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'发起询价',desc:'选择原料向已建档供应商群发询价，回报后自动比价',actionType:'quote.upsert',confirmLabel:'发起询价'})">+ 询价</div></div>
         <div class="pill-grp" id="sup-pills"><div class="pill on" data-sp="sup-vendor">供应商</div><div class="pill" data-sp="sup-compare">比价</div><div class="pill" data-sp="sup-account">账期</div></div>
 
         <div class="sub-page on" id="sup-vendor">
@@ -1143,7 +1143,7 @@
 
       <!-- ============ 模块 11：顾客口碑 ============ -->
       <section class="screen-body hide" id="p-m-review">
-        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">顾客口碑</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'回复评价',desc:'选择平台评价并提交回复，差评优先 24h 内处理',actionType:'review.reply',confirmLabel:'提交回复'})">+ 回复</div></div>
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">顾客口碑</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'回复评价',desc:'选择平台评价并提交回复，差评优先 24h 内处理',actionType:'review.followup',confirmLabel:'提交回复'})">+ 回复</div></div>
         <div class="pill-grp" id="rv-pills"><div class="pill on" data-sp="rv-score">评分</div><div class="pill" data-sp="rv-improve">差评改进</div><div class="pill" data-sp="rv-good">好评语录</div></div>
 
         <div class="sub-page on" id="rv-score">
@@ -1225,7 +1225,7 @@
           </div>
           <div class="card">
             <div class="card-h"><div class="ttl"><i class="em"></i>报损单审批</div><span class="badge">1</span></div>
-            <div class="rc-row"><div class="info"><div class="ti">墨鱼汁 · 过期 200g</div><div class="ds">原因：冷藏超温 · 金额 ¥86</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'generic',title:'报损审批 · 墨鱼汁',desc:'过期 200g · 原因：冷藏超温 · 金额 ¥86，审批后计入本月损耗',actionType:'loss.approve',confirmLabel:'审批通过'})">审批</button></div>
+            <div class="rc-row"><div class="info"><div class="ti">墨鱼汁 · 过期 200g</div><div class="ds">原因：冷藏超温 · 金额 ¥86</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'generic',title:'报损审批 · 墨鱼汁',desc:'过期 200g · 原因：冷藏超温 · 金额 ¥86，审批后计入本月损耗',actionType:'loss.report',actionPayload:{name:'墨鱼汁',qty:0.2,amount:86,reason:'过期·冷藏超温'},confirmLabel:'审批通过'})">审批</button></div>
             <div class="rc-row"><div class="info"><div class="ti">蔬菜 · 萎蔫 1.2kg</div><div class="ds">原因：未及时使用 · 金额 ¥24</div></div><span class="tag ok">已审批</span></div>
           </div>
         </div>

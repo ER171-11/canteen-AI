@@ -35,6 +35,7 @@ export const MENU: MenuGroup[] = [
     children: [
       { path: '/dashboard', title: '经营看板' },
       { path: '/ops/analysis', title: '经营分析' },
+      { path: '/ops/weekly', title: '经营周报' },
     ],
   },
   {

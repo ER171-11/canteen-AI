@@ -61,7 +61,7 @@ function salesTs(r) {
 }
 
 // 真实聚合：trend 按日、heatmap 时段×星期、matrix 波士顿象限、efficiency 效率
-function realAnalysis(snap) {
+function realAnalysis(snap, paramOverrides) {
   const data = snap.data || {};
   const sales = arr(data.sales);
 
@@ -93,28 +93,103 @@ function realAnalysis(snap) {
     return { hour: c.hour, weekday: c.weekday, orders: c.orders, revenue: +c.revenue.toFixed(2) };
   }).sort((a, b) => a.weekday - b.weekday || a.hour - b.hour);
 
-  // 波士顿矩阵：优先用保本价盘（日销量×毛利率），否则回落 dishes
+  // 波士顿矩阵：volume 用真销量（近 7 日，dishAlias/sku_id/菜名聚合），
+  // 无匹配回落保本 daily_qty，再回落 est；margin 优先 recipe_cost 真成本毛利率
   let dishes = [];
   let baobenSummary = null;
   try {
     const { mergeDishesWithBaoben, computeBaobenSummary } = require('../lib/menu_baoben');
-    baobenSummary = computeBaobenSummary();
+    baobenSummary = computeBaobenSummary(paramOverrides);
     const merged = mergeDishesWithBaoben(arr(data.dishes));
+
+    // 近 7 日真销量聚合：sales.dish(短名) → dishAlias → 菜品 id → 份数
+    const alias = (data.dishAlias && typeof data.dishAlias === 'object') ? data.dishAlias : {};
+    const dishById = {};
+    const dishByName = {};
+    const dishBySku = {};
+    for (const d of arr(data.dishes)) {
+      if (!d) continue;
+      if (d.id != null) dishById[String(d.id)] = d;
+      if (d.name) dishByName[String(d.name)] = d;
+      if (d.sku_id != null && !dishBySku[String(d.sku_id)]) dishBySku[String(d.sku_id)] = d;
+    }
+    const cleanKey = (s) => String(s == null ? '' : s)
+      .replace(/^[　 *＊·・]+/, '').replace(/[　 *＊]+$/, '').trim();
+    const fromDay = (() => {
+      const d = new Date(Date.now() - 6 * 86400000);
+      const p = (n) => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    })();
+    const volMap = {};
+    for (const r of sales) {
+      const m = salesTs(r).match(/^(\d{4}-\d{2}-\d{2})/);
+      if (!m || m[1] < fromDay) continue;
+      const addQty = (dishId, q) => {
+        if (!dishId || !(q > 0)) return;
+        volMap[dishId] = (volMap[dishId] || 0) + q;
+      };
+      if (Array.isArray(r.lines) && r.lines.length) {
+        for (const l of r.lines) addQty(String(l && l.dish), num(l && l.qty));
+        continue;
+      }
+      const nm = String((r && r.dish) || '');
+      const a = alias[cleanKey(nm)];
+      const byNm = dishByName[nm];
+      const dishId = (a && a.dish) || (byNm && byNm.id) || null;
+      addQty(dishId ? String(dishId) : null, num(r && r.qty));
+    }
+
+    // sku → 快照配方（算真成本毛利率用）
+    const extRecipes = {};
+    for (const rcp of arr(extOf(snap).recipes)) {
+      if (rcp && rcp.sku_id != null) extRecipes[String(rcp.sku_id)] = rcp;
+    }
+    let costLib = null;
+    try { costLib = require('../lib/recipe_cost'); } catch (e) { costLib = null; }
+
     dishes = merged.dishes.map((d) => {
-      const volume = num(d && (d.est != null ? d.est : (d.qty != null ? d.qty : d.sales)));
+      // volume：真销量（近7日份数）→ 保本日销 → est
+      const realVol = d && d.id != null ? volMap[String(d.id)] : null;
+      const volume = realVol != null ? +realVol.toFixed(2)
+        : (d && d.daily_qty != null ? num(d.daily_qty)
+          : num(d && (d.est != null ? d.est : (d.qty != null ? d.qty : d.sales))));
+      // margin：recipe_cost 真成本毛利率（0-1）→ 保本/店内静态值
       let margin = null;
-      if (d && d.gross_margin != null) margin = num(d.gross_margin);
-      else if (d && d.margin != null) margin = num(d.margin);
-      else if (d && d.price != null && d.cost != null && num(d.price) > 0) {
-        margin = 1 - num(d.cost) / num(d.price);
-      } else if (d && d.q != null && num(d.q) <= 1) {
-        margin = num(d.q); // 仅当 q 像比率时
-      } else {
-        margin = 0;
+      const sku = d && d.sku_id != null ? String(d.sku_id) : null;
+      if (costLib && sku && extRecipes[sku]) {
+        try {
+          const card = costLib.buildCostCard(extRecipes[sku], data);
+          if (card && card.gross_margin != null) margin = card.gross_margin / 100;
+        } catch (e) { /* 回落静态 */ }
+      }
+      if (margin == null) {
+        if (d && d.gross_margin != null) margin = num(d.gross_margin);
+        else if (d && d.margin != null) margin = num(d.margin);
+        else if (d && d.price != null && d.cost != null && num(d.price) > 0) {
+          margin = 1 - num(d.cost) / num(d.price);
+        } else if (d && d.q != null && num(d.q) <= 1) {
+          margin = num(d.q); // 仅当 q 像比率时
+        } else {
+          margin = 0;
+        }
       }
       if (margin > 1) margin = margin / 100;
+      // 解析 docs.data 真实菜品 id（下架 dish.set_active 要用）：
+      // 店内菜品自带 id → 菜名精确 → dishAlias → sku_id 反查；保本独有行为 null
+      const rowName = (d && (d.name || d.sku || d.sku_id)) || '未命名';
+      let realDish = null;
+      if (d && d.id != null && dishById[String(d.id)]) realDish = dishById[String(d.id)];
+      if (!realDish && d && d.name && dishByName[String(d.name)]) realDish = dishByName[String(d.name)];
+      if (!realDish && d && d.name) {
+        const a = alias[cleanKey(String(d.name))];
+        if (a && a.dish != null && dishById[String(a.dish)]) realDish = dishById[String(a.dish)];
+      }
+      if (!realDish && sku && dishBySku[sku]) realDish = dishBySku[sku];
+      const realDishId = realDish && realDish.id != null ? String(realDish.id) : null;
       return {
-        name: (d && (d.name || d.sku || d.sku_id)) || '未命名',
+        id: realDishId,
+        dish_id: realDishId,
+        name: rowName,
         price: d && d.price != null ? num(d.price) : null,
         volume,
         margin,
@@ -125,7 +200,10 @@ function realAnalysis(snap) {
     dishes = arr(data.dishes).map((d) => {
       const volume = num(d && (d.est != null ? d.est : (d.qty != null ? d.qty : d.sales)));
       const margin = num(d && (d.q != null ? d.q : (d.margin != null ? d.margin : d.gross)));
+      const fbId = d && d.id != null ? String(d.id) : null;
       return {
+        id: fbId,
+        dish_id: fbId,
         name: (d && (d.name || d.sku || d.sku_id)) || '未命名',
         price: d && d.price != null ? num(d.price) : null,
         volume,
@@ -133,13 +211,22 @@ function realAnalysis(snap) {
       };
     });
   }
-  const avgV = dishes.length ? dishes.reduce((s, d) => s + d.volume, 0) / dishes.length : 0;
-  const avgM = dishes.length ? dishes.reduce((s, d) => s + d.margin, 0) / dishes.length : 0;
+  // 分象限基线：中位数（抗长尾，比均值更稳）
+  const medianOf = (xs) => {
+    const ys = xs.filter((x) => isFinite(x)).slice().sort((a, b) => a - b);
+    if (!ys.length) return 0;
+    const mid = Math.floor(ys.length / 2);
+    return ys.length % 2 ? ys[mid] : (ys[mid - 1] + ys[mid]) / 2;
+  };
+  const avgV = medianOf(dishes.map((d) => d.volume));
+  const avgM = medianOf(dishes.map((d) => d.margin));
   const matrix = dishes.map((d) => {
     const hiV = d.volume >= avgV;
     const hiM = d.margin >= avgM;
     const quadrant = hiV && hiM ? 'star' : hiV && !hiM ? 'puzzle' : !hiV && hiM ? 'cow' : 'dog';
     return {
+      id: d.id != null ? d.id : null,
+      dish_id: d.dish_id != null ? d.dish_id : (d.id != null ? d.id : null),
       name: d.name,
       price: d.price,
       volume: d.volume,
@@ -356,7 +443,7 @@ function equipmentEnergySummary(ext, energyRows) {
 }
 
 // 演示数据：落自原型 p-m-analysis（W35→W38 趋势、五色周表现、矩阵图例、效率环）
-function mockAnalysis() {
+function mockAnalysis(paramOverrides) {
   const heatmap = [];
   for (let wd = 0; wd < 7; wd++) {
     for (const h of [11, 12, 18, 19]) {
@@ -428,7 +515,7 @@ function mockAnalysis() {
       { date: 'W38', revenue: 58210 }
     ], { daily_avg_revenue: 8315.7 }),
     baoben_summary: (() => {
-      try { return require('../lib/menu_baoben').computeBaobenSummary(); } catch (e) { return null; }
+      try { return require('../lib/menu_baoben').computeBaobenSummary(paramOverrides); } catch (e) { return null; }
     })()
   };
 }
@@ -494,10 +581,19 @@ async function handle(req, res, ctx, pathname) {
     return true;
   }
 
-  // GET /api/modules/analysis
+  // GET /api/modules/analysis（店参透传：area/staff/days/target_profit → 保本测算 paramOverrides）
   if (pathname === '/api/modules/analysis') {
+    const overrides = {};
+    const qnum = (k) => {
+      const v = parseFloat(ctx.query.get(k));
+      return isNaN(v) ? null : v;
+    };
+    const area = qnum('area'); if (area != null) overrides.area = area;
+    const staff = qnum('staff'); if (staff != null) overrides.staff = staff;
+    const days = qnum('days'); if (days != null) overrides.days = days;
+    const tp = qnum('target_profit'); if (tp != null) overrides.targetProfit = tp;
     const hasSales = !!(snap && Array.isArray(snap.data && snap.data.sales) && snap.data.sales.length > 0);
-    const a = hasSales ? realAnalysis(snap) : mockAnalysis();
+    const a = hasSales ? realAnalysis(snap, overrides) : mockAnalysis(overrides);
     ctx.sendJSON(res, 200, Object.assign(base, {
       trend: a.trend,
       heatmap: a.heatmap,

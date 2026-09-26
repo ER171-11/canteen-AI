@@ -471,6 +471,36 @@ private fun RecipeDetailCard(
                 color = Sub,
                 style = MaterialTheme.typography.labelSmall
             )
+            state.selectedCostCard?.let { cc ->
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF7F8FA)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("成本卡 · BOM 测算", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            KpiCell("批成本", cc.batchCost?.let { "¥${"%.2f".format(it)}" } ?: "-")
+                            KpiCell("份成本", cc.unitCost?.let { "¥${"%.2f".format(it)}" } ?: "-")
+                            KpiCell("售价", cc.price?.let { "¥${"%.2f".format(it)}" } ?: "-")
+                            KpiCell(
+                                "毛利率",
+                                cc.grossMargin?.let { "${"%.0f".format(if (it in 0.0..1.0) it * 100 else it)}%" } ?: "-"
+                            )
+                        }
+                        val unpriced = cc.bomLines.filter { it.matched == false }.mapNotNull { it.name }
+                        val missing = (cc.missingIngs + unpriced).distinct()
+                        if (missing.isNotEmpty()) {
+                            Text(
+                                "缺失原料（未匹配到价格）：${missing.joinToString("、")}",
+                                color = FiveRedC,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
             if (state.detailLoading) {
                 CircularProgressIndicator(color = Ink, strokeWidth = 3.dp)
             } else {

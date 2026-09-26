@@ -31,6 +31,21 @@ function recordAmount(r) {
 }
 
 function mockReport(date) {
+  // mock 分支也给保本口径：be_day 取自静态价盘（真算法），today_rev 为演示值（mock:true 标注）
+  let breakeven = null;
+  try {
+    const { computeBaobenSummary } = require('../lib/menu_baoben');
+    const summary = computeBaobenSummary();
+    const beDay = summary && summary.kpi ? summary.kpi.be_day : null;
+    if (beDay != null && beDay > 0) {
+      breakeven = {
+        be_day: beDay,
+        today_rev: 12580,
+        attain_pct: Math.round((12580 / beDay) * 1000) / 10,
+        mock: true
+      };
+    }
+  } catch (e) { breakeven = null; }
   return {
     ok: true,
     mock: true,
@@ -54,6 +69,7 @@ function mockReport(date) {
       { kind: 'prep', route: 'kitchen', text: '有快照后将汇总今日建议备料工单', done: false }
     ],
     alerts: [{ level: 'info', text: '无快照数据，当前为 mock 报表' }],
+    breakeven,
     day_close: {
       sold: { label: '售出', count: 286, amount: 12580, route: 'm/pos' },
       inbound: { label: '入库', count: 3, amount: 1860, route: 'inventory/recv' },
@@ -278,6 +294,21 @@ function deriveReport(snap, date) {
     return s + (isNaN(v) ? 0 : v);
   }, 0);
 
+  // 保本达成：be_day 取自保本测算（静态价盘+店参），today_rev 为当日真实营收
+  let breakeven = null;
+  try {
+    const { computeBaobenSummary } = require('../lib/menu_baoben');
+    const summary = computeBaobenSummary();
+    const beDay = summary && summary.kpi ? summary.kpi.be_day : null;
+    if (beDay != null && beDay > 0) {
+      breakeven = {
+        be_day: beDay,
+        today_rev: Math.round(revenue * 100) / 100,
+        attain_pct: Math.round((revenue / beDay) * 1000) / 10
+      };
+    }
+  } catch (e) { breakeven = null; }
+
   const report = {
     ok: true,
     mock: false,
@@ -298,6 +329,7 @@ function deriveReport(snap, date) {
     heat_mini,
     todos,
     alerts,
+    breakeven,
     day_close: {
       sold: { label: '售出', count: orders, amount: Math.round(revenue * 100) / 100, route: 'm/pos' },
       inbound: { label: '入库', count: recvToday.length, amount: Math.round(recvAmount * 100) / 100, route: 'inventory/recv' },

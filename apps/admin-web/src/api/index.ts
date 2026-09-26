@@ -3,6 +3,7 @@ import { client } from './client'
 import type {
   ActionItem,
   ActionStatus,
+  AnalysisResp,
   BookingResp,
   Dish,
   FoodsafeResp,
@@ -125,6 +126,22 @@ export async function fetchReportDaily(date?: string): Promise<ReportDaily> {
 /** GET /api/snapshot/latest */
 export async function fetchSnapshot(): Promise<Snapshot> {
   const { data } = await client.get<Snapshot>('/snapshot/latest')
+  return data
+}
+
+/** 经营分析店参（代理A逐步上线：BFF 未识别时忽略，不报错） */
+export interface AnalysisParams {
+  area?: number
+  staff?: number
+  days?: number
+  target_profit?: number
+}
+
+/** GET /api/modules/analysis?area=&staff=&days=&target_profit= */
+export async function fetchAnalysis(params?: AnalysisParams): Promise<AnalysisResp> {
+  const { data } = await client.get<AnalysisResp>('/modules/analysis', {
+    params: params && Object.keys(params).length ? params : undefined,
+  })
   return data
 }
 

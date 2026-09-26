@@ -468,6 +468,7 @@ const PAGES: Record<string, PageCfg> = {
         COL.text('销量', 'volume', 90),
         COL.text('毛利', 'margin', 90),
       ],
+      /* 行级动作（调价/上下架/标为爆品）在组件内按 routeKey==='ops/analysis' 追加 */
     },
   },
   'inventory/loss': {
@@ -762,7 +763,29 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
   const [formAction, setFormAction] = useState<PageAction | null>(null)
   const [ingsOpts, setIngsOpts] = useState<Opt[]>([])
   const [dishOpts, setDishOpts] = useState<Opt[]>([])
+  const [dishMap, setDishMap] = useState<Map<string, { id: string; on?: boolean }>>(new Map())
+  const [priceRow, setPriceRow] = useState<Row | null>(null)
   const [writeForm] = Form.useForm()
+  const [priceForm] = Form.useForm()
+
+  /** 菜品库 名称→{id,on}：矩阵行级动作（set_active 必须带 id） */
+  const loadDishMap = useCallback(() => {
+    if (routeKey !== 'ops/analysis') return
+    client
+      .get('/admin/dishes')
+      .then(({ data }) => {
+        const m = new Map<string, { id: string; on?: boolean }>()
+        for (const d of (data?.items ?? []) as Array<{ id?: string; name?: string; on?: boolean }>) {
+          if (d.name) m.set(String(d.name), { id: String(d.id), on: !!d.on })
+        }
+        setDishMap(m)
+      })
+      .catch(() => setDishMap(new Map()))
+  }, [routeKey])
+
+  useEffect(() => {
+    loadDishMap()
+  }, [loadDishMap])
 
   const pickList = (data: Record<string, unknown>, key: string, nested?: string): Row[] => {
     let cur: unknown = data?.[key]
@@ -923,6 +946,27 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
     return <Input {...common} />
   }
 
+  /** 矩阵行级动作入队（调价/上下架/标为爆品） */
+  const enqueueMatrix = async (type: string, payload: Record<string, unknown>, ok: string) => {
+    setBusy(true)
+    try {
+      await postAction({ type, payload, operator: 'admin' })
+      message.success(`${ok}已入队，请到审批中心确认执行`)
+      load()
+      loadDishMap()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '提交失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const openMatrixPrice = (row: Row) => {
+    priceForm.setFieldsValue({ price: row.price, reason: '' })
+    setPriceRow(row)
+  }
+
   const columns = useMemo(() => {
     if (!cfg) return []
     const cols = [...cfg.columns]
@@ -968,6 +1012,81 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
     }
     return cols
   }, [cfg, busy, load, canWrite])
+
+  /* 矩阵（tertiary）列：ops/analysis 追加行级动作 */
+  const tertiaryColumns = useMemo(() => {
+    if (!cfg?.tertiary) return []
+    const cols = [...cfg.tertiary.columns]
+    if (routeKey === 'ops/analysis') {
+      cols.push({
+        title: '操作',
+        key: '_mxop',
+        width: 220,
+        render: (_: unknown, row: Row) => {
+          const dish = dishMap.get(String(row.name ?? ''))
+          return (
+            <Space size={4} wrap>
+              <Tooltip title={canWrite ? undefined : noWriteTip}>
+                <Button
+                  size="small"
+                  type="link"
+                  disabled={!canWrite}
+                  onClick={() => openMatrixPrice(row)}
+                >
+                  调价
+                </Button>
+              </Tooltip>
+              <Tooltip
+                title={
+                  !canWrite
+                    ? noWriteTip
+                    : dish
+                      ? undefined
+                      : '菜品库未按名称匹配到该菜，无法上下架'
+                }
+              >
+                <Button
+                  size="small"
+                  type="link"
+                  disabled={!canWrite || !dish}
+                  loading={busy}
+                  onClick={() =>
+                    dish &&
+                    enqueueMatrix(
+                      'dish.set_active',
+                      { id: dish.id, on: !dish.on },
+                      dish.on ? `下架 ${row.name}` : `上架 ${row.name}`,
+                    )
+                  }
+                >
+                  {dish?.on ? '下架' : '上架'}
+                </Button>
+              </Tooltip>
+              <Tooltip title={canWrite ? 'dish.upsert 改分类为爆品' : noWriteTip}>
+                <Button
+                  size="small"
+                  type="link"
+                  disabled={!canWrite}
+                  loading={busy}
+                  onClick={() =>
+                    enqueueMatrix(
+                      'dish.upsert',
+                      { id: dish?.id, name: row.name, cat: '爆品' },
+                      `标为爆品 ${row.name}`,
+                    )
+                  }
+                >
+                  标为爆品
+                </Button>
+              </Tooltip>
+            </Space>
+          )
+        },
+      })
+    }
+    return cols
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg, routeKey, dishMap, busy, canWrite])
 
   if (!cfg) {
     return (
@@ -1053,7 +1172,7 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
             rowKey={(r, i) => String(r.id ?? r.name ?? i)}
             loading={loading}
             dataSource={tertiaryRows}
-            columns={cfg.tertiary.columns}
+            columns={tertiaryColumns}
             pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
           />
         </div>
@@ -1081,6 +1200,37 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
               {renderField(f)}
             </Form.Item>
           ))}
+        </Form>
+      </Modal>
+      <Modal
+        title={`调价 · ${String(priceRow?.name ?? '')}`}
+        open={!!priceRow}
+        onCancel={() => setPriceRow(null)}
+        confirmLoading={busy}
+        destroyOnClose
+        onOk={async () => {
+          const v = await priceForm.validateFields()
+          const row = priceRow
+          if (!row) return
+          const dish = dishMap.get(String(row.name ?? ''))
+          await enqueueMatrix(
+            'dish.price',
+            { id: dish?.id, name: row.name, price: v.price, reason: v.reason },
+            `调价 ${row.name} → ¥${v.price}`,
+          )
+          setPriceRow(null)
+        }}
+      >
+        <Form form={priceForm} layout="vertical" preserve={false}>
+          <Form.Item label="当前售价">
+            <Input disabled value={priceRow?.price != null ? `¥${priceRow.price}` : '-'} />
+          </Form.Item>
+          <Form.Item name="price" label="新售价" rules={[{ required: true, message: '请填写新售价' }]}>
+            <InputNumber min={0} step={1} style={{ width: '100%' }} addonBefore="¥" />
+          </Form.Item>
+          <Form.Item name="reason" label="调价原因">
+            <Input.TextArea rows={2} placeholder="成本上涨 / 促销 / 象限优化…" />
+          </Form.Item>
         </Form>
       </Modal>
     </Card>

@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage'
 import ActionsPage from './pages/ActionsPage'
 import OrgPage from './pages/OrgPage'
 import ModuleBrowsePage from './pages/ModuleBrowsePage'
+import WeeklyReportPage from './pages/ops/WeeklyReportPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import SystemConfigPage from './pages/SystemConfigPage'
 import DishesPage from './pages/kitchen/DishesPage'
@@ -57,6 +58,7 @@ export default function App() {
           <Route index element={<HomeRedirect />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="ops/analysis" element={<ModuleBrowsePage routeKey="ops/analysis" />} />
+          <Route path="ops/weekly" element={<WeeklyReportPage />} />
           <Route path="platform/actions" element={<ActionsPage />} />
           <Route path="platform/org" element={<OrgPage />} />
           <Route path="platform/system" element={<SystemConfigPage />} />

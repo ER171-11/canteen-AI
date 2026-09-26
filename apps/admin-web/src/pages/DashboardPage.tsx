@@ -14,8 +14,8 @@ import {
 } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import dayjs, { type Dayjs } from 'dayjs'
-import { fetchReportDaily } from '../api'
-import type { AlertItem, ReportDaily, TodoItem } from '../api/types'
+import { fetchAnalysis, fetchReportDaily } from '../api'
+import type { AlertItem, AnalysisResp, ReportDaily, TodoItem } from '../api/types'
 import { resolveDeepLink } from '../config/menu'
 import { COLORS } from '../theme'
 
@@ -84,9 +84,27 @@ function ageMinutes(iso?: string | null): number | null {
   return Math.max(0, Math.floor((Date.now() - t) / 60000))
 }
 
+/** 从 kpi 值（可能是 ¥12,860 字符串）解析数字 */
+function parseNum(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  const n = Number(String(v ?? '').replace(/[^0-9.-]/g, ''))
+  return Number.isFinite(n) && String(v ?? '') !== '' ? n : null
+}
+
+/** 从 report kpis 中取今日营收（兼容 kpi/kpis 两种形状） */
+function todayRevenue(report: ReportDaily | null): number | null {
+  if (!report) return null
+  const list = report.kpis ?? []
+  const hit = list.find((k) => /营业额|营收/.test(k.label ?? '') || k.key === 'revenue')
+  if (hit) return parseNum(hit.value)
+  const raw = (report.kpi ?? []).find((k) => /营业额|营收/.test(k.label ?? ''))
+  return raw ? parseNum(raw.value) : null
+}
+
 export default function DashboardPage() {
   const navigate = useNavigate()
   const [report, setReport] = useState<ReportDaily | null>(null)
+  const [analysis, setAnalysis] = useState<AnalysisResp | null>(null)
   const [isMock, setIsMock] = useState(false)
   const [loading, setLoading] = useState(true)
   const [date, setDate] = useState<Dayjs>(dayjs())
@@ -106,8 +124,38 @@ export default function DashboardPage() {
       .finally(() => setLoading(false))
   }, [date])
 
+  useEffect(() => {
+    fetchAnalysis()
+      .then((a) => setAnalysis(a))
+      .catch(() => setAnalysis(null))
+  }, [])
+
   const age = useMemo(() => ageMinutes(report?.generated_at), [report?.generated_at])
   const stale = age != null && age > 15
+
+  /** 保本卡数据：优先 report.breakeven（动态），否则 baoben_summary.kpi（静态价盘） */
+  const baoben = useMemo(() => {
+    const kpi = analysis?.baoben_summary?.kpi ?? {}
+    const be = report?.breakeven
+    const live = !!(be && be.be_day != null)
+    const beDay = live ? be!.be_day! : kpi.be_day
+    const todayRev = live ? be!.today_rev ?? null : todayRevenue(report)
+    const attain =
+      live && be!.attain_pct != null
+        ? be!.attain_pct
+        : beDay && todayRev != null
+          ? (todayRev / beDay) * 100
+          : null
+    if (beDay == null && kpi.safety == null && kpi.month_profit == null) return null
+    return {
+      live,
+      beDay: beDay ?? null,
+      todayRev,
+      attain,
+      safety: kpi.safety ?? null,
+      monthProfit: kpi.month_profit ?? null,
+    }
+  }, [analysis, report])
 
   if (loading || !report) {
     return (
@@ -178,6 +226,67 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {baoben && (
+        <Card
+          size="small"
+          style={{ marginBottom: 16, borderLeft: `4px solid ${COLORS.purple}` }}
+          title={
+            <Space size={8}>
+              <span>保本经营</span>
+              <Tag color={baoben.live ? COLORS.green : COLORS.yellow}>
+                {baoben.live ? '动态实况' : '静态价盘'}
+              </Tag>
+            </Space>
+          }
+        >
+          <Row gutter={[16, 8]}>
+            <Col xs={12} md={4}>
+              <Statistic
+                title="日保本"
+                value={baoben.beDay != null ? baoben.beDay.toFixed(0) : '-'}
+                prefix="¥"
+              />
+            </Col>
+            <Col xs={12} md={5}>
+              <Statistic
+                title="今日营收"
+                value={baoben.todayRev != null ? baoben.todayRev.toFixed(0) : '-'}
+                prefix="¥"
+              />
+            </Col>
+            <Col xs={12} md={5}>
+              <Statistic
+                title="保本达成率"
+                value={baoben.attain != null ? baoben.attain.toFixed(1) : '-'}
+                suffix="%"
+                valueStyle={{
+                  color:
+                    baoben.attain == null
+                      ? undefined
+                      : baoben.attain >= 100
+                        ? COLORS.green
+                        : COLORS.red,
+                }}
+              />
+            </Col>
+            <Col xs={12} md={5}>
+              <Statistic
+                title="安全边际"
+                value={baoben.safety != null ? baoben.safety.toFixed(1) : '-'}
+                suffix="%"
+              />
+            </Col>
+            <Col xs={12} md={5}>
+              <Statistic
+                title="月利润预测"
+                value={baoben.monthProfit != null ? baoben.monthProfit.toFixed(0) : '-'}
+                prefix="¥"
+              />
+            </Col>
+          </Row>
+        </Card>
+      )}
 
       <Row gutter={[16, 16]}>
         {(report.kpis ?? []).slice(0, 8).map((kpi) => (

@@ -340,8 +340,9 @@ function mergeDishesWithBaoben(dishes) {
       id: d.id || (bb && bb.id) || name,
       name: d.name || (bb && bb.name),
       // 分类可挂保本类型；售价/成本以店内为准（调价落库后不被价盘盖掉）
+      // price=0 视为占位未定价（如 SKU-WF-* 占位菜品），回落保本价
       cat: d.cat || (bb && bb.type) || '常规',
-      price: d.price != null ? d.price : (bb ? bb.price : null),
+      price: (d.price != null && Number(d.price) > 0) ? d.price : (bb ? bb.price : null),
       cost: d.cost != null ? d.cost : (bb ? bb.cost : null),
       // est：店内成本估优先；勿用保本日销量覆盖
       est: d.est != null ? d.est : (bb ? bb.cost : null),

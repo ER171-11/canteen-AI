@@ -611,7 +611,7 @@ var sheets = {
       '</div>'+
       '<div class="card">'+
         '<div class="card-h"><div class="ttl"><i class="em"></i>结账操作</div></div>'+
-        '<div class="chip-row"><span class="chip act" onclick="bossConfirmAction(\'pos.checkout\',{channel:\'wechat\'},\'微信结账\')">微信结账</span><span class="chip" onclick="bossConfirmAction(\'pos.checkout\',{channel:\'alipay\'},\'支付宝结账\')">支付宝</span><span class="chip" onclick="bossConfirmAction(\'pos.checkout\',{channel:\'member\'},\'会员储值结账\')">会员储值</span></div>'+
+        '<div class="chip-row"><span class="chip act" onclick="bossConfirmAction(\'pos.pay\',{channel:\'wechat\',table_id:(document.getElementById(\'billNo\')||{}).textContent},\'微信结账\')">微信结账</span><span class="chip" onclick="bossConfirmAction(\'pos.pay\',{channel:\'alipay\',table_id:(document.getElementById(\'billNo\')||{}).textContent},\'支付宝结账\')">支付宝</span><span class="chip" onclick="bossConfirmAction(\'pos.pay\',{channel:\'member\',table_id:(document.getElementById(\'billNo\')||{}).textContent},\'会员储值结账\')">会员储值</span></div>'+
         '<div class="note" style="margin-top:8px">结账入云端确认队列（不直写店内 DB）；桌态可本地演示翻台。</div>'+
       '</div>'
   },
@@ -700,7 +700,7 @@ function buildConfirm(p){
       (total ? '<div class="stat-line"><span>合计预估</span><span><b>¥'+total.toLocaleString('en-US')+'</b></span></div>' : '')+
       '<div class="note" style="margin-top:8px">转单后进采购管理，自动生成 ≠ 自动下单。</div></div>';
     if(!p.actionType) p.actionType = 'restock.create';
-    if(!p.actionPayload) p.actionPayload = {items:(p.items||[]).map(function(it){ return it.name; })};
+    if(!p.actionPayload) p.actionPayload = {supplier: p.vendor || '未指定供应商', note:'低库存补货转采购草稿（自动生成≠自动下单）', items:(p.items||[]).map(function(it){ return {name: it.name, qty: it.suggest || it.qty, price: it.price}; })};
     if(!p.confirmLabel) p.confirmLabel = '确认转单';
   } else if(kind === 'aiForecast2po'){
     title = p.title || 'AI 备货转采购 · 人工确认';
@@ -712,8 +712,9 @@ function buildConfirm(p){
     inner = '<div class="card"><div class="card-h"><div class="ttl"><i class="em"></i>AI 备货清单 → 采购单</div></div>'+frows+
       (ftotal ? '<div class="stat-line"><span>合计预估</span><span><b>¥'+ftotal.toLocaleString('en-US')+'</b></span></div>' : '')+
       '<div class="note" style="margin-top:8px">备货建议由 AI 生成（天气+历史4周+节假日三因子），<b>预测 ≠ 下单</b>。</div></div>';
-    if(!p.actionType) p.actionType = 'forecast.po';
-    if(!p.actionPayload) p.actionPayload = {items:(p.items||[]).map(function(it){ return it.name; })};
+    /* forecast.po 不在消费器 KNOWN_TYPES → 映射 restock.create（AI 备货→采购草稿） */
+    if(!p.actionType) p.actionType = 'restock.create';
+    if(!p.actionPayload) p.actionPayload = {supplier:'AI备货建议', note:'AI 备货转采购草稿（预测≠下单）', items:(p.items||[]).map(function(it){ return {name: it.name, qty: it.qty || it.range, price: it.price}; })};
     if(!p.confirmLabel) p.confirmLabel = '转采购';
   } else if(kind === 'salary'){
     title = p.title || '薪资审批 · 人工确认';
@@ -723,8 +724,9 @@ function buildConfirm(p){
       cfmStat('发放人数', (p.count != null ? p.count+' 人' : '-'))+
       '<div class="stat-line"><span>发放总额</span><span><b>'+escHtml(stotal)+'</b></span></div>'+
       '<div class="note" style="margin-top:8px">⚠ 审批后进入发放队列，银行代发回单后自动销记。</div></div>';
-    if(!p.actionType) p.actionType = 'salary.approve';
-    if(!p.actionPayload) p.actionPayload = {month:p.month, count:p.count, total:p.total};
+    /* salary.approve 不在 KNOWN_TYPES → 映射 finance.approve（财务审批，语义近似：无专门薪资类型） */
+    if(!p.actionType) p.actionType = 'finance.approve';
+    if(!p.actionPayload) p.actionPayload = {period:p.month, party:'员工薪资（'+(p.count != null ? p.count+' 人' : '全员')+'）', amount:p.total, status:'已结算'};
     if(!p.confirmLabel) p.confirmLabel = '审批发放';
   } else if(kind === 'birthdayCoupon'){
     title = p.title || '生日发券 · 人工确认';
@@ -733,8 +735,9 @@ function buildConfirm(p){
       (p.members ? cfmStat('会员数', p.members+' 人') : '')+
       cfmStat('券面额', p.face || '8 折券')+
       '<div class="note" style="margin-top:8px">建议：储值会员加赠「长寿红饺一份」；发券后企微自动触达。</div></div>';
-    if(!p.actionType) p.actionType = 'vip.birthdayCoupon';
-    if(!p.actionPayload) p.actionPayload = {member:p.member, face:p.face};
+    /* vip.birthdayCoupon 不在 KNOWN_TYPES → 映射 vip.campaign（生日赠券活动草案） */
+    if(!p.actionType) p.actionType = 'vip.campaign';
+    if(!p.actionPayload) p.actionPayload = {type:'生日赠', value:p.face || '8 折券', note:p.member ? '会员 '+p.member : undefined};
     if(!p.confirmLabel) p.confirmLabel = '确认发券';
   } else if(kind === 'settlement'){
     title = p.title || '结算单审批 · 人工确认';
@@ -744,8 +747,9 @@ function buildConfirm(p){
       '<div class="stat-line"><span>结算金额</span><span><b>'+escHtml(samt)+'</b></span></div>'+
       '<div class="stat-line"><span>对账</span><span class="tag ok">一致</span></div>'+
       '<div class="note" style="margin-top:8px">⚠ 结算单只读输出层，不写 DB；审批后由人工入账。</div></div>';
-    if(!p.actionType) p.actionType = 'settlement.approve';
-    if(!p.actionPayload) p.actionPayload = {vendor:p.vendor, amount:p.amount};
+    /* settlement.approve 不在 KNOWN_TYPES → 映射 finance.approve（结算审批，语义近似） */
+    if(!p.actionType) p.actionType = 'finance.approve';
+    if(!p.actionPayload) p.actionPayload = {party:p.vendor, amount:p.amount, status:'已结算'};
     if(!p.confirmLabel) p.confirmLabel = '审批通过';
   } else { // generic
     title = p.title || '操作确认';
@@ -779,7 +783,8 @@ function enqueueBossAction(type, payload){
 /* ====== Kimi 结果卡 CTA：入库/补货/留样走 confirm 抽屉，其余轻量 toast ====== */
 function kimiCta(type, label){
   if(type === 'recv'){
-    openSheet('confirm', {kind:'generic', title:'登记入库', desc:'Kimi 验货识别结果登记入库：猪肉前肩 / 雪花粉八星 / 火龙果汁，批次均已溯源、检验合格。', actionType:'recv.stockIn', confirmLabel:'登记入库'});
+    /* recv.stockIn 不在 KNOWN_TYPES → 映射 recv.inbound；无进货单/明细时走 Kimi 审计登记，不空改账面 */
+    openSheet('confirm', {kind:'generic', title:'登记入库', desc:'Kimi 验货识别结果登记入库：猪肉前肩 / 雪花粉八星 / 火龙果汁，批次均已溯源、检验合格。', actionType:'recv.inbound', actionPayload:{source:'kimi', kimi_draft:true, supplier:'Kimi验货', status:'待核对', note:'Kimi 验货识别：猪肉前肩 / 雪花粉八星 / 火龙果汁，批次溯源、检验合格'}, confirmLabel:'登记入库'});
     return;
   }
   if(type === 'stock'){
@@ -787,7 +792,8 @@ function kimiCta(type, label){
     return;
   }
   if(type === 'sample'){
-    openSheet('confirm', {kind:'generic', title:'登记留样', desc:'红色长寿饺 · 125g · 48h 留样，到期自动提醒。', actionType:'foodsafe.sample', confirmLabel:'登记留样'});
+    /* foodsafe.sample 不在 KNOWN_TYPES → 映射 sample.log（留样登记） */
+    openSheet('confirm', {kind:'generic', title:'登记留样', desc:'红色长寿饺 · 125g · 48h 留样，到期自动提醒。', actionType:'sample.log', actionPayload:{dish:'红色长寿饺', weight_g:125, meal:'午餐', keeper:'老板'}, confirmLabel:'登记留样'});
     return;
   }
   toast((label || '识别结果')+'已记录（仅原型）');
@@ -1239,13 +1245,11 @@ function jumpToPosStep(k){
 }
 renderFloor();
 
-/* ====== 波士顿矩阵钻取 ====== */
-var MATRIX_DISHES = {
-  star:[['红色·冬菇荸荠饺','销量 486 · 毛利 43.1%','高销高利，建议主推位前置'],['御膳狮子头','销量 312 · 毛利 45%','招牌，可加价 ¥2 测弹性']],
-  puzzle:[['黑色·猪肉三鲜饺','销量 413 · 毛利 38.6%','墨鱼汁涨价，试点 +¥0.5'],['五彩大拉皮','销量 268 · 毛利 34%','高销低利，建议优化份量或换供']],
-  cow:[['白色·酸菜/牛肉饺','销量 315 · 毛利 42%','低销稳利，中秋可放量'],['五福长寿面','销量 198 · 毛利 41%','主食稳利，搭配套餐']],
-  dog:[['紫色·猪肉香芹饺','销量 289 · 毛利 36.2%','低销低利，建议调馅或下架'],['桂花酒酿圆子','销量 142 · 毛利 35%','甜品瘦狗，保留作引流或减 SKU']]
-};
+/* ====== 波士顿矩阵钻取 ======
+ * 真数据由 bff-hydrate.js applyMatrix 注入（window.MATRIX_DISHES，
+ * 与本全局 var 同一绑定）；BFF 未接通/演示态时为空对象，钻取显示「暂无菜品」。
+ */
+var MATRIX_DISHES = {};
 function drillMatrix(q){
   var list = MATRIX_DISHES[q] || [];
   var names = {star:'明星',puzzle:'问题',cow:'金牛',dog:'瘦狗'};

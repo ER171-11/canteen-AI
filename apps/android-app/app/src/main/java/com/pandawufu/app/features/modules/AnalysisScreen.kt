@@ -11,12 +11,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -175,14 +180,10 @@ fun AnalysisScreen() {
                     else {
                         MatrixLegend(list)
                         list.sortedByDescending { it.volume ?: 0.0 }.take(15).forEach { m ->
-                            KvRow(
-                                listOfNotNull(m.dishType, m.name).joinToString(" · ").ifBlank { m.name ?: "-" },
-                                listOfNotNull(
-                                    m.price?.let { "¥${"%.0f".format(it)}" },
-                                    m.volume?.let { "日销${"%.0f".format(it)}" },
-                                    m.margin?.let { "毛利${"%.0f".format(it * 100)}%" },
-                                    quadrantLabel(m.quadrant)
-                                ).joinToString(" · ")
+                            MatrixDishRow(
+                                m = m,
+                                baseRev = a?.rev?.toString(),
+                                onDone = { viewModel.dispatch(ModulesViewModel.Intent.LoadAnalysis) }
                             )
                         }
                     }
@@ -523,6 +524,174 @@ private fun quadrantLabel(q: String?): String = when (q) {
     "cow" -> "金牛"
     "dog" -> "瘦狗"
     else -> q ?: ""
+}
+
+/** 矩阵行：瘦狗/问题象限给「调价 + 下架」，明星（爆品）给「调价」；无写权限隐藏（同 WriteActionButton 显隐口径） */
+@Composable
+private fun MatrixDishRow(
+    m: AnalysisMatrixDto,
+    baseRev: String?,
+    onDone: () -> Unit
+) {
+    val context = LocalContext.current
+    var priceOpen by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        KvRow(
+            listOfNotNull(m.dishType, m.name).joinToString(" · ").ifBlank { m.name ?: "-" },
+            listOfNotNull(
+                m.price?.let { "¥${"%.0f".format(it)}" },
+                m.volume?.let { "日销${"%.0f".format(it)}" },
+                m.margin?.let { "毛利${"%.0f".format(it * 100)}%" },
+                quadrantLabel(m.quadrant)
+            ).joinToString(" · ")
+        )
+        val q = m.quadrant ?: ""
+        val canAdjust = q == "star" || q == "puzzle" || q == "dog"
+        val canOff = q == "puzzle" || q == "dog"
+        if (AppModule.canWrite() && (canAdjust || canOff)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.End)
+            ) {
+                if (canAdjust) {
+                    Text(
+                        "调价",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Ink,
+                        modifier = Modifier.clickable { priceOpen = true }
+                    )
+                }
+                if (canOff) {
+                    Text(
+                        "下架",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = FiveRed,
+                        modifier = Modifier.clickable {
+                            ConfirmBus.ask(
+                                ConfirmRequest(
+                                    title = "下架 ${m.name ?: "菜品"}",
+                                    summary = "矩阵「${quadrantLabel(q)}」象限 · ${m.name ?: "-"} 下架（确认后店内消费器执行）",
+                                    type = "dish.set_active",
+                                    payload = buildJsonObject {
+                                        m.id?.let { put("id", it) }
+                                        m.dishId?.let { put("dish_id", it) }
+                                        m.name?.let { put("name", it) }
+                                        put("on", false)
+                                        put("active", false)
+                                    },
+                                    baseRev = baseRev,
+                                    onResult = { r ->
+                                        Toast.makeText(
+                                            context,
+                                            if (r.isSuccess) "已入队：下架 ${m.name ?: ""}"
+                                            else r.exceptionOrNull()?.message ?: "失败",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        if (r.isSuccess) onDone()
+                                    }
+                                )
+                            )
+                        }
+                    )
+                }
+            }
+        }
+    }
+    if (priceOpen) {
+        MatrixPriceDialog(
+            m = m,
+            baseRev = baseRev,
+            onDismiss = { priceOpen = false },
+            onDone = {
+                priceOpen = false
+                onDone()
+            }
+        )
+    }
+}
+
+/** 调价：输入新价 + 原因 → ConfirmBus → dish.price（字段对齐 queue_consumer.apply_dish_price） */
+@Composable
+private fun MatrixPriceDialog(
+    m: AnalysisMatrixDto,
+    baseRev: String?,
+    onDismiss: () -> Unit,
+    onDone: () -> Unit
+) {
+    val context = LocalContext.current
+    var priceText by remember { mutableStateOf(m.price?.let { "%.2f".format(it) } ?: "") }
+    var reasonText by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("调价 · ${m.name ?: "菜品"}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "矩阵「${quadrantLabel(m.quadrant)}」象限 · 现售 ${m.price?.let { "¥${"%.2f".format(it)}" } ?: "-"}",
+                    fontSize = 12.sp,
+                    color = Sub
+                )
+                OutlinedTextField(
+                    value = priceText,
+                    onValueChange = { priceText = it },
+                    label = { Text("新售价 ¥") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = reasonText,
+                    onValueChange = { reasonText = it },
+                    label = { Text("调价原因") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val newPrice = priceText.trim().toDoubleOrNull()
+                    if (newPrice == null || newPrice < 0) {
+                        Toast.makeText(context, "请输入有效新售价", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    val reason = reasonText.trim()
+                    onDismiss()
+                    ConfirmBus.ask(
+                        ConfirmRequest(
+                            title = "调价 ${m.name ?: "菜品"}",
+                            summary = "${m.name ?: "-"} 售价 ${m.price?.let { "¥${"%.2f".format(it)}" } ?: "-"} → ¥${"%.2f".format(newPrice)}" +
+                                (reason.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                            type = "dish.price",
+                            payload = buildJsonObject {
+                                m.id?.let { put("id", it) }
+                                m.dishId?.let { put("dish_id", it) }
+                                m.name?.let { put("name", it) }
+                                put("price", newPrice)
+                                reason.takeIf { it.isNotBlank() }?.let { put("reason", it) }
+                            },
+                            baseRev = baseRev,
+                            onResult = { r ->
+                                Toast.makeText(
+                                    context,
+                                    if (r.isSuccess) "已入队：调价 ¥${"%.2f".format(newPrice)}"
+                                    else r.exceptionOrNull()?.message ?: "失败",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                if (r.isSuccess) onDone()
+                            }
+                        )
+                    )
+                },
+                shape = RoundedCornerShape(12.dp)
+            ) { Text("下一步确认") }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 private fun fmtQty(v: Double?): String =

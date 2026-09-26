@@ -294,7 +294,8 @@ def rebuild_stock(data):
 
 
 def resolve_ing_id(data, payload):
-    """从 payload 的 ing_id / name / ing_name 解析原料 id。"""
+    """从 payload 的 ing_id / name / ing_name 解析原料 id。
+    匹配顺序：精确 → config.ing_alias 别名（含去括号名）→ 双向包含。"""
     raw = payload.get("ing_id") or payload.get("ing") or payload.get("gid")
     if raw is not None and str(raw).strip():
         return str(raw).strip()
@@ -304,6 +305,16 @@ def resolve_ing_id(data, payload):
     for g in data.get("ings") or []:
         if (g.get("name") or "").strip() == name:
             return str(g.get("id"))
+    alias = (data.get("config") or {}).get("ing_alias") or {}
+    import re as _re
+    stripped = _re.sub(r"[（(][^）)]*[）)]", "", name).strip()
+    for key in (name, stripped):
+        tgt = alias.get(key)
+        if not tgt:
+            continue
+        for g in data.get("ings") or []:
+            if (g.get("name") or "").strip() == str(tgt).strip():
+                return str(g.get("id"))
     for g in data.get("ings") or []:
         n = (g.get("name") or "")
         if name in n or n in name:
@@ -3314,9 +3325,24 @@ def process_action(action, store_url, bff_url, token, db_path):
                 result["ok"] = True
             body["result"] = result
         body["trace_id"] = trace_id
-        status, resp = http_json(
-            "POST", bff_url.rstrip("/") + "/api/actions/%s/execute" % aid,
-            body, token=token)
+        # 429/5xx 重试（BFF 令牌桶 60/min，密集拍板时回调可能撞限流；
+        # 不重试会导致"已落库但动作卡待执行"，重确认引发重复执行）
+        status, resp = 0, {}
+        for attempt in range(1, 5):
+            status, resp = http_json(
+                "POST", bff_url.rstrip("/") + "/api/actions/%s/execute" % aid,
+                body, token=token)
+            if status != 429 and not (isinstance(status, int) and status >= 500):
+                break
+            retry_after = 1
+            if isinstance(resp, dict):
+                try:
+                    retry_after = max(1, int(resp.get("retry_after") or 1))
+                except Exception:
+                    retry_after = 1
+            alog.warning("回调 execute 第 %s/4 次 http=%s，%ss 后重试 id=%s trace=%s",
+                         attempt, status, retry_after, aid, trace_id)
+            time.sleep(retry_after * attempt)
         alog.info("回调 execute id=%s http=%s resp=%s trace=%s", aid, status, resp, trace_id)
         return status, resp
 
@@ -3509,7 +3535,19 @@ def process_action(action, store_url, bff_url, token, db_path):
 def fetch_pending(bff_url, token):
     from urllib.parse import quote
     url = bff_url.rstrip("/") + "/api/actions?status=" + quote("待执行")
-    status, resp = http_json("GET", url, token=token)
+    status, resp = 0, {}
+    for attempt in range(1, 5):
+        status, resp = http_json("GET", url, token=token)
+        if status != 429 and not (isinstance(status, int) and status >= 500):
+            break
+        retry_after = 1
+        if isinstance(resp, dict):
+            try:
+                retry_after = max(1, int(resp.get("retry_after") or 1))
+            except Exception:
+                retry_after = 1
+        log.warning("拉取动作第 %s/4 次 http=%s，%ss 后重试", attempt, status, retry_after)
+        time.sleep(retry_after * attempt)
     if status != 200:
         raise RuntimeError("拉取动作失败: http=%s %s" % (status, resp))
     if isinstance(resp, list):
