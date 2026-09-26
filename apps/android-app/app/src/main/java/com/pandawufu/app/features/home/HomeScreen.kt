@@ -674,15 +674,15 @@ fun HomeScreen(
                 Text("堂食客流与叫号，详情在预订模块。", fontSize = 11.sp, color = Sub)
                 Spacer(Modifier.height(4.dp))
                 ProtoKv("今日预订", "${bookingHome.bookings.size} 桌 / ${bookingHome.bookings.sumOf { it.partySize ?: 0 }} 人")
-                val waiting = bookingHome.queue.count {
+                val waitingQueue = bookingHome.queue.filter {
                     val s = it.status.orEmpty()
-                    s.contains("等") || s.contains("排队") || s.isBlank()
+                    !s.contains("就餐") && !s.contains("完成") && !s.contains("取消") && !s.contains("入座")
                 }
                 ProtoKv(
                     "当前排队",
-                    if (bookingHome.queue.isEmpty()) "无人排队"
-                    else "${bookingHome.queue.size} 组 · 待叫 ${waiting.coerceAtLeast(bookingHome.queue.size)}",
-                    valueColor = if (waiting > 0) FiveRed else Txt
+                    if (waitingQueue.isEmpty()) "无人排队"
+                    else "${waitingQueue.size} 组待叫",
+                    valueColor = if (waitingQueue.isNotEmpty()) FiveRed else Txt
                 )
             }
         }

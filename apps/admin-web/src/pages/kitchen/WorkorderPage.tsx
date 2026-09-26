@@ -5,17 +5,23 @@ import {
   Col,
   DatePicker,
   Empty,
+  Form,
+  InputNumber,
+  Modal,
   Row,
+  Select,
   Space,
   Spin,
   Tag,
   Timeline,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
 import dayjs, { Dayjs } from 'dayjs'
-import { fetchWorkorders, postAction } from '../../api'
+import { fetchAdminDishes, fetchWorkorders, postAction } from '../../api'
 import type { WorkOrder } from '../../api/types'
+import { useAuthStore } from '../../store/auth'
 import ColorBadge from './components/ColorBadge'
 import MockAlert from './components/MockAlert'
 import { colorMeta } from './colorMeta'
@@ -94,11 +100,15 @@ function WorkorderCard({ wo }: { wo: WorkOrder }) {
 }
 
 export default function WorkorderPage() {
+  const canWrite = useAuthStore((s) => s.canWrite)
   const [date, setDate] = useState<Dayjs>(dayjs())
   const [items, setItems] = useState<WorkOrder[]>([])
   const [isMock, setIsMock] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [skuOpts, setSkuOpts] = useState<Array<{ value: string; label: string }>>([])
+  const [form] = Form.useForm()
 
   const load = useCallback((d: Dayjs) => {
     setLoading(true)
@@ -118,6 +128,24 @@ export default function WorkorderPage() {
     load(date)
   }, [date, load])
 
+  const openCreate = () => {
+    form.resetFields()
+    form.setFieldsValue({
+      qty: 30,
+      planned_start: dayjs(`${date.format('YYYY-MM-DD')}T10:00`),
+    })
+    setCreateOpen(true)
+    fetchAdminDishes()
+      .then((r) =>
+        setSkuOpts(
+          (r.items ?? [])
+            .filter((d) => d.id && d.name)
+            .map((d) => ({ value: d.id, label: `${d.name}（${d.id}）` })),
+        ),
+      )
+      .catch(() => setSkuOpts([]))
+  }
+
   return (
     <div>
       <Card
@@ -129,35 +157,11 @@ export default function WorkorderPage() {
               allowClear={false}
               onChange={(d) => d && setDate(d)}
             />
-            <Button
-              type="primary"
-              loading={busy}
-              onClick={async () => {
-                setBusy(true)
-                try {
-                  await postAction({
-                    type: 'workorder.create',
-                    payload: {
-                      date: date.format('YYYY-MM-DD'),
-                      sku_id: 'SKU_WFJ',
-                      qty: 30,
-                      planned_start: `${date.format('YYYY-MM-DD')}T10:00`,
-                      status: '待开始',
-                    },
-                    operator: 'admin',
-                  })
-                  message.success('工单已入队 → 请到审批中心确认')
-                  load(date)
-                } catch (e: unknown) {
-                  const err = e as { response?: { data?: { error?: string } } }
-                  message.error(err.response?.data?.error || '提交失败')
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              新建工单
-            </Button>
+            <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
+              <Button type="primary" disabled={!canWrite} onClick={openCreate}>
+                新建工单
+              </Button>
+            </Tooltip>
           </Space>
         }
       >
@@ -176,6 +180,71 @@ export default function WorkorderPage() {
           )}
         </Spin>
       </Card>
+
+      <Modal
+        title="新建工单"
+        open={createOpen}
+        onCancel={() => setCreateOpen(false)}
+        confirmLoading={busy}
+        destroyOnClose
+        onOk={async () => {
+          const v = await form.validateFields()
+          setBusy(true)
+          try {
+            const sku = skuOpts.find((o) => o.value === v.sku_id)
+            await postAction({
+              type: 'workorder.create',
+              payload: {
+                date: date.format('YYYY-MM-DD'),
+                sku_id: v.sku_id,
+                name: sku ? sku.label.replace(/（.*）$/, '') : undefined,
+                qty: v.qty,
+                planned_start: (v.planned_start as Dayjs).format('YYYY-MM-DDTHH:mm'),
+                status: '待开始',
+              },
+              operator: 'admin',
+            })
+            message.success('工单已入队 → 请到审批中心确认')
+            setCreateOpen(false)
+            load(date)
+          } catch (e: unknown) {
+            const err = e as { response?: { data?: { error?: string } } }
+            message.error(err.response?.data?.error || '提交失败')
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        <Form form={form} layout="vertical" preserve={false}>
+          <Form.Item
+            name="sku_id"
+            label="菜品（SKU）"
+            rules={[{ required: true, message: '请选择菜品' }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="从菜品库选择"
+              options={skuOpts}
+              notFoundContent="菜品库为空或 BFF 未连接"
+            />
+          </Form.Item>
+          <Form.Item
+            name="qty"
+            label="数量（份）"
+            rules={[{ required: true, message: '请填写数量' }]}
+          >
+            <InputNumber min={1} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            name="planned_start"
+            label="计划开始时间"
+            rules={[{ required: true, message: '请选择计划时间' }]}
+          >
+            <DatePicker showTime={{ format: 'HH:mm' }} format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }

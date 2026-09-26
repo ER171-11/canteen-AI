@@ -233,6 +233,14 @@ class BffClient(
             setBody(req)
         }.body()
 
+    /** POST /api/org/users/reset-password — 重置员工密码（org 直连写既有约定） */
+    suspend fun orgResetPassword(req: OrgResetPasswordRequest): OrgResetPasswordResponse =
+        http.post("$baseUrl/api/org/users/reset-password") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(req)
+        }.body()
+
     suspend fun agentChat(question: String, ctx: Map<String, String> = emptyMap()): AgentChatResponse =
         http.post("$baseUrl/api/agent/chat") {
             auth()

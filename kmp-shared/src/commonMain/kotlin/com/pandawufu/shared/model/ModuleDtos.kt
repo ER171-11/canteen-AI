@@ -459,8 +459,21 @@ data class EnergyDto(
     val date: String? = null,
     val device: String? = null,
     val kind: String? = null,
-    val usage: Double? = null
-)
+    /** 店内可能推数字或「12度」这类字符串，统一接住再兜底解析，避免整端点解析失败 */
+    val usage: JsonElement? = null
+) {
+    fun usageValue(): Double? = when (val u = usage) {
+        is JsonPrimitive -> u.contentOrNull?.toDoubleOrNull()
+            ?: Regex("[0-9]+(?:\\.[0-9]+)?").find(u.contentOrNull.orEmpty())?.value?.toDoubleOrNull()
+        else -> null
+    }
+
+    fun usageText(): String = when (val u = usage) {
+        is JsonPrimitive -> u.contentOrNull ?: "-"
+        null -> "-"
+        else -> u.toString()
+    }
+}
 
 /** GET /api/modules/finance */
 @Serializable

@@ -274,7 +274,7 @@ fun AnalysisScreen() {
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            EffRing("翻台率", "3.2", FiveGreen)
+                            EffRing("翻台率·演示", "3.2", FiveGreen)
                             EffRing("坪效/㎡", e.dailyAvgRevenue?.let { "¥${(it / 120).toInt()}" } ?: "¥680", FiveYellow)
                             EffRing("人效/人", e.avgTicket?.let { "¥${(it * 14).toInt()}" } ?: "¥648", FivePurple)
                         }
@@ -291,16 +291,18 @@ fun AnalysisScreen() {
                         val prev = revs[revs.lastIndex - 1]
                         if (prev > 0) (last - prev) / prev * 100 else null
                     } else null
-                    KvRow("营收环比", mom?.let { "${if (it >= 0) "+" else ""}${"%.1f".format(it)}%" } ?: "+4.2%")
-                    KvRow("营收同比", "+11.6%")
-                    KvRow("毛利环比", "+0.8pct")
-                    KvRow("客单价同比", e?.avgTicket?.let { "+¥${"%.1f".format(it * 0.05)}" } ?: "+¥2.4")
+                    KvRow("营收环比", mom?.let { "${if (it >= 0) "+" else ""}${"%.1f".format(it)}%" } ?: "演示 +4.2%")
+                    KvRow("营收同比（演示）", "+11.6%")
+                    KvRow("毛利环比（演示）", "+0.8pct")
+                    KvRow("客单价同比（演示）", e?.avgTicket?.let { "+¥${"%.1f".format(it * 0.05)}" } ?: "+¥2.4")
+                    Text("标注「演示」为示例数据，非店内实测", color = Sub, fontSize = 12.sp)
                 }
                 ModuleCard("天气 / 节假日关联") {
                     val hol = a?.forecast?.holidays.orEmpty()
                     if (hol.isEmpty()) {
-                        KvRow("雨天热汤点单", "+14%")
-                        KvRow("气温每降 3℃", "汤品主食 +8%")
+                        KvRow("雨天热汤点单（演示）", "+14%")
+                        KvRow("气温每降 3℃（演示）", "汤品主食 +8%")
+                        Text("暂无节假日关联数据，上行为示例规则", color = Sub, fontSize = 12.sp)
                     } else {
                         hol.take(4).forEach { h -> KvRow(h.label ?: "-", h.effect ?: "-") }
                     }

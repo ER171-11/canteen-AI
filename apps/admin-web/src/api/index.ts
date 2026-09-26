@@ -3,14 +3,10 @@ import { client } from './client'
 import type {
   ActionItem,
   ActionStatus,
-  AnalysisResp,
-  AuditItem,
   BookingResp,
   Dish,
-  EquipmentResp,
   FoodsafeResp,
   Health,
-  KimiLogItem,
   KitchenBoardItem,
   ListResp,
   LoginRequest,
@@ -21,7 +17,6 @@ import type {
   ReportDaily,
   Snapshot,
   StaffModuleResp,
-  VipResp,
   WorkorderResp,
   OrgOverview,
   OrgUser,
@@ -119,15 +114,45 @@ export async function fetchHealth(): Promise<Health> {
   }
 }
 
-/** GET /api/report/daily */
-export async function fetchReportDaily(): Promise<ReportDaily> {
-  const { data } = await client.get<ReportDaily>('/report/daily')
+/** GET /api/report/daily?date= */
+export async function fetchReportDaily(date?: string): Promise<ReportDaily> {
+  const { data } = await client.get<ReportDaily>('/report/daily', {
+    params: date ? { date } : undefined,
+  })
   return data
 }
 
 /** GET /api/snapshot/latest */
 export async function fetchSnapshot(): Promise<Snapshot> {
   const { data } = await client.get<Snapshot>('/snapshot/latest')
+  return data
+}
+
+/** 服务端补货建议项（GET /api/inventory/restock-suggest） */
+export interface RestockSuggestItem {
+  ingredientId: string
+  name?: string
+  unit?: string
+  /** 当前库存 */
+  qty?: number
+  /** 安全线 */
+  safe?: number | null
+  suggestQty?: number
+  daily?: number
+  daysLeft?: number | null
+  reason?: string
+  source?: string
+  urgency?: 'critical' | 'low' | 'watch'
+}
+
+/** GET /api/inventory/restock-suggest — 服务端补货建议（est/plans 口径） */
+export async function fetchRestockSuggest(): Promise<{
+  ok: boolean
+  mock?: boolean
+  banner?: string
+  items: RestockSuggestItem[]
+}> {
+  const { data } = await client.get('/inventory/restock-suggest')
   return data
 }
 
@@ -180,10 +205,16 @@ export async function rejectAction(
   return data
 }
 
-/** GET /api/admin/{resource}（dishes/recipes/staff/members/tables/vendors） */
-export async function fetchAdminList<T>(resource: string): Promise<T[]> {
-  const { data } = await client.get<T[] | { items: T[] }>(`/admin/${resource}`)
-  return Array.isArray(data) ? data : data.items ?? []
+/** GET /api/actions/{id}/status — 已确认单执行进度轮询 */
+export async function fetchActionStatus(id: string): Promise<{
+  ok?: boolean
+  id: string
+  status: string
+  executed_at?: string
+  error?: string
+}> {
+  const { data } = await client.get(`/actions/${encodeURIComponent(id)}/status`)
+  return data
 }
 
 /* ---------------- 菜品厨房（Sprint 1） ---------------- */
@@ -254,64 +285,4 @@ export async function fetchBooking(date: string): Promise<BookingResp> {
 export async function fetchFoodsafe(): Promise<FoodsafeResp> {
   const { data } = await client.get<FoodsafeResp>('/modules/foodsafe')
   return data
-}
-
-/** GET /api/modules/analysis */
-export async function fetchAnalysis(): Promise<AnalysisResp> {
-  const { data } = await client.get<AnalysisResp>('/modules/analysis')
-  return data
-}
-
-/** GET /api/modules/vip */
-export async function fetchVip(): Promise<VipResp> {
-  const { data } = await client.get<VipResp>('/modules/vip')
-  return data
-}
-
-/** GET /api/modules/equipment */
-export async function fetchEquipment(): Promise<EquipmentResp> {
-  const { data } = await client.get<EquipmentResp>('/modules/equipment')
-  return data
-}
-
-/** GET /api/modules/takeout */
-export async function fetchTakeout(): Promise<Record<string, unknown>> {
-  const { data } = await client.get('/modules/takeout')
-  return data
-}
-
-/** GET /api/modules/finance */
-export async function fetchFinance(): Promise<Record<string, unknown>> {
-  const { data } = await client.get('/modules/finance')
-  return data
-}
-
-/** GET /api/modules/loss */
-export async function fetchLoss(): Promise<Record<string, unknown>> {
-  const { data } = await client.get('/modules/loss')
-  return data
-}
-
-/** GET /api/modules/review */
-export async function fetchReview(): Promise<Record<string, unknown>> {
-  const { data } = await client.get('/modules/review')
-  return data
-}
-
-/** GET /api/admin/kimi-log?limit= */
-export async function fetchKimiLog(limit = 100): Promise<KimiLogItem[]> {
-  const { data } = await client.get<{ ok: boolean; items: KimiLogItem[] }>(
-    '/admin/kimi-log',
-    { params: { limit } },
-  )
-  return data.items ?? []
-}
-
-/** GET /api/admin/audit?limit= */
-export async function fetchAuditLog(limit = 100): Promise<AuditItem[]> {
-  const { data } = await client.get<{ ok: boolean; items: AuditItem[] }>(
-    '/admin/audit',
-    { params: { limit } },
-  )
-  return data.items ?? []
 }

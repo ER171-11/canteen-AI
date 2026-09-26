@@ -421,6 +421,7 @@ data class ActionListItemDto(
     val type: String? = null,
     val status: String? = null,
     val operator: String? = null,
+    val payload: JsonObject? = null,
     val rev: JsonElement? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("confirmed_at") val confirmedAt: String? = null,

@@ -11,7 +11,15 @@ export const client = axios.create({
 })
 
 client.interceptors.request.use((config) => {
-  const { token, storeId } = useAuthStore.getState()
+  const state = useAuthStore.getState()
+  /* token 本地已过期：直接登出跳登录，不再发请求 */
+  if (state.token && state.checkExpired()) {
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+    return Promise.reject(new Error('token expired'))
+  }
+  const { token, storeId } = state
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }

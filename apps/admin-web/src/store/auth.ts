@@ -23,11 +23,21 @@ interface AuthState {
   }) => void
   setStore: (p: { storeId: string; storeName: string }) => void
   logout: () => void
+  /** 主动过期检查：token 已过 expiresAt 即登出并返回 true */
+  checkExpired: () => boolean
+}
+
+/** expires_at 解析（ISO8601；非法值视为不过期，交由服务端 401 兜底） */
+function isExpired(expiresAt: string | null): boolean {
+  if (!expiresAt) return false
+  const t = new Date(expiresAt).getTime()
+  if (Number.isNaN(t)) return false
+  return t <= Date.now()
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       token: null,
       role: null,
       account: null,
@@ -68,6 +78,14 @@ export const useAuthStore = create<AuthState>()(
           permissions: [],
           canWrite: false,
         }),
+      checkExpired: () => {
+        const { token, expiresAt } = get()
+        if (token && isExpired(expiresAt)) {
+          get().logout()
+          return true
+        }
+        return false
+      },
     }),
     { name: 'panda_admin_auth' },
   ),

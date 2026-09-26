@@ -7,11 +7,13 @@ import {
   Input,
   InputNumber,
   Space,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
 import { client } from '../api/client'
 import { postAction } from '../api'
+import { useAuthStore } from '../store/auth'
 
 type Config = {
   safety_stock?: Record<string, number>
@@ -22,6 +24,8 @@ type Config = {
 }
 
 export default function SystemConfigPage() {
+  const canWrite = useAuthStore((s) => s.canWrite)
+  const noWriteTip = '当前角色无写权限（配置写仅老板/店长）'
   const [config, setConfig] = useState<Config>({})
   const [source, setSource] = useState<string>('-')
   const [rev, setRev] = useState<string | number | undefined>()
@@ -90,12 +94,19 @@ export default function SystemConfigPage() {
                 面粉: vals.flour_safe,
               },
             }
-            await postAction({
-              type: 'config.update',
-              payload,
-              operator: 'admin',
-            })
-            message.success('已入队 → 请到审批中心确认执行')
+            try {
+              /* 优先走 /api/admin/config（服务端 RBAC 更严：仅老板/店长） */
+              await client.post('/admin/config', { config: payload })
+              message.success('已入队 → 请到审批中心确认执行')
+            } catch {
+              /* 端点不可用或被拒时回退原 actions 链路 */
+              await postAction({
+                type: 'config.update',
+                payload,
+                operator: 'admin',
+              })
+              message.success('已入队（actions 链路）→ 请到审批中心确认执行')
+            }
           } catch (e: unknown) {
             const err = e as { response?: { data?: { error?: string } } }
             message.error(err.response?.data?.error || '提交失败')
@@ -116,9 +127,11 @@ export default function SystemConfigPage() {
         <Form.Item name="note" label="备注">
           <Input />
         </Form.Item>
-        <Button type="primary" htmlType="submit" loading={busy}>
-          提交配置变更
-        </Button>
+        <Tooltip title={canWrite ? undefined : noWriteTip}>
+          <Button type="primary" htmlType="submit" loading={busy} disabled={!canWrite}>
+            提交配置变更
+          </Button>
+        </Tooltip>
       </Form>
     </Card>
   )

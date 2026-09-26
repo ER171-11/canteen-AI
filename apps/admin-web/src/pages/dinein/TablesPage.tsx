@@ -169,6 +169,11 @@ export default function TablesPage() {
 
   const removeTable = (t: PosTable) => {
     const tid = String(t.id ?? t.no ?? '')
+    const label = STATUS_STYLE[normalizeStatus(t.status)]?.label ?? '空闲'
+    if (label !== '空闲') {
+      message.warning(`桌台「${t.name || tid}」当前为「${label}」，仅空闲桌台可删除`)
+      return
+    }
     Modal.confirm({
       title: `删除桌台 ${t.name || tid}？`,
       content: '仅空闲桌可删；删后需确认台落库。',

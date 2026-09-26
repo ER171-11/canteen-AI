@@ -135,7 +135,12 @@ fun AppNav(modifier: Modifier = Modifier) {
         val obs = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME && loggedIn) {
                 scope.launch {
-                    AppModule.refreshSession()
+                    val ok = AppModule.refreshSession()
+                    // token 过期被清（如超过 12h TTL）时踢回登录页，避免卡在 App 里满屏报错
+                    if (!ok && AuthTokenHolder.get().isNullOrBlank() && !AppModule.canEnterOffline()) {
+                        loggedIn = false
+                        return@launch
+                    }
                     if (AppModule.isOnline()) {
                         runCatching { AppModule.syncEngine.flush() }
                     }

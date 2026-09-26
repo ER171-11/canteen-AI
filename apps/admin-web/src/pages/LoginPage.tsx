@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Card, Form, Input, Typography, message } from 'antd'
+import { Button, Card, Form, Input, Typography, message } from 'antd'
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
 import { login as apiLogin } from '../api'
 import { getDeviceFp } from '../utils/device'
@@ -68,19 +68,12 @@ export default function LoginPage() {
           </div>
           <Typography.Text type="secondary">管理后台 · 门店岗位账号</Typography.Text>
         </div>
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message="演示：boss / manager / cashier / kitchen / finance · 密码 wufu123"
-        />
         <Form<LoginForm>
           onFinish={onFinish}
-          initialValues={{ account: 'boss', password: 'wufu123' }}
           size="large"
         >
           <Form.Item name="account" rules={[{ required: true, message: '请输入账号' }]}>
-            <Input prefix={<UserOutlined />} placeholder="账号" />
+            <Input prefix={<UserOutlined />} placeholder="岗位账号" />
           </Form.Item>
           <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
             <Input.Password prefix={<LockOutlined />} placeholder="密码" />

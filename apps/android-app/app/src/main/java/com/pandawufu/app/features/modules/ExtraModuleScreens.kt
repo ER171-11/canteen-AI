@@ -819,7 +819,7 @@ fun EquipmentScreen() {
                     val list = eq?.energy.orEmpty()
                     if (list.isEmpty()) Text("暂无能耗明细", style = MaterialTheme.typography.bodySmall)
                     list.take(20).forEach { e ->
-                        KvRow("${e.device} ${e.kind}", "${e.usage} · ${e.date}")
+                        KvRow("${e.device} ${e.kind}", "${e.usageText()} · ${e.date}")
                     }
                 }
             }
@@ -898,7 +898,7 @@ private fun EnergyBarRow(label: String, amount: Double, pct: Float) {
 fun ReviewScreen() {
     val viewModel = remember { ModulesViewModel(AppModule.modulesRepository) }
     val state by viewModel.state.collectAsState()
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by remember { mutableIntStateOf(ModuleEntry.consumePill(0).coerceIn(0, 2)) }
     val pills = listOf("评分", "差评", "好评")
     LaunchedEffect(Unit) {
         AppModule.ensureSession()

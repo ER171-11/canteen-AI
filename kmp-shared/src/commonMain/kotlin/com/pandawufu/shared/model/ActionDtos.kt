@@ -248,6 +248,21 @@ data class OrgUpdateUserResponse(
     val error: String? = null
 )
 
+/** POST /api/org/users/reset-password（需 org.write；password 缺省后端用默认密码） */
+@Serializable
+data class OrgResetPasswordRequest(
+    val account: String,
+    val password: String? = null
+)
+
+@Serializable
+data class OrgResetPasswordResponse(
+    val ok: Boolean = false,
+    val account: String? = null,
+    val reset: Boolean = false,
+    val error: String? = null
+)
+
 fun Map<String, String>.toJsonObject(): JsonObject = buildJsonObject {
     forEach { (k, v) -> put(k, v) }
 }

@@ -32,6 +32,7 @@ const ROLE_TAG_COLOR: Record<string, string> = {
   店长: COLORS.purple,
   财务: COLORS.yellow,
   厨房: COLORS.green,
+  收银: '#F48FB1',
   只读: COLORS.black,
 }
 
@@ -86,6 +87,14 @@ export default function MainLayout() {
   const matched = findLeaf(location.pathname)
   const openKey = matched?.group.key
 
+  /* 深链/直接访问时自动展开所属菜单分组 */
+  const [openKeys, setOpenKeys] = useState<string[]>(openKey ? [openKey] : [])
+  useEffect(() => {
+    if (openKey) {
+      setOpenKeys((ks) => (ks.includes(openKey) ? ks : [...ks, openKey]))
+    }
+  }, [openKey])
+
   const onLogout = () => {
     logout()
     navigate('/login', { replace: true })
@@ -120,7 +129,8 @@ export default function MainLayout() {
           mode="inline"
           items={menuItems}
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={openKey ? [openKey] : []}
+          openKeys={openKeys}
+          onOpenChange={(keys) => setOpenKeys(keys as string[])}
           onClick={({ key }) => navigate(key)}
         />
       </Sider>

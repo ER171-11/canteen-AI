@@ -220,7 +220,8 @@ const server = http.createServer(async (req, res) => {
         service: 'canteenAI-bff',
         models: kimi.MODEL_CANDIDATES,
         key_loaded: !!process.env.KIMI_API_KEY,
-        rev: snap ? snap.rev : null
+        rev: snap ? snap.rev : null,
+        updated_at: snap ? (snap.updated_at || snap.generated_at || null) : null
       }, traceId);
     }
 

@@ -399,12 +399,13 @@ object BossIa {
             route = "m/vip",
             gridSub = "储值/券/生日",
             oneLiner = "熟客经营 · 储值/券/生日",
-            pills = listOf("会员", "储值", "券", "生日"),
+            pills = listOf("会员", "储值", "券", "生日", "到店"),
             leaves = mapOf(
                 "会员" to listOf("会员数/活跃", "等级分布", "到店识别 vip.checkin"),
                 "储值" to listOf("储值余额", "充值活动"),
                 "券" to listOf("在发券种", "核销概况", "收银核券联动"),
-                "生日" to listOf("近七日寿星", "关怀/发券")
+                "生日" to listOf("近七日寿星", "关怀/发券"),
+                "到店" to listOf("到店识别记录", "到店欢迎/关怀")
             ),
             bossAsk = "熟客回来了吗？券还能不能在前厅核？",
             keywords = "会员 储值 券 生日 前厅 熟客",

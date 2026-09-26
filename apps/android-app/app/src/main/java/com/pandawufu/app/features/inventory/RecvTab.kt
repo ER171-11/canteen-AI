@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.pandawufu.app.AppModule
 import com.pandawufu.app.confirm.ConfirmBus
 import com.pandawufu.app.confirm.ConfirmRequest
+import com.pandawufu.app.confirm.KimiCtaByType
 import com.pandawufu.app.features.kitchen.StatusTag
 import com.pandawufu.app.ui.designsystem.CardBg
 import com.pandawufu.app.ui.designsystem.FiveGreen
@@ -96,6 +97,8 @@ fun RecvTab(
                 }
             }
         }
+
+        item { KimiCtaByType("recv", baseRev = state.rev) }
 
         item {
             Text("待入库（${awaiting.size}）", style = MaterialTheme.typography.titleMedium)

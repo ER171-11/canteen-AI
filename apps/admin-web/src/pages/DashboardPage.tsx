@@ -3,6 +3,7 @@ import {
   Alert,
   Card,
   Col,
+  DatePicker,
   List,
   Row,
   Space,
@@ -12,6 +13,7 @@ import {
   Typography,
 } from 'antd'
 import { useNavigate } from 'react-router-dom'
+import dayjs, { type Dayjs } from 'dayjs'
 import { fetchReportDaily } from '../api'
 import type { AlertItem, ReportDaily, TodoItem } from '../api/types'
 import { resolveDeepLink } from '../config/menu'
@@ -87,20 +89,22 @@ export default function DashboardPage() {
   const [report, setReport] = useState<ReportDaily | null>(null)
   const [isMock, setIsMock] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [date, setDate] = useState<Dayjs>(dayjs())
 
   useEffect(() => {
-    fetchReportDaily()
+    setLoading(true)
+    fetchReportDaily(date.format('YYYY-MM-DD'))
       .then((data) => {
         const n = normalizeReport(data)
         setReport(n)
         setIsMock(!!n.mock)
       })
       .catch(() => {
-        setReport(normalizeReport(MOCK_REPORT))
+        setReport(normalizeReport({ ...MOCK_REPORT, date: date.format('YYYY-MM-DD') }))
         setIsMock(true)
       })
       .finally(() => setLoading(false))
-  }, [])
+  }, [date])
 
   const age = useMemo(() => ageMinutes(report?.generated_at), [report?.generated_at])
   const stale = age != null && age > 15
@@ -154,9 +158,17 @@ export default function DashboardPage() {
           marginBottom: 16,
         }}
       >
-        <Typography.Title level={4} style={{ color: '#fff', margin: 0 }}>
-          经营看板 · {report.date}
-        </Typography.Title>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <Typography.Title level={4} style={{ color: '#fff', margin: 0 }}>
+            经营看板 · {report.date}
+          </Typography.Title>
+          <DatePicker
+            value={date}
+            allowClear={false}
+            disabledDate={(d) => d.isAfter(dayjs(), 'day')}
+            onChange={(d) => d && setDate(d)}
+          />
+        </div>
         <div style={{ marginTop: 8, opacity: 0.92 }}>
           {report.banner ?? '五福临门，今日加油！'}
         </div>

@@ -27,6 +27,7 @@ import com.pandawufu.app.AppModule
 import com.pandawufu.shared.model.OrgCreateStoreRequest
 import com.pandawufu.shared.model.OrgCreateUserRequest
 import com.pandawufu.shared.model.OrgOverviewResponse
+import com.pandawufu.shared.model.OrgResetPasswordRequest
 import com.pandawufu.shared.model.OrgUpdateUserRequest
 import kotlinx.coroutines.launch
 
@@ -38,6 +39,7 @@ fun OrgScreen() {
     var error by remember { mutableStateOf<String?>(null) }
     var showCreateUser by remember { mutableStateOf(false) }
     var showCreateStore by remember { mutableStateOf(false) }
+    var resetTarget by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val canWriteOrg = AppModule.can("org", write = true) ||
@@ -124,33 +126,90 @@ fun OrgScreen() {
                         )
                         val acc = u.account
                         if (canWriteOrg && !acc.isNullOrBlank() && acc != AppModule.account) {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        try {
-                                            AppModule.ensureSession()
-                                            val resp = AppModule.bffClient.orgUpdateUser(
-                                                OrgUpdateUserRequest(account = acc, status = "disabled")
-                                            )
-                                            Toast.makeText(
-                                                context,
-                                                if (resp.ok) "已停用 $acc" else (resp.error ?: "失败"),
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                            if (resp.ok) reload()
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, e.message ?: "失败", Toast.LENGTH_SHORT).show()
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { resetTarget = acc },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("重置密码") }
+                                OutlinedButton(
+                                    onClick = {
+                                        scope.launch {
+                                            try {
+                                                AppModule.ensureSession()
+                                                val resp = AppModule.bffClient.orgUpdateUser(
+                                                    OrgUpdateUserRequest(account = acc, status = "disabled")
+                                                )
+                                                Toast.makeText(
+                                                    context,
+                                                    if (resp.ok) "已停用 $acc" else (resp.error ?: "失败"),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                if (resp.ok) reload()
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, e.message ?: "失败", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
-                                    }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text("停用 $acc") }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("停用 $acc") }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    resetTarget?.let { acc ->
+        var newPassword by remember { mutableStateOf("wufu123") }
+        AlertDialog(
+            onDismissRequest = { resetTarget = null },
+            title = { Text("重置密码 · $acc") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = newPassword,
+                        onValueChange = { newPassword = it },
+                        label = { Text("新密码（留空则用默认密码）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("重置后请线下告知员工，并提醒尽快修改", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    scope.launch {
+                        try {
+                            AppModule.ensureSession()
+                            val resp = AppModule.bffClient.orgResetPassword(
+                                OrgResetPasswordRequest(
+                                    account = acc,
+                                    password = newPassword.trim().ifBlank { null }
+                                )
+                            )
+                            Toast.makeText(
+                                context,
+                                if (resp.ok) "已重置 $acc 密码：${newPassword.trim().ifBlank { "默认密码" }}"
+                                else (resp.error ?: "重置失败"),
+                                Toast.LENGTH_LONG
+                            ).show()
+                            if (resp.ok) resetTarget = null
+                        } catch (e: Exception) {
+                            Toast.makeText(context, e.message ?: "重置失败", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }) { Text("确认重置") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { resetTarget = null }) { Text("取消") }
+            }
+        )
     }
 
     if (showCreateStore) {

@@ -1,19 +1,57 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
+  AutoComplete,
   Button,
   Card,
+  DatePicker,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import dayjs, { type Dayjs } from 'dayjs'
 import { client } from '../api/client'
 import { postAction, fetchSnapshot } from '../api'
+import { useAuthStore } from '../store/auth'
 
 type Row = Record<string, unknown>
+type Opt = { value: string | number; label: string }
+
+type WriteField = {
+  name: string
+  label: string
+  type: 'text' | 'number' | 'select' | 'date'
+  required?: boolean
+  min?: number
+  max?: number
+  initial?: unknown
+  placeholder?: string
+  options?: Opt[]
+  /** 动态选项：快照原料 / 菜品（AutoComplete 渲染，允许自由输入） */
+  optionsFrom?: 'ings' | 'dishes'
+  /** 从主表 rows 按字段去重取选项 */
+  optionsFromRows?: string
+}
+
+type PageAction = {
+  label: string
+  type: string
+  build: (rows: Row[], values?: Record<string, unknown>) => Record<string, unknown>
+  summary: (rows: Row[]) => string
+  /** 有 fields 时先弹 Modal 真表单，确认后入队 */
+  fields?: WriteField[]
+  /** 返回禁用原因；null 表示可用 */
+  disabledReason?: (rows: Row[]) => string | null
+}
 
 type PageCfg = {
   title: string
@@ -21,18 +59,15 @@ type PageCfg = {
   listKey: string
   columns: ColumnsType<Row>
   /** 页面级写操作 */
-  actions?: Array<{
-    label: string
-    type: string
-    build: (rows: Row[]) => Record<string, unknown>
-    summary: (rows: Row[]) => string
-  }>
+  actions?: PageAction[]
   /** 行级写操作 */
   rowAction?: {
     label: string
     type: string
     build: (row: Row) => Record<string, unknown>
     summary: (row: Row) => string
+    /** 行不满足条件时隐藏按钮（如已处理差评） */
+    visibleWhen?: (row: Row) => boolean
   }
   emptyHint?: string
   /** 额外从 snapshot 取数 */
@@ -78,6 +113,8 @@ const COL = {
   }),
 }
 
+const PLATFORM_OPTS: Opt[] = ['美团', '饿了么', '京东到家'].map((p) => ({ value: p, label: p }))
+
 const PAGES: Record<string, PageCfg> = {
   'dinein/orders': {
     title: '外卖订单',
@@ -95,8 +132,18 @@ const PAGES: Record<string, PageCfg> = {
       {
         label: '对账确认',
         type: 'takeout.ack',
-        summary: () => '确认今日外卖对账',
-        build: () => ({ platform: '美团', status: '已对账', note: 'admin 对账' }),
+        summary: () => '确认外卖对账',
+        fields: [
+          {
+            name: 'platform',
+            label: '平台',
+            type: 'select',
+            required: true,
+            initial: '美团',
+            options: PLATFORM_OPTS,
+          },
+        ],
+        build: (_rows, v) => ({ platform: v?.platform, status: '已对账', note: 'admin 对账' }),
       },
     ],
   },
@@ -118,8 +165,17 @@ const PAGES: Record<string, PageCfg> = {
         label: '标记已对账',
         type: 'takeout.ack',
         summary: () => '将本期对账标为已对账',
-        build: (rows) => ({
-          platform: String(rows[0]?.platform || '美团'),
+        fields: [
+          {
+            name: 'platform',
+            label: '平台',
+            type: 'select',
+            required: true,
+            options: PLATFORM_OPTS,
+          },
+        ],
+        build: (rows, v) => ({
+          platform: v?.platform ?? String(rows[0]?.platform || '美团'),
           status: '已对账',
           amount: rows[0]?.actual_amt,
         }),
@@ -148,6 +204,8 @@ const PAGES: Record<string, PageCfg> = {
       label: '跟进',
       type: 'review.followup',
       summary: (r) => `跟进评价 #${r.id}`,
+      /* 已处理的评价不再展示跟进入口 */
+      visibleWhen: (r) => Number(r.handled) !== 1,
       build: (r) => ({
         review_id: r.id,
         action: '电话回访致歉',
@@ -246,9 +304,19 @@ const PAGES: Record<string, PageCfg> = {
         label: '推送生日礼券',
         type: 'vip.campaign',
         summary: (rows) => `为 ${rows.length || 0} 位会员推送生日礼券`,
-        build: (rows) => ({
+        fields: [
+          {
+            name: 'value',
+            label: '礼券面额（元）',
+            type: 'number',
+            required: true,
+            min: 1,
+            initial: 30,
+          },
+        ],
+        build: (rows, v) => ({
           campaign_type: '生日礼',
-          value: 30,
+          value: v?.value ?? 30,
           code: `BDY${Date.now() % 100000}`,
           member_ids: rows.map((r) => r.member_id).filter(Boolean),
         }),
@@ -272,19 +340,47 @@ const PAGES: Record<string, PageCfg> = {
       {
         label: '登记换班',
         type: 'staff.shift_upsert',
-        summary: () => '登记今日早班',
-        build: () => ({
-          staff_id: 'admin',
-          staff_name: '管理员',
-          shift: '早班',
-          role: '店长',
+        summary: () => '登记换班',
+        fields: [
+          { name: 'staff_name', label: '员工', type: 'select', required: true, optionsFromRows: 'staff_name' },
+          { name: 'date', label: '日期', type: 'date', required: true, initial: dayjs() },
+          {
+            name: 'shift',
+            label: '班次',
+            type: 'select',
+            required: true,
+            initial: '早班',
+            options: ['早班', '中班', '晚班'].map((s) => ({ value: s, label: s })),
+          },
+        ],
+        build: (_rows, v) => ({
+          staff_name: v?.staff_name,
+          date: v?.date ? (v.date as Dayjs).format('YYYY-MM-DD') : undefined,
+          shift: v?.shift,
         }),
       },
       {
         label: '补打卡',
         type: 'staff.clock',
-        summary: () => '补录上班打卡',
-        build: () => ({ staff_id: 'admin', kind: '上班', status: '补录' }),
+        summary: () => '补录打卡',
+        fields: [
+          { name: 'staff_name', label: '员工', type: 'select', required: true, optionsFromRows: 'staff_name' },
+          {
+            name: 'kind',
+            label: '类型',
+            type: 'select',
+            required: true,
+            initial: '上班',
+            options: ['上班', '下班'].map((s) => ({ value: s, label: s })),
+          },
+          { name: 'time', label: '打卡时间', type: 'text', required: true, placeholder: 'HH:mm，如 09:00' },
+        ],
+        build: (_rows, v) => ({
+          staff_name: v?.staff_name,
+          kind: v?.kind,
+          time: v?.time,
+          status: '补录',
+        }),
       },
     ],
     secondary: {
@@ -333,27 +429,19 @@ const PAGES: Record<string, PageCfg> = {
       {
         label: '分析转补货建议',
         type: 'analysis.restock',
-        summary: (rows) => {
-          const fc = rows as Row[]
-          return fc.length
-            ? `按预测备货 ${fc.length} 项转采购草稿`
-            : '按分析生成补货草稿'
-        },
-        build: (rows) => {
-          const items =
-            rows.length > 0 && rows[0]?.name
-              ? rows.map((r) => ({
-                  name: r.name,
-                  qty: r.qty ?? r.opt ?? 10,
-                  price: r.amount ?? 28,
-                }))
-              : [{ name: '猪肉馅', qty: 10, price: 28 }]
-          return {
-            supplier: '分析建议',
-            note: '管理端经营分析一键转补货（同源 App forecast）',
-            items,
-          }
-        },
+        summary: (rows) => `按预测备货 ${rows.length} 项转采购草稿`,
+        /* 无 AI 预测数据时禁用，不再硬编码兜底项 */
+        disabledReason: (rows) =>
+          rows.length > 0 ? null : '暂无 AI 预测备货数据，无法生成补货草稿',
+        build: (rows) => ({
+          supplier: '分析建议',
+          note: '管理端经营分析一键转补货（同源 App forecast）',
+          items: rows.map((r) => ({
+            name: r.name,
+            qty: r.qty ?? r.opt ?? 10,
+            price: r.amount ?? 0,
+          })),
+        }),
       },
     ],
     secondary: {
@@ -399,12 +487,17 @@ const PAGES: Record<string, PageCfg> = {
       {
         label: '提交报损',
         type: 'loss.report',
-        summary: () => '报损面粉 1kg',
-        build: () => ({
-          name: '面粉',
-          ing_name: '面粉',
-          qty: 1,
-          reason: '受潮',
+        summary: () => '提交报损单',
+        fields: [
+          { name: 'ing_name', label: '原料', type: 'select', required: true, optionsFrom: 'ings', placeholder: '从产品库选或输入' },
+          { name: 'qty', label: '数量', type: 'number', required: true, min: 0.01, initial: 1 },
+          { name: 'reason', label: '原因', type: 'text', required: true, placeholder: '如 受潮 / 过期 / 破损' },
+        ],
+        build: (_rows, v) => ({
+          name: v?.ing_name,
+          ing_name: v?.ing_name,
+          qty: v?.qty,
+          reason: v?.reason,
           reporter: 'admin',
         }),
       },
@@ -427,11 +520,23 @@ const PAGES: Record<string, PageCfg> = {
       {
         label: '登记留样',
         type: 'sample.log',
-        summary: () => '午餐留样 125g',
-        build: () => ({
-          meal: '午餐',
-          dish: '五福饺',
-          weight_g: 125,
+        summary: () => '登记留样',
+        fields: [
+          { name: 'dish', label: '菜品', type: 'select', required: true, optionsFrom: 'dishes', placeholder: '从菜品库选或输入' },
+          { name: 'weight_g', label: '克重（g）', type: 'number', required: true, min: 1, initial: 125 },
+          {
+            name: 'meal',
+            label: '餐次',
+            type: 'select',
+            required: true,
+            initial: '午餐',
+            options: ['早餐', '午餐', '晚餐'].map((s) => ({ value: s, label: s })),
+          },
+        ],
+        build: (_rows, v) => ({
+          meal: v?.meal,
+          dish: v?.dish,
+          weight_g: v?.weight_g,
           keeper: 'admin',
         }),
       },
@@ -479,12 +584,24 @@ const PAGES: Record<string, PageCfg> = {
       {
         label: '登记维保',
         type: 'equipment.maintain',
-        summary: () => '冷藏柜巡检',
-        build: () => ({
-          device: '冷藏柜-1',
-          kind: '巡检',
+        summary: () => '登记设备维保',
+        fields: [
+          { name: 'device', label: '设备', type: 'select', required: true, optionsFromRows: 'device', placeholder: '从设备列表选或输入' },
+          {
+            name: 'kind',
+            label: '类型',
+            type: 'select',
+            required: true,
+            initial: '巡检',
+            options: ['巡检', '保养', '维修'].map((s) => ({ value: s, label: s })),
+          },
+          { name: 'note', label: '备注', type: 'text', placeholder: '后台登记' },
+        ],
+        build: (_rows, v) => ({
+          device: v?.device,
+          kind: v?.kind,
           operator: 'admin',
-          note: '后台登记',
+          note: v?.note || '后台登记',
         }),
       },
     ],
@@ -569,12 +686,20 @@ const PAGES: Record<string, PageCfg> = {
       {
         label: '冻结分账',
         type: 'finance.freeze',
-        summary: () => '冻结合伙人分账',
-        build: () => ({
-          party: '合伙人',
-          amount: 5000,
-          ratio: 0.3,
-          frozen_until: '2099-12-31',
+        summary: () => '冻结分账',
+        fields: [
+          { name: 'party', label: '分账方', type: 'text', required: true, initial: '合伙人' },
+          { name: 'amount', label: '金额（元）', type: 'number', required: true, min: 0.01 },
+          { name: 'ratio', label: '比例（0-1）', type: 'number', required: true, min: 0, max: 1, initial: 0.3 },
+          { name: 'frozen_until', label: '冻结至', type: 'date', required: true, initial: dayjs().add(30, 'day') },
+        ],
+        build: (_rows, v) => ({
+          party: v?.party,
+          amount: v?.amount,
+          ratio: v?.ratio,
+          frozen_until: v?.frozen_until
+            ? (v.frozen_until as Dayjs).format('YYYY-MM-DD')
+            : undefined,
         }),
       },
     ],
@@ -624,6 +749,8 @@ const PAGES: Record<string, PageCfg> = {
 
 export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
   const cfg = PAGES[routeKey]
+  const canWrite = useAuthStore((s) => s.canWrite)
+  const noWriteTip = '当前角色无写权限，仅可查看'
   const [rows, setRows] = useState<Row[]>([])
   const [secondaryRows, setSecondaryRows] = useState<Row[]>([])
   const [tertiaryRows, setTertiaryRows] = useState<Row[]>([])
@@ -632,6 +759,10 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
   const [hint, setHint] = useState<string | null>(null)
   const [rev, setRev] = useState<string | number | undefined>()
   const [busy, setBusy] = useState(false)
+  const [formAction, setFormAction] = useState<PageAction | null>(null)
+  const [ingsOpts, setIngsOpts] = useState<Opt[]>([])
+  const [dishOpts, setDishOpts] = useState<Opt[]>([])
+  const [writeForm] = Form.useForm()
 
   const pickList = (data: Record<string, unknown>, key: string, nested?: string): Row[] => {
     let cur: unknown = data?.[key]
@@ -695,44 +826,148 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
     load()
   }, [load])
 
+  const submitAction = async (a: PageAction, values?: Record<string, unknown>) => {
+    setBusy(true)
+    try {
+      await postAction({
+        type: a.type,
+        payload: a.build(actionRows, values),
+        operator: 'admin',
+      })
+      message.success(`${a.label}已入队 → 请到审批中心确认`)
+      setFormAction(null)
+      load()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '提交失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 打开真表单；按需预取动态选项（原料 / 菜品） */
+  const openForm = (a: PageAction) => {
+    writeForm.resetFields()
+    setFormAction(a)
+    if (a.fields?.some((f) => f.optionsFrom === 'ings')) {
+      fetchSnapshot()
+        .then((snap) => {
+          const ings = (snap.data?.ings ?? []) as Array<{ name?: string; unit?: string }>
+          setIngsOpts(
+            ings
+              .filter((g) => g.name)
+              .map((g) => ({
+                value: String(g.name),
+                label: `${g.name}${g.unit ? ` · ${g.unit}` : ''}`,
+              })),
+          )
+        })
+        .catch(() => setIngsOpts([]))
+    }
+    if (a.fields?.some((f) => f.optionsFrom === 'dishes')) {
+      client
+        .get('/admin/dishes')
+        .then(({ data }) => {
+          const items = (data?.items ?? []) as Array<{ name?: string }>
+          setDishOpts(
+            items.filter((d) => d.name).map((d) => ({ value: String(d.name), label: String(d.name) })),
+          )
+        })
+        .catch(() => setDishOpts([]))
+    }
+  }
+
+  const fieldOptions = (f: WriteField): Opt[] => {
+    if (f.options) return f.options
+    if (f.optionsFrom === 'ings') return ingsOpts
+    if (f.optionsFrom === 'dishes') return dishOpts
+    if (f.optionsFromRows) {
+      const seen = new Set<string>()
+      const out: Opt[] = []
+      for (const r of rows) {
+        const v = r[f.optionsFromRows]
+        if (v != null && v !== '' && !seen.has(String(v))) {
+          seen.add(String(v))
+          out.push({ value: String(v), label: String(v) })
+        }
+      }
+      return out
+    }
+    return []
+  }
+
+  const renderField = (f: WriteField) => {
+    const common = { placeholder: f.placeholder }
+    if (f.type === 'number') {
+      return <InputNumber min={f.min} max={f.max} style={{ width: '100%' }} {...common} />
+    }
+    if (f.type === 'date') {
+      return <DatePicker style={{ width: '100%' }} allowClear={false} />
+    }
+    if (f.type === 'select') {
+      const opts = fieldOptions(f)
+      /* 动态来源（原料/菜品/设备/员工）允许自由输入 */
+      if (f.optionsFrom || f.optionsFromRows) {
+        return (
+          <AutoComplete
+            options={opts}
+            filterOption={(input, opt) =>
+              String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            {...common}
+          />
+        )
+      }
+      return <Select options={opts} {...common} />
+    }
+    return <Input {...common} />
+  }
+
   const columns = useMemo(() => {
     if (!cfg) return []
     const cols = [...cfg.columns]
     if (cfg.rowAction) {
+      const ra = cfg.rowAction
       cols.push({
         title: '操作',
         key: '_op',
         width: 110,
-        render: (_: unknown, row: Row) => (
-          <Button
-            size="small"
-            type="link"
-            loading={busy}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await postAction({
-                  type: cfg.rowAction!.type,
-                  payload: cfg.rowAction!.build(row),
-                  operator: 'admin',
-                })
-                message.success('已入队，请到审批中心确认执行')
-                load()
-              } catch (e: unknown) {
-                const err = e as { response?: { data?: { error?: string } } }
-                message.error(err.response?.data?.error || '提交失败')
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            {cfg.rowAction!.label}
-          </Button>
-        ),
+        render: (_: unknown, row: Row) => {
+          if (ra.visibleWhen && !ra.visibleWhen(row)) return <span>-</span>
+          return (
+            <Tooltip title={canWrite ? undefined : noWriteTip}>
+              <Button
+                size="small"
+                type="link"
+                disabled={!canWrite}
+                loading={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    await postAction({
+                      type: ra.type,
+                      payload: ra.build(row),
+                      operator: 'admin',
+                    })
+                    message.success('已入队，请到审批中心确认执行')
+                    load()
+                  } catch (e: unknown) {
+                    const err = e as { response?: { data?: { error?: string } } }
+                    message.error(err.response?.data?.error || '提交失败')
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              >
+                {ra.label}
+              </Button>
+            </Tooltip>
+          )
+        },
       })
     }
     return cols
-  }, [cfg, busy, load])
+  }, [cfg, busy, load, canWrite])
 
   if (!cfg) {
     return (
@@ -765,32 +1000,29 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
       )}
       {cfg.actions && cfg.actions.length > 0 && (
         <Space wrap style={{ marginBottom: 12 }}>
-          {cfg.actions.map((a) => (
-            <Button
-              key={a.type + a.label}
-              type="primary"
-              loading={busy}
-              onClick={async () => {
-                setBusy(true)
-                try {
-                  await postAction({
-                    type: a.type,
-                    payload: a.build(actionRows),
-                    operator: 'admin',
-                  })
-                  message.success(`${a.label}已入队 → 请到审批中心确认`)
-                  load()
-                } catch (e: unknown) {
-                  const err = e as { response?: { data?: { error?: string } } }
-                  message.error(err.response?.data?.error || '提交失败')
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              {a.label}
-            </Button>
-          ))}
+          {cfg.actions.map((a) => {
+            const reason = a.disabledReason?.(actionRows) ?? null
+            const disabled = !canWrite || reason != null
+            const tip = !canWrite ? noWriteTip : (reason ?? undefined)
+            return (
+              <Tooltip key={a.type + a.label} title={tip}>
+                <Button
+                  type="primary"
+                  disabled={disabled}
+                  loading={busy}
+                  onClick={() => {
+                    if (a.fields?.length) {
+                      openForm(a)
+                    } else {
+                      submitAction(a)
+                    }
+                  }}
+                >
+                  {a.label}
+                </Button>
+              </Tooltip>
+            )
+          })}
           <Typography.Text type="secondary">写操作经确认台，不会直连店内库</Typography.Text>
         </Space>
       )}
@@ -826,6 +1058,31 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
           />
         </div>
       )}
+      <Modal
+        title={formAction?.label ?? ''}
+        open={!!formAction}
+        onCancel={() => setFormAction(null)}
+        confirmLoading={busy}
+        destroyOnClose
+        onOk={async () => {
+          const values = await writeForm.validateFields()
+          if (formAction) await submitAction(formAction, values)
+        }}
+      >
+        <Form form={writeForm} layout="vertical" preserve={false}>
+          {formAction?.fields?.map((f) => (
+            <Form.Item
+              key={f.name}
+              name={f.name}
+              label={f.label}
+              initialValue={f.initial}
+              rules={f.required ? [{ required: true, message: `请填写${f.label}` }] : undefined}
+            >
+              {renderField(f)}
+            </Form.Item>
+          ))}
+        </Form>
+      </Modal>
     </Card>
   )
 }

@@ -19,8 +19,26 @@ object OpsSignal {
         private set
     var refreshHomeTick by mutableIntStateOf(0)
         private set
-    var hideTodoKinds by mutableStateOf(setOf<String>())
-        private set
+    private var _hideTodoKinds by mutableStateOf(setOf<String>())
+    private var hideDay: String? = null
+
+    /** 被消待办按日 key 复位：跨天后同类待办要重新出现 */
+    val hideTodoKinds: Set<String>
+        get() {
+            resetHidesIfNewDay()
+            return _hideTodoKinds
+        }
+
+    private fun todayKey(): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.CHINA).format(java.util.Date())
+
+    private fun resetHidesIfNewDay() {
+        val today = todayKey()
+        if (hideDay != today) {
+            hideDay = today
+            if (_hideTodoKinds.isNotEmpty()) _hideTodoKinds = emptySet()
+        }
+    }
 
     fun afterConfirm(type: String, executed: Boolean = true, detail: String? = null) {
         lastDetail = detail?.takeIf { it.isNotBlank() }
@@ -30,7 +48,10 @@ object OpsSignal {
                 banner = "$done · 打开「进销 → 采购」看草稿 PO"
                 bannerRoute = "inventory/purchase"
                 // 仅真正执行后才消掉首页补货待办，避免「入队即假装办完」
-                if (executed) hideTodoKinds = hideTodoKinds + "restock"
+                if (executed) {
+                    resetHidesIfNewDay()
+                    _hideTodoKinds = _hideTodoKinds + "restock"
+                }
             }
             type.startsWith("recv") || type == "order.mark" -> {
                 banner = if (executed) "采购/入库已落库 · 打开进销核对"
@@ -45,7 +66,10 @@ object OpsSignal {
             type.startsWith("workorder") -> {
                 banner = "$done · 打开「厨房 → 工单」"
                 bannerRoute = "kitchen"
-                if (executed) hideTodoKinds = hideTodoKinds + "prep"
+                if (executed) {
+                    resetHidesIfNewDay()
+                    _hideTodoKinds = _hideTodoKinds + "prep"
+                }
             }
             type.startsWith("pos.pay") -> {
                 banner = if (executed) "结账已落库·已按菜谱扣料" else "$done · 等消费器扣 BOM"
@@ -112,7 +136,8 @@ object OpsSignal {
 
     fun hideTodo(kind: String) {
         if (kind.isBlank()) return
-        hideTodoKinds = hideTodoKinds + kind
+        resetHidesIfNewDay()
+        _hideTodoKinds = _hideTodoKinds + kind
     }
 
     fun peekBanner(): String? = banner

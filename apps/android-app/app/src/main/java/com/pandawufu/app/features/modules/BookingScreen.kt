@@ -369,7 +369,8 @@ fun BookingScreen() {
             }
             else -> {
                 ModuleCard("翻台预估 · 下一时段") {
-                    KvRow("平均翻台时长", "~$turnMin 分钟")
+                    KvRow("平均翻台时长（预估）", "~$turnMin 分钟")
+                    Text("按「10 + 就餐×2 + 排队组数」公式预估，非实测", color = Sub, fontSize = 12.sp)
                     Text(
                         if (turnMin <= 12) "优于基线 · 可加快叫号" else "偏慢 · 建议清台优先",
                         color = FiveGreen,

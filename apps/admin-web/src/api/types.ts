@@ -78,7 +78,7 @@ export interface Health {
   updated_at?: string
   time?: string
   models?: string[]
-  keyLoaded?: boolean
+  key_loaded?: boolean
 }
 
 /** GET /api/snapshot/latest */

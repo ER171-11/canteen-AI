@@ -367,6 +367,7 @@ export default function RecipesPage() {
                         <Select
                           showSearch
                           allowClear
+                          mode="tags"
                           placeholder={ings.length ? '从产品库选或输入' : '输入原料名'}
                           options={ings.map((g) => ({
                             value: g.name,
@@ -374,13 +375,14 @@ export default function RecipesPage() {
                           }))}
                           optionFilterProp="label"
                           onChange={(val) => {
-                            const hit = ings.find((g) => g.name === val)
-                            if (hit?.unit) {
-                              const cur = form.getFieldValue(key) || []
-                              const next = [...cur]
-                              next[field.name] = { ...(next[field.name] || {}), name: val, unit: hit.unit }
-                              form.setFieldValue(key, next)
-                            }
+                            /* tags 模式允许自由输入新原料名：取最后一项并收敛为单值 */
+                            const name = Array.isArray(val) ? val[val.length - 1] : val
+                            const cur = form.getFieldValue(key) || []
+                            const next = [...cur]
+                            next[field.name] = { ...(next[field.name] || {}), name }
+                            const hit = ings.find((g) => g.name === name)
+                            if (hit?.unit) next[field.name].unit = hit.unit
+                            form.setFieldValue(key, next)
                           }}
                         />
                       </Form.Item>

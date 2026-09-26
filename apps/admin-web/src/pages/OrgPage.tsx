@@ -12,6 +12,8 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
+  Typography,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -23,6 +25,44 @@ import {
   updateOrgUser,
 } from '../api'
 import type { OrgOverview, OrgPosition, OrgUser } from '../api/types'
+import { useAuthStore } from '../store/auth'
+
+/** 生成随机强密码（重置/新建账号用，一次性展示） */
+function genPassword(len = 12): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#%&*'
+  const buf = new Uint32Array(len)
+  crypto.getRandomValues(buf)
+  return Array.from(buf, (n) => chars[n % chars.length]).join('')
+}
+
+/** 一次性展示新密码（带复制按钮），关闭后不可再见 */
+function showPasswordOnce(title: string, account: string, password: string) {
+  Modal.info({
+    title,
+    width: 440,
+    content: (
+      <Space direction="vertical" style={{ width: '100%', marginTop: 8 }}>
+        <Typography.Text>
+          账号 <Typography.Text strong>{account}</Typography.Text> 的新密码（仅本次展示，请妥善保管）：
+        </Typography.Text>
+        <Space.Compact style={{ width: '100%' }}>
+          <Input readOnly value={password} onFocus={(e) => e.target.select()} />
+          <Button
+            type="primary"
+            onClick={() => {
+              navigator.clipboard
+                ?.writeText(password)
+                .then(() => message.success('已复制'))
+                .catch(() => message.warning('复制失败，请手动选择复制'))
+            }}
+          >
+            复制
+          </Button>
+        </Space.Compact>
+      </Space>
+    ),
+  })
+}
 
 const MODULE_LABELS: Record<string, string> = {
   inventory: '进销存',
@@ -44,6 +84,11 @@ const MODULE_LABELS: Record<string, string> = {
 }
 
 export default function OrgPage() {
+  const role = useAuthStore((s) => s.role)
+  const permissions = useAuthStore((s) => s.permissions)
+  /* org.write 服务端仅老板（或显式授权岗位）可写，其余角色前端直接禁用 */
+  const canOrgWrite = role === '老板' || permissions.includes('org.write')
+  const noWriteTip = '当前角色无组织写权限（需老板 org.write）'
   const [data, setData] = useState<OrgOverview | null>(null)
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -92,52 +137,62 @@ export default function OrgPage() {
       width: 220,
       render: (_, r) => (
         <Space size={4} wrap>
-          <Button
-            size="small"
-            onClick={() => {
-              setEditingUser(r)
-              userForm.setFieldsValue({
-                account: r.account,
-                display_name: r.display_name,
-                position_id: r.position_id,
-                status: r.status === 'disabled' || r.status === '停用' ? 'disabled' : 'active',
-              })
-              setUserOpen(true)
-            }}
-          >
-            改岗
-          </Button>
-          <Button
-            size="small"
-            onClick={async () => {
-              try {
-                await resetOrgPassword({ account: r.account, password: 'wufu123' })
-                message.success(`${r.account} 密码已重置为 wufu123`)
-              } catch (e: unknown) {
-                const err = e as { response?: { data?: { error?: string } } }
-                message.error(err.response?.data?.error || '重置失败')
-              }
-            }}
-          >
-            重置密码
-          </Button>
-          <Button
-            size="small"
-            danger={!(r.status === 'disabled' || r.status === '停用')}
-            onClick={async () => {
-              const next = r.status === 'disabled' || r.status === '停用' ? 'active' : 'disabled'
-              try {
-                await updateOrgUser({ account: r.account, status: next })
-                message.success(next === 'disabled' ? '已停用' : '已启用')
-                load()
-              } catch (e: unknown) {
-                const err = e as { response?: { data?: { error?: string } } }
-                message.error(err.response?.data?.error || '失败')
-              }
-            }}
-          >
-            {r.status === 'disabled' || r.status === '停用' ? '启用' : '停用'}
-          </Button>
+          <Tooltip title={canOrgWrite ? undefined : noWriteTip}>
+            <Button
+              size="small"
+              disabled={!canOrgWrite}
+              onClick={() => {
+                setEditingUser(r)
+                userForm.setFieldsValue({
+                  account: r.account,
+                  display_name: r.display_name,
+                  position_id: r.position_id,
+                  status: r.status === 'disabled' || r.status === '停用' ? 'disabled' : 'active',
+                })
+                setUserOpen(true)
+              }}
+            >
+              改岗
+            </Button>
+          </Tooltip>
+          <Tooltip title={canOrgWrite ? undefined : noWriteTip}>
+            <Button
+              size="small"
+              disabled={!canOrgWrite}
+              onClick={async () => {
+                const pwd = genPassword()
+                try {
+                  await resetOrgPassword({ account: r.account, password: pwd })
+                  showPasswordOnce('密码已重置', r.account, pwd)
+                } catch (e: unknown) {
+                  const err = e as { response?: { data?: { error?: string } } }
+                  message.error(err.response?.data?.error || '重置失败')
+                }
+              }}
+            >
+              重置密码
+            </Button>
+          </Tooltip>
+          <Tooltip title={canOrgWrite ? undefined : noWriteTip}>
+            <Button
+              size="small"
+              disabled={!canOrgWrite}
+              danger={!(r.status === 'disabled' || r.status === '停用')}
+              onClick={async () => {
+                const next = r.status === 'disabled' || r.status === '停用' ? 'active' : 'disabled'
+                try {
+                  await updateOrgUser({ account: r.account, status: next })
+                  message.success(next === 'disabled' ? '已停用' : '已启用')
+                  load()
+                } catch (e: unknown) {
+                  const err = e as { response?: { data?: { error?: string } } }
+                  message.error(err.response?.data?.error || '失败')
+                }
+              }}
+            >
+              {r.status === 'disabled' || r.status === '停用' ? '启用' : '停用'}
+            </Button>
+          </Tooltip>
         </Space>
       ),
     },
@@ -187,9 +242,11 @@ export default function OrgPage() {
               title: '操作',
               width: 100,
               render: (_, r) => (
-                <Button
-                  size="small"
-                  onClick={() => {
+                <Tooltip title={canOrgWrite ? undefined : noWriteTip}>
+                  <Button
+                    size="small"
+                    disabled={!canOrgWrite}
+                    onClick={() => {
                     setEditingPos(r)
                     const perms = r.permissions || []
                     const selected: string[] = []
@@ -203,10 +260,11 @@ export default function OrgPage() {
                       permissions: selected,
                     })
                     setPosOpen(true)
-                  }}
-                >
-                  改权限
-                </Button>
+                    }}
+                  >
+                    改权限
+                  </Button>
+                </Tooltip>
               ),
             },
           ]}
@@ -231,15 +289,21 @@ export default function OrgPage() {
           layout="inline"
           onFinish={async (v) => {
             setCreating(true)
+            const given = typeof v.password === 'string' ? v.password.trim() : ''
+            const pwd = given || genPassword()
             try {
               await createOrgUser({
                 account: v.account,
-                password: v.password || 'wufu123',
+                password: pwd,
                 display_name: v.display_name,
                 position_id: v.position_id,
                 store_id: data?.stores?.[0]?.id,
               })
-              message.success('已创建')
+              if (given) {
+                message.success('已创建')
+              } else {
+                showPasswordOnce('账号已创建', v.account, pwd)
+              }
               load()
             } catch (e: unknown) {
               const err = e as { response?: { data?: { error?: string } } }
@@ -256,7 +320,7 @@ export default function OrgPage() {
             <Input placeholder="姓名" />
           </Form.Item>
           <Form.Item name="password">
-            <Input.Password placeholder="密码（默认 wufu123）" />
+            <Input.Password placeholder="密码（留空自动生成随机强密码）" />
           </Form.Item>
           <Form.Item name="position_id" initialValue="pos_readonly" rules={[{ required: true }]}>
             <Select
@@ -265,9 +329,11 @@ export default function OrgPage() {
             />
           </Form.Item>
           <Form.Item>
-            <Button type="primary" htmlType="submit" loading={creating}>
-              创建
-            </Button>
+            <Tooltip title={canOrgWrite ? undefined : noWriteTip}>
+              <Button type="primary" htmlType="submit" loading={creating} disabled={!canOrgWrite}>
+                创建
+              </Button>
+            </Tooltip>
           </Form.Item>
         </Form>
         <Alert

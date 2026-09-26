@@ -27,6 +27,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pandawufu.app.AppModule
+import com.pandawufu.app.confirm.ConfirmBus
+import com.pandawufu.app.confirm.ConfirmRequest
 import com.pandawufu.app.confirm.OpsSignal
 import com.pandawufu.app.ui.BossIa
 import com.pandawufu.app.ui.designsystem.Ink
@@ -109,6 +111,7 @@ fun ActionsScreen() {
         "待执行" -> "店内执行中"
         "已执行" -> "已完成"
         "已驳回" -> "已退回"
+        "已过期" -> "超时未执行·已过期"
         else -> status ?: "未知"
     }
 
@@ -136,7 +139,7 @@ fun ActionsScreen() {
             Text("先看清楚要做什么，再点“批准执行”；不合适就退回。", color = Sub)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(null to "全部", "queued" to "待我拍板", "待执行" to "执行中", "已执行" to "已完成", "已驳回" to "已退回")
+            listOf(null to "全部", "queued" to "待我拍板", "待执行" to "执行中", "已执行" to "已完成", "已驳回" to "已退回", "已过期" to "已过期")
                 .let { tabs ->
                     Row(
                         Modifier.horizontalScroll(rememberScrollState()),
@@ -183,7 +186,8 @@ fun ActionsScreen() {
                                                 val remoteRev = runCatching {
                                                     AppModule.bffClient.snapshotLatest().revText().ifBlank { null }
                                                 }.getOrNull()
-                                                val localRev = revOf(a) ?: remoteRev
+                                                // 始终以最新快照 rev 拍板；入队时的旧 rev 必然 409（与 ConfirmSheet 单发口径一致）
+                                                val localRev = remoteRev ?: revOf(a)
                                                 val confirmed = ConfirmGateway.shared.confirm(
                                                     com.pandawufu.shared.model.ActionDto(
                                                         id = id,
@@ -247,11 +251,39 @@ fun ActionsScreen() {
                     } else if (a.status == "待执行") {
                         Text("已确认，等待店内执行器处理", color = Color(0xFF9A6B19), modifier = Modifier.padding(vertical = 6.dp))
                     }
+                    val expiredType = a.type
+                    if (canWrite && expiredType != null && a.status == "已过期") {
+                        OutlinedButton(
+                            onClick = {
+                                ConfirmBus.ask(
+                                    ConfirmRequest(
+                                        title = "重新提交 · ${actionTitle(expiredType)}",
+                                        summary = "原单超时未执行已过期，将以相同内容重新入队等你拍板。" +
+                                            (a.error?.takeIf { it.isNotBlank() }?.let { "\n原单备注：$it" } ?: ""),
+                                        type = expiredType,
+                                        payload = a.payload ?: JsonObject(emptyMap()),
+                                        baseRev = null,
+                                        onResult = { r ->
+                                            Toast.makeText(
+                                                context,
+                                                r.fold({ "已重新入队 · ${it.id}" }, { it.message ?: "重新提交失败" }),
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            if (r.isSuccess) reload(filter)
+                                        }
+                                    )
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("重新提交") }
+                    }
                 }
             }
         }
         Text(
-            "状态说明：等你拍板 → 店内执行中 → 已完成。若长时间停在“执行中”，请联系店内执行器或刷新重试。",
+            "状态说明：等你拍板 → 店内执行中 → 已完成。若长时间停在“执行中”，请联系店内执行器或刷新重试。" +
+                "超过 24 小时未执行的单会自动标记「已过期」，可点「重新提交」再次入队。",
             style = MaterialTheme.typography.bodySmall
         )
     }
