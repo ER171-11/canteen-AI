@@ -6,9 +6,14 @@ package com.pandawufu.shared.redline
  */
 object RedlineGuard {
 
-    /** rev 为 "yyyyMMdd" 或递增序号字符串；无法解析时按字符串不等即过期处理。 */
+    /**
+     * rev 为 "yyyyMMdd" 或递增序号字符串；无法解析时按字符串不等即过期处理。
+     * - 无远端快照（新店未推送）→ 不过期，允许确认入队
+     * - 有远端但本地空白 → 过期，需先刷新
+     */
     fun isStale(localRev: String?, remoteRev: String?): Boolean {
-        if (localRev.isNullOrBlank() || remoteRev.isNullOrBlank()) return true
+        if (remoteRev.isNullOrBlank()) return false
+        if (localRev.isNullOrBlank()) return true
         val l = localRev.toLongOrNull()
         val r = remoteRev.toLongOrNull()
         return if (l != null && r != null) l < r else localRev != remoteRev

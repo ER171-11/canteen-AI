@@ -11,9 +11,13 @@ export const client = axios.create({
 })
 
 client.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().token
+  const { token, storeId } = useAuthStore.getState()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+  }
+  /* SaaS 门店上下文：业务读同源，平台侧按店过滤展示 */
+  if (storeId) {
+    config.headers['X-Store-Id'] = storeId
   }
   return config
 })

@@ -1,5 +1,7 @@
 # iOS 工程接入说明（README_iOS_SETUP）
 
+> **本阶段（Wave0–5）不建 iOS 工程**：Linux 交付以 [apps/boss-app](../boss-app) 为可演示主路径；Android 同契约追赶见 [../android-app/README_BUILD.md](../android-app/README_BUILD.md)。以下步骤仅在 macOS + Xcode 时执行。
+
 本目录（`apps/ios-app/`）只包含 Swift 源码布局，**不含 .xcodeproj**（交付环境无 Xcode）。
 请按以下步骤在 macOS 上手工建工程并接入。
 

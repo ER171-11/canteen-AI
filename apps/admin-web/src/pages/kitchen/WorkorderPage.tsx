@@ -10,11 +10,11 @@ import {
   Spin,
   Tag,
   Timeline,
-  Tooltip,
   Typography,
+  message,
 } from 'antd'
 import dayjs, { Dayjs } from 'dayjs'
-import { fetchWorkorders } from '../../api'
+import { fetchWorkorders, postAction } from '../../api'
 import type { WorkOrder } from '../../api/types'
 import ColorBadge from './components/ColorBadge'
 import MockAlert from './components/MockAlert'
@@ -98,6 +98,7 @@ export default function WorkorderPage() {
   const [items, setItems] = useState<WorkOrder[]>([])
   const [isMock, setIsMock] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
 
   const load = useCallback((d: Dayjs) => {
     setLoading(true)
@@ -128,12 +129,35 @@ export default function WorkorderPage() {
               allowClear={false}
               onChange={(d) => d && setDate(d)}
             />
-            {/* 红线：写操作走 actions 队列，审批中心上线前置灰 */}
-            <Tooltip title="待审批中心上线">
-              <Button type="primary" disabled>
-                新建工单
-              </Button>
-            </Tooltip>
+            <Button
+              type="primary"
+              loading={busy}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  await postAction({
+                    type: 'workorder.create',
+                    payload: {
+                      date: date.format('YYYY-MM-DD'),
+                      sku_id: 'SKU_WFJ',
+                      qty: 30,
+                      planned_start: `${date.format('YYYY-MM-DD')}T10:00`,
+                      status: '待开始',
+                    },
+                    operator: 'admin',
+                  })
+                  message.success('工单已入队 → 请到审批中心确认')
+                  load(date)
+                } catch (e: unknown) {
+                  const err = e as { response?: { data?: { error?: string } } }
+                  message.error(err.response?.data?.error || '提交失败')
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              新建工单
+            </Button>
           </Space>
         }
       >

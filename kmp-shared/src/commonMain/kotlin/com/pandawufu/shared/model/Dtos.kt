@@ -1,53 +1,33 @@
 package com.pandawufu.shared.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-/** GET /api/health */
+/** GET /api/health —— BFF 返回 rev 为数字；兼容字符串 */
 @Serializable
 data class HealthDto(
-    val ok: Boolean,
+    val ok: Boolean = false,
     val service: String = "",
-    val rev: String? = null,
-    val keyLoaded: Boolean? = null,
+    val models: List<String> = emptyList(),
+    @SerialName("key_loaded") val keyLoaded: Boolean? = null,
+    val rev: JsonElement? = null,
     val time: String? = null
-)
+) {
+    fun revText(): String =
+        rev?.jsonPrimitive?.contentOrNull
+            ?: rev?.jsonPrimitive?.intOrNull?.toString()
+            ?: ""
+}
 
 /** GET /api/snapshot/latest —— 见 model/SnapshotDtos.kt（Sprint 1 起对齐 BFF 真实契约） */
 
-/** GET /api/report/daily —— 日报（只读） */
-@Serializable
-data class ReportDailyDto(
-    val date: String,
-    val rev: String,
-    val revenue: Double = 0.0,
-    val orders: Int = 0,
-    val grossMargin: Double? = null,
-    val topItems: List<TopItemDto> = emptyList()
-)
+/** GET /api/report/daily —— 见 model/ReportDtos.kt（Sprint 2 起对齐 BFF 新契约） */
 
-@Serializable
-data class TopItemDto(
-    val name: String,
-    val qty: Int,
-    val margin: Double? = null
-)
-
-/** 写操作四态：草稿 → 已确认 → 已执行 / 已驳回 */
-@Serializable
-enum class ActionStatus { PENDING, CONFIRMED, EXECUTED, REJECTED }
-
-/** POST /api/actions 的请求/响应。一切端侧写操作必须经 ConfirmGateway 落到这里。 */
-@Serializable
-data class ActionDto(
-    val id: String,
-    val type: String,
-    val payload: Map<String, String> = emptyMap(),
-    val status: ActionStatus = ActionStatus.PENDING,
-    val baseRev: String? = null,
-    val rev: String? = null,
-    val createdAt: String? = null,
-    val updatedAt: String? = null
-)
+/** 写操作 ActionDto / ActionStatus —— 见 model/ActionDtos.kt */
 
 /** POST /api/kimi/vision(/stream) 入参 */
 @Serializable

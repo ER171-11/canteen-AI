@@ -12,9 +12,15 @@
  *   GET /api/kitchen/recipes/{sku} 单条配方 + 其 sop_steps
  *   GET /api/kitchen/qc?date=      品控记录（关联 workorder/sku）
  *   GET /api/kitchen/board?date=   出品看板：按 color 聚合 planned/done/qc_pass_rate
- * 无快照一律 404 {ok:false,error:"no snapshot"}；date 缺省今天。
+ * 无快照：菜谱用 menu-wufu 兜底 200；工单/看板/品控/需求回空列表 200 + hint=no_snapshot
+ * （与进销 restock-suggest 一致：空开优于硬 404，避免 App 整页「加载失败」）。
+ * date 缺省今天。
  */
 const { loadSnapshot } = require('./snapshot');
+const { mergeRecipesWithMenu, findMergedRecipe } = require('../lib/menu_wufu');
+
+const NO_SNAP_HINT = 'no_snapshot';
+const NO_SNAP_MSG = '店内快照未接通 · 菜谱已用标准菜单，工单/出品需推送快照后刷新';
 
 function todayStr() {
   const d = new Date();
@@ -49,25 +55,95 @@ function stepsFor(ext, skuId) {
 
 function truthyPass(v) { return v === true || v === 1 || v === 'true' || v === 'pass'; }
 
+function isOpenTakeout(o) {
+  const st = String((o && (o.status || o.state)) || '').trim();
+  if (!st) return true;
+  return !/完成|已送达|已取消|closed|done|cancel/i.test(st);
+}
+
+function isDoneWo(st) {
+  return st === '已完成' || st === 'done' || st === '完成' || st === '已传' || st === 'passed';
+}
+
+function isDoingWo(st) {
+  return st === '制作中' || st === '进行中' || st === 'doing' || st === 'in_progress';
+}
+
+function isReadyWo(st) {
+  return st === '待传' || st === 'ready' || st === 'pass_ready' || st === '齐';
+}
+
+/** 本餐需求：预订人数启发 + 未完结外卖粗估 + 已建工单对照 */
+function buildDemand(ext, rmap, date) {
+  const bookings = arr(ext.bookings).filter((b) => {
+    const d = String((b && (b.date || b.ts || b.time || b.created_at)) || '');
+    return d.indexOf(date) === 0 || String(b.date || '') === date;
+  });
+  const heads = bookings.reduce((s, b) => s + (parseInt(b.party_size || b.partySize || b.people || 0, 10) || 0), 0);
+  const takeoutAll = arr(ext.takeout_orders);
+  const takeoutOpen = takeoutAll.filter(isOpenTakeout);
+  // 糙算法：预订按 1.2 份/人；外卖未完结按 2 份/单（多 SKU 店可后续接明细）
+  const fromBooking = Math.ceil(heads * 1.2);
+  const fromTakeout = takeoutOpen.length * 2;
+  const suggestPortions = Math.max(fromBooking, fromTakeout, 0);
+
+  const wosToday = arr(ext.sop_workorders).filter((w) => w && String(w.date || '') === date);
+  const planned = wosToday.reduce((s, w) => s + (Number(w.qty) || 0), 0);
+  const gap = Math.max(0, suggestPortions - planned);
+
+  const recipes = arr(ext.recipes);
+  const top = recipes[0] || null;
+  const suggest = [];
+  if (gap > 0 && top) {
+    suggest.push({
+      sku_id: top.sku_id,
+      name: top.name || top.sku_id,
+      color: top.color || null,
+      qty: gap,
+      reason: '本餐缺口约 ' + gap + ' 份（预订启发 ' + fromBooking + ' + 外卖粗估 ' + fromTakeout + ' − 已建工单 ' + planned + '）'
+    });
+  }
+
+  return {
+    date,
+    booking_tables: bookings.length,
+    booking_heads: heads,
+    takeout_open: takeoutOpen.length,
+    suggest_portions: suggestPortions,
+    workorder_planned: planned,
+    gap,
+    suggest_workorders: suggest,
+    takeout_orders: takeoutOpen.slice(0, 20).map((o) => ({
+      id: o.id,
+      platform: o.platform,
+      platform_no: o.platform_no || o.platformNo,
+      amount: o.amount,
+      status: o.status,
+      ts: o.ts
+    }))
+  };
+}
+
 async function handle(req, res, ctx, pathname) {
   // 只读路由：非 GET 一律交外层 404（不暴露任何写路径）
   if (req.method !== 'GET') return false;
 
-  const isWorkorder = pathname === '/api/sop/workorder';
+  const isWorkorder = pathname === '/api/sop/workorder' || pathname === '/api/kitchen/workorders';
   const isRecipes = pathname === '/api/kitchen/recipes';
   const mRecipe = pathname.match(/^\/api\/kitchen\/recipes\/([^/]+)$/);
   const isQc = pathname === '/api/kitchen/qc';
   const isBoard = pathname === '/api/kitchen/board';
-  if (!isWorkorder && !isRecipes && !mRecipe && !isQc && !isBoard) return false;
+  const isDemand = pathname === '/api/kitchen/demand';
+  if (!isWorkorder && !isRecipes && !mRecipe && !isQc && !isBoard && !isDemand) return false;
 
   const snap = loadSnapshot();
-  if (!snap) {
-    ctx.sendJSON(res, 404, { ok: false, error: 'no snapshot' });
-    return true;
-  }
   const ext = extOf(snap);
   const rmap = recipeMap(ext);
   const date = pickDate(ctx);
+  const rev = snap ? snap.rev : null;
+  const soft = snap
+    ? {}
+    : { hint: NO_SNAP_HINT, message: NO_SNAP_MSG };
 
   // GET /api/sop/workorder?date=
   if (isWorkorder) {
@@ -76,24 +152,47 @@ async function handle(req, res, ctx, pathname) {
       .map((w) => {
         const r = rmap[String(w.sku_id)] || null;
         return {
-          id: w.id,
+          id: String(w.id),
           sku_id: w.sku_id,
-          name: r ? r.name || null : null,
+          name: (r && (r.name || r.sku_id)) || String(w.sku_id || ''),
           color: r ? r.color || null : null,
           qty: w.qty,
           planned_start: w.planned_start,
-          status: w.status,
+          status: w.status || '待开始',
+          table_id: w.table_id || null,
+          table_no: w.table_no || null,
           steps: stepsFor(ext, w.sku_id)
         };
       });
-    ctx.sendJSON(res, 200, { ok: true, date, rev: snap.rev, count: workorders.length, workorders });
+    ctx.sendJSON(res, 200, {
+      ok: true,
+      date,
+      rev,
+      count: workorders.length,
+      workorders,
+      ...soft
+    });
     return true;
   }
 
-  // GET /api/kitchen/recipes
+  // GET /api/kitchen/recipes — 快照配方 ∪ menu-wufu ∪ 保本测算（无快照仍可用菜单）
   if (isRecipes) {
-    const items = arr(ext.recipes);
-    ctx.sendJSON(res, 200, { ok: true, rev: snap.rev, count: items.length, items });
+    const merged = mergeRecipesWithMenu(arr(ext.recipes));
+    let baobenSummary = null;
+    try {
+      baobenSummary = require('../lib/menu_baoben').computeBaobenSummary();
+    } catch (e) { /* optional */ }
+    ctx.sendJSON(res, 200, {
+      ok: true,
+      rev,
+      count: merged.items.length,
+      items: merged.items,
+      menu: merged.menu,
+      baoben: merged.baoben || null,
+      baoben_summary: baobenSummary,
+      source: merged.source,
+      ...soft
+    });
     return true;
   }
 
@@ -101,12 +200,26 @@ async function handle(req, res, ctx, pathname) {
   if (mRecipe) {
     let sku = mRecipe[1];
     try { sku = decodeURIComponent(sku); } catch (e) {}
-    const r = rmap[sku];
-    if (!r) {
-      ctx.sendJSON(res, 404, { ok: false, error: 'recipe not found', sku_id: sku, rev: snap.rev });
+    const found = findMergedRecipe(arr(ext.recipes), sku);
+    if (!found.item) {
+      ctx.sendJSON(res, 404, {
+        ok: false,
+        error: 'recipe not found',
+        sku_id: sku,
+        rev,
+        ...soft
+      });
       return true;
     }
-    ctx.sendJSON(res, 200, { ok: true, rev: snap.rev, item: r, steps: stepsFor(ext, sku) });
+    const stepsSku = found.item.sku_id;
+    ctx.sendJSON(res, 200, {
+      ok: true,
+      rev,
+      item: found.item,
+      steps: stepsFor(ext, stepsSku),
+      source: found.item.source || found.meta.source,
+      ...soft
+    });
     return true;
   }
 
@@ -134,7 +247,14 @@ async function handle(req, res, ctx, pathname) {
           workorder_status: w ? w.status || null : null
         });
       });
-    ctx.sendJSON(res, 200, { ok: true, date, rev: snap.rev, count: items.length, items });
+    ctx.sendJSON(res, 200, {
+      ok: true,
+      date,
+      rev,
+      count: items.length,
+      items,
+      ...soft
+    });
     return true;
   }
 
@@ -142,7 +262,7 @@ async function handle(req, res, ctx, pathname) {
   if (isBoard) {
     const groups = {};
     const grp = (color) => {
-      if (!groups[color]) groups[color] = { color, planned: 0, done: 0, _qcPass: 0, _qcTotal: 0 };
+      if (!groups[color]) groups[color] = { color, planned: 0, done: 0, doing: 0, _qcPass: 0, _qcTotal: 0 };
       return groups[color];
     };
     const wos = {};
@@ -153,7 +273,8 @@ async function handle(req, res, ctx, pathname) {
       const g = grp((r && r.color) || '未关联');
       const qty = Number(w.qty) || 0;
       g.planned += qty;
-      if (w.status === '已完成') g.done += qty;
+      if (isDoneWo(w.status)) g.done += qty;
+      else if (isDoingWo(w.status)) g.doing += qty;
     }
     for (const q of arr(ext.qc_records)) {
       if (!q) continue;
@@ -172,15 +293,81 @@ async function handle(req, res, ctx, pathname) {
         color: g.color,
         planned: g.planned,
         done: g.done,
+        doing: g.doing,
         qc_pass_rate: g._qcTotal ? +(g._qcPass / g._qcTotal).toFixed(4) : null,
         qc_total: g._qcTotal
       };
     });
-    ctx.sendJSON(res, 200, { ok: true, date, rev: snap.rev, board });
+    // 传菜对桌：未完成工单按 table_id 聚合
+    const tableMap = {};
+    for (const w of arr(ext.sop_workorders)) {
+      if (!w || String(w.date || '') !== date) continue;
+      if (isDoneWo(w.status)) continue;
+      const tid = String(w.table_id || '').trim();
+      if (!tid) continue;
+      const r = rmap[String(w.sku_id)] || null;
+      if (!tableMap[tid]) {
+        tableMap[tid] = {
+          table_id: tid,
+          table_no: w.table_no || tid,
+          pending: 0,
+          doing: 0,
+          ready: 0,
+          colors: {},
+          items: []
+        };
+      }
+      const row = tableMap[tid];
+      const qty = Number(w.qty) || 0;
+      row.pending += qty;
+      if (isDoingWo(w.status)) row.doing += qty;
+      if (isReadyWo(w.status)) row.ready += qty;
+      const color = (r && r.color) || '未关联';
+      row.colors[color] = (row.colors[color] || 0) + qty;
+      row.items.push({
+        id: String(w.id),
+        sku_id: w.sku_id,
+        name: (r && (r.name || r.sku_id)) || String(w.sku_id || ''),
+        color,
+        qty,
+        status: w.status || '待开始'
+      });
+    }
+    const tables = Object.keys(tableMap).sort().map((tid) => {
+      const row = tableMap[tid];
+      return {
+        table_id: row.table_id,
+        table_no: row.table_no,
+        pending: row.pending,
+        doing: row.doing,
+        ready: row.ready,
+        colors: Object.keys(row.colors).map((c) => ({ color: c, qty: row.colors[c] })),
+        items: row.items
+      };
+    });
+    const demand = buildDemand(ext, rmap, date);
+    ctx.sendJSON(res, 200, {
+      ok: true,
+      date,
+      rev,
+      board,
+      items: board,
+      tables,
+      demand,
+      takeout_open: demand.takeout_orders,
+      ...soft
+    });
+    return true;
+  }
+
+  // GET /api/kitchen/demand?date=
+  if (isDemand) {
+    const demand = buildDemand(ext, rmap, date);
+    ctx.sendJSON(res, 200, { ok: true, rev, ...demand, ...soft });
     return true;
   }
 
   return false;
 }
 
-module.exports = { handle };
+module.exports = { handle, buildDemand };

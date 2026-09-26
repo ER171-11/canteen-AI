@@ -62,6 +62,16 @@ async function handle(req, res, ctx, pathname) {
     const mod = (ctx.query.get('module') || '').trim();
     let data = snap.data;
     let ext = snap.ext === undefined ? null : snap.ext;
+
+    // 堂食 dishes ∪ 保本价盘（类型/售价/成本），收银与后厨同源
+    try {
+      const { mergeDishesWithBaoben } = require('../lib/menu_baoben');
+      if (data && typeof data === 'object') {
+        const merged = mergeDishesWithBaoben(Array.isArray(data.dishes) ? data.dishes : []);
+        data = Object.assign({}, data, { dishes: merged.dishes });
+      }
+    } catch (e) { /* optional */ }
+
     if (mod) {
       if (mod.indexOf('ext.') === 0) {
         // ext.* 过滤：只回 ext 的指定子集
@@ -71,8 +81,9 @@ async function handle(req, res, ctx, pathname) {
         if (ext && Object.prototype.hasOwnProperty.call(ext, k)) sub[k] = ext[k];
         ext = sub;
       } else {
+        const full = data;
         data = {};
-        if (Object.prototype.hasOwnProperty.call(snap.data, mod)) data[mod] = snap.data[mod];
+        if (full && Object.prototype.hasOwnProperty.call(full, mod)) data[mod] = full[mod];
         ext = null;
       }
     }

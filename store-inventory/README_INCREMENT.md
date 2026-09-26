@@ -116,3 +116,40 @@ python3 queue_consumer.py --db data/餐厅系统.db  # 指定本地 sqlite（qc/
   落库正确；pusher 推送成功、rev 去重跳过、状态文件写入均验证通过。
 - 店内服务/BFF 未启动时两组件均优雅报错、不崩溃。
 - `sha256sum -c ../ci/redline_baseline.sha256`：5 个受保护文件全部「成功」。
+
+## 4. migrate_from_zip.py —— 从「餐厅系统.zip」灌入真实进销存
+
+把打包机上的 `餐厅系统.zip` 内 `data/餐厅系统.db`（v3：`pos`+`logs`+有库存）
+合并进本仓店内库（v4：`recv`/`orders`/补货壳），再由 `snapshot_pusher` 推到 BFF，
+供 boss-app / Android / admin-web 只读消费。
+
+```bash
+python3 migrate_from_zip.py --dry-run          # 只看差异
+python3 migrate_from_zip.py                    # 写库（自动冷备份）
+# 登录拿 token 后推快照
+TOKEN=$(curl -s -X POST http://127.0.0.1:8787/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"account":"boss","device_fp":"migrate"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+python3 snapshot_pusher.py --once --token "$TOKEN"
+```
+
+迁移策略：
+- `pos` → `recv`，单号 `CG`→`JH`（对齐 HTML `migrateV4`）
+- 覆盖：`ings`（含 stock/avg）、`logs`、`recv`、`quotes`、`sales`、`seq`
+- 保留本仓：`orders`/`plans`/`restock`/`dishAlias`/`config` 与全部 ext 增量表
+- **不**改 `rebuildStock`/`seedDB`/`dishRecipeCost` 源码
+
+已验证（2026-09-24）：rev 28→29；BFF `stock>0=163`、`recv=9`、`logs=193`、应付 ¥8392.22。
+
+## 5. import_orders_excel.py —— 批量导入 订单/ 配送单 Excel
+
+解析 `.xlsx` 与伪 `.xls`(HTML)，写入 `DB.recv` 并 `rebuildStock`（Python 端口，口径对齐 HTML）。
+
+```bash
+python3 import_orders_excel.py --dry-run
+python3 import_orders_excel.py --push   # 写库 + 推 BFF
+```
+
+- 跳过：`采购单整理_熊猫五福.xlsx`（已是 84 行基线）、`采购物品与施工备用金汇总表0924.xlsx`
+- 去重：精确明细指纹 + `(日期,金额,行数)` 软键 + 拆分明细子集命中
+- 已导入：9/17 鸿源五福、9/20、9/23；其余 9/13–9/16 已在库中跳过

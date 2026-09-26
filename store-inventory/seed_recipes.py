@@ -57,17 +57,27 @@ SKU_DEFS = [
     ("白", "猪肉山药馅",       "SKU-WF-BAI-SHANYAO", (25, 28)),
 ]
 
-# 面皮基料（PRD 附录 A：各 SKU 通用），提取色源时从面主料中扣除
+# 面皮基料（金丰标准：一律以 500g 面粉起草一批）
 FACE_BASE = ("五得利雪花粉八星500g", "食盐3g")
 
-# PRD 附录 A「关键工艺参数（全 SKU 通用）」+ 任务书给定褶纹标准
+# 金丰标准 · 关键工艺参数（全 SKU 通用）
+# 起草基准 = 面粉 500g / 批；一批出成由面主料克重÷剂子推算
 COMMON_PARAMS = {
     "剂子_g": [10, 11],
+    "馅_g": [14, 16],
+    "馅_中位_g": 15.5,
+    "一批面团_g": 723,       # 红黄绿白常见：500+220+3；紫/黑按面主料重算
+    "一批出成_理论": [66, 72],
+    "一批出成_个": 67,
+    "一批出成_中位": 69,
     "醒发_min": 30,
     "点凉水次数": 3,
     "料水加入": "分三次加入，顺同一方向搅至上劲",
     "褶纹": "12-14道",
+    "标准": "金丰标准",
+    "起草基准": "面粉500g=1倍标准量",
 }
+
 
 # 忌口/过敏原标签推导规则（由馅料成分直接推出，非编造）
 DIET_RULES = [
@@ -95,9 +105,27 @@ def docx_paragraphs(path):
 
 
 def split_items(s):
-    """'冬菇100g、荸荠100g' → ['冬菇100g', '荸荠100g']，去掉尾部分号/句号。"""
+    """按顿号/逗号切分，但括号（）内的顿号不切开（避免料水配方被拆碎）。"""
     s = s.strip().rstrip(";；。")
-    return [x.strip() for x in re.split(r"[、，,]", s) if x.strip()]
+    out, buf, depth = [], [], 0
+    for ch in s:
+        if ch in "（(":
+            depth += 1
+            buf.append(ch)
+        elif ch in "）)":
+            depth = max(0, depth - 1)
+            buf.append(ch)
+        elif ch in "、，," and depth == 0:
+            part = "".join(buf).strip()
+            if part:
+                out.append(part)
+            buf = []
+        else:
+            buf.append(ch)
+    part = "".join(buf).strip()
+    if part:
+        out.append(part)
+    return out
 
 
 def parse_sections(lines):
@@ -107,6 +135,8 @@ def parse_sections(lines):
     返回 {(color, filling): {face, main, aux, seasoning, steps}}
     """
     head_re = re.compile(r"^御字牌五福饺子（(.+?)色）(?:（(.+?)）)?$")
+    # 仅在其它品项标题处截断（冰花煎饺/蒸饺/包子等），勿截断「御字牌五福饺子是…」正文
+    other_product_re = re.compile(r"^御字牌(?!五福饺子)")
     sections = []
     cur = None
     for line in lines:
@@ -114,6 +144,9 @@ def parse_sections(lines):
         if m:
             cur = {"color": m.group(1), "title_filling": m.group(2), "lines": []}
             sections.append(cur)
+            continue
+        if cur is not None and other_product_re.match(line):
+            cur = None
             continue
         if cur is not None:
             cur["lines"].append(line)
@@ -154,6 +187,24 @@ def derive_face_main(face_items):
     """色源 = 面主料扣除基料（面粉/食盐）。色源字段锁定，写入后不得擅改。"""
     rest = [x for x in face_items if x not in FACE_BASE]
     return "、".join(rest) if rest else "清水（本色）"
+
+
+def face_dough_grams(face_items):
+    """金丰标准：面主料各克重合计（只认原文 g 数，不补料）。"""
+    total = 0.0
+    for x in face_items:
+        for m in re.finditer(r"(\d+(?:\.\d+)?)\s*g", x, re.I):
+            total += float(m.group(1))
+    return int(round(total))
+
+
+def batch_yield_from_dough_g(dough_g):
+    """剂子 10–11g：理论区间 + 中位扣约 3% 下剂损耗 → 一批出成_个。"""
+    lo = int(dough_g // 11)
+    hi = int(dough_g // 10)
+    mid = round(dough_g / 10.5)
+    pcs = max(1, round(dough_g / 10.5 * 0.97))
+    return [lo, hi], mid, pcs
 
 
 def derive_diet_tags(filling, main, aux):
@@ -264,6 +315,18 @@ def build_recipes(docx_path):
         params = dict(COMMON_PARAMS)
         params["成品_g"] = list(weight)
         params["色源"] = face_main
+        # 完整面主料（含面粉/盐）写入 params，供 BOM/算料；face_main 仍只存色源锁定字段
+        params["面主料"] = list(rec["face"])
+        # 金丰标准：面团克重 / 一批出成 严格按 Word 面主料合计，不另补清水
+        dough_g = face_dough_grams(rec["face"])
+        theory, mid, pcs = batch_yield_from_dough_g(dough_g)
+        params["一批面团_g"] = dough_g
+        params["一批出成_理论"] = theory
+        params["一批出成_中位"] = mid
+        params["一批出成_个"] = pcs
+        if color == "黑" and "清水" not in "".join(rec["face"]):
+            # Word 黑色面主料仅墨鱼汁16g；总览括号曾写清水220g，标准以分色面主料为准
+            params["色源说明"] = "金丰标准面主料为墨鱼汁16g（不含清水）；总览括号清水不计入本批"
         recipes.append({
             "sku_id": sku_id,
             "name": "御字牌五福饺子（%s）（%s）" % (color, filling),

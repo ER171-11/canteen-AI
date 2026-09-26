@@ -1,17 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Card,
   Col,
   List,
   Row,
+  Space,
   Spin,
   Statistic,
   Tag,
   Typography,
 } from 'antd'
+import { useNavigate } from 'react-router-dom'
 import { fetchReportDaily } from '../api'
-import type { ReportDaily } from '../api/types'
+import type { AlertItem, ReportDaily, TodoItem } from '../api/types'
+import { resolveDeepLink } from '../config/menu'
 import { COLORS } from '../theme'
 
 /** BFF 未上线时的内置演示数据（页面有显著提示） */
@@ -46,7 +49,41 @@ const LEVEL_TAG: Record<string, { color: string; text: string }> = {
   info: { color: COLORS.purple, text: '提示' },
 }
 
+/** 归一 kpi：BFF 的 kpi[] → 前端 kpis[] */
+function normalizeReport(data: ReportDaily): ReportDaily {
+  const kpis =
+    data.kpis ??
+    (Array.isArray(data.kpi)
+      ? data.kpi.map((k, i) => ({
+          key: k.label ?? String(i),
+          label: k.label,
+          value: k.value,
+          delta: k.delta ?? undefined,
+          trend: k.delta && String(k.delta).startsWith('-') ? ('down' as const) : ('up' as const),
+        }))
+      : [])
+  const todos = (data.todos ?? []).map((t: TodoItem, i) => ({
+    ...t,
+    id: t.id ?? `t${i}`,
+    title: t.title ?? t.text ?? '',
+  }))
+  const alerts = (data.alerts ?? []).map((a: AlertItem, i) => ({
+    ...a,
+    id: a.id ?? `a${i}`,
+    title: a.title ?? a.text ?? '',
+  }))
+  return { ...data, kpis, todos, alerts }
+}
+
+function ageMinutes(iso?: string | null): number | null {
+  if (!iso) return null
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return null
+  return Math.max(0, Math.floor((Date.now() - t) / 60000))
+}
+
 export default function DashboardPage() {
+  const navigate = useNavigate()
   const [report, setReport] = useState<ReportDaily | null>(null)
   const [isMock, setIsMock] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -54,23 +91,19 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchReportDaily()
       .then((data) => {
-        /* 兼容 BFF 实际下发的 kpi:[{label,value,delta}]（value 已带格式） */
-        if (!data.kpis && Array.isArray(data.kpi)) {
-          data.kpis = data.kpi.map((k, i) => ({
-            key: k.label ?? String(i),
-            label: k.label,
-            value: k.value,
-            delta: k.delta ?? undefined,
-          }))
-        }
-        setReport(data)
+        const n = normalizeReport(data)
+        setReport(n)
+        setIsMock(!!n.mock)
       })
       .catch(() => {
-        setReport(MOCK_REPORT)
+        setReport(normalizeReport(MOCK_REPORT))
         setIsMock(true)
       })
       .finally(() => setLoading(false))
   }, [])
+
+  const age = useMemo(() => ageMinutes(report?.generated_at), [report?.generated_at])
+  const stale = age != null && age > 15
 
   if (loading || !report) {
     return (
@@ -80,6 +113,11 @@ export default function DashboardPage() {
     )
   }
 
+  const heat = (report.heat_mini ?? []).map((h) =>
+    typeof h === 'number' ? h : (h.orders ?? 0),
+  )
+  const heatMax = Math.max(1, ...heat)
+
   return (
     <div>
       {isMock && (
@@ -87,11 +125,26 @@ export default function DashboardPage() {
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
-          message="BFF 未连接（/api/report/daily 不可用），当前展示内置演示数据。"
+          message="演示数据（/api/report/daily mock 或 BFF 不可用）"
+        />
+      )}
+      {!isMock && stale && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={`快照时延 ${age} 分钟（>15 分钟标黄），rev=${report.rev ?? '-'}`}
+        />
+      )}
+      {!isMock && !stale && age != null && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={`${age} 分钟前更新 · rev=${report.rev ?? '-'}`}
         />
       )}
 
-      {/* 顶部 Banner：AI 强调渐变 */}
       <div
         style={{
           background: COLORS.aiGradient,
@@ -107,24 +160,23 @@ export default function DashboardPage() {
         <div style={{ marginTop: 8, opacity: 0.92 }}>
           {report.banner ?? '五福临门，今日加油！'}
         </div>
+        {report.kitchen && (
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.9 }}>
+            今日工单 {report.kitchen.workorders_done ?? 0}/{report.kitchen.workorders_total ?? 0}
+          </div>
+        )}
       </div>
 
-      {/* KPI 8 格 */}
       <Row gutter={[16, 16]}>
         {(report.kpis ?? []).slice(0, 8).map((kpi) => (
           <Col xs={12} sm={12} md={6} key={kpi.key}>
             <Card>
-              <Statistic
-                title={kpi.label}
-                value={kpi.value}
-                suffix={kpi.unit}
-              />
+              <Statistic title={kpi.label} value={kpi.value} suffix={kpi.unit} />
               {kpi.delta && (
                 <Typography.Text
                   style={{
                     fontSize: 12,
-                    color:
-                      kpi.trend === 'down' ? COLORS.red : COLORS.green,
+                    color: kpi.trend === 'down' ? COLORS.red : COLORS.green,
                   }}
                 >
                   {kpi.trend === 'down' ? '↓' : '↑'} {kpi.delta}
@@ -135,18 +187,79 @@ export default function DashboardPage() {
         ))}
       </Row>
 
+      {heat.length > 0 && (
+        <Card title="时段热力（迷你）" style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {heat.map((v, i) => {
+              const cell = report.heat_mini?.[i]
+              const hour = typeof cell === 'object' && cell ? cell.hour : i
+              const alpha = 0.15 + (v / heatMax) * 0.85
+              return (
+                <div
+                  key={i}
+                  title={`${hour}时 · ${v} 单`}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 4,
+                    background: `rgba(155, 107, 191, ${alpha})`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 10,
+                    color: alpha > 0.5 ? '#fff' : COLORS.primary,
+                  }}
+                >
+                  {hour}
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} md={12}>
           <Card title="待办事项">
             <List
               dataSource={report.todos ?? []}
               locale={{ emptyText: '暂无待办' }}
-              renderItem={(item) => (
-                <List.Item>
-                  <Typography.Text>{item.title}</Typography.Text>
-                  {item.source && <Tag>{item.source}</Tag>}
-                </List.Item>
-              )}
+              renderItem={(item) => {
+                const link = resolveDeepLink(
+                  `${item.title ?? ''} ${item.source ?? ''} ${item.text ?? ''} ${item.desc ?? ''}`,
+                  { route: item.route, kind: item.kind },
+                )
+                return (
+                  <List.Item
+                    style={link ? { cursor: 'pointer' } : undefined}
+                    onClick={() => link && navigate(link)}
+                    actions={
+                      link
+                        ? [
+                            <Typography.Link key="go" onClick={() => navigate(link)}>
+                              去处理
+                            </Typography.Link>,
+                          ]
+                        : undefined
+                    }
+                  >
+                    <div>
+                      <Typography.Text delete={item.done}>{item.title}</Typography.Text>
+                      {item.desc && (
+                        <div>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {item.desc}
+                          </Typography.Text>
+                        </div>
+                      )}
+                    </div>
+                    <Space size={4}>
+                      {item.kind && <Tag>{item.kind}</Tag>}
+                      {item.source && <Tag>{item.source}</Tag>}
+                    </Space>
+                  </List.Item>
+                )
+              }}
             />
           </Card>
         </Col>
@@ -157,8 +270,23 @@ export default function DashboardPage() {
               locale={{ emptyText: '暂无预警' }}
               renderItem={(item) => {
                 const tag = LEVEL_TAG[item.level] ?? LEVEL_TAG.info
+                const link = resolveDeepLink(
+                  `${item.title ?? ''} ${item.detail ?? ''} ${item.text ?? ''} ${item.desc ?? ''}`,
+                )
                 return (
-                  <List.Item>
+                  <List.Item
+                    style={link ? { cursor: 'pointer' } : undefined}
+                    onClick={() => link && navigate(link)}
+                    actions={
+                      link
+                        ? [
+                            <Typography.Link key="go" onClick={() => navigate(link)}>
+                              去处理
+                            </Typography.Link>,
+                          ]
+                        : undefined
+                    }
+                  >
                     <div>
                       <Typography.Text>{item.title}</Typography.Text>
                       {item.detail && (

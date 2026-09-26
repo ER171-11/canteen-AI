@@ -10,17 +10,19 @@ import {
   Layout,
   Menu,
   Result,
+  Select,
   Space,
   Tag,
   Typography,
+  message,
 } from 'antd'
 import type { MenuProps } from 'antd'
-import { LogoutOutlined, SyncOutlined } from '@ant-design/icons'
+import { LogoutOutlined, ShopOutlined, SyncOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../store/auth'
 import { canAccess, firstAccessiblePath } from '../rbac/roles'
 import { MENU, findLeaf } from '../config/menu'
-import { fetchHealth } from '../api'
-import type { Health } from '../api/types'
+import { fetchHealth, fetchOrg } from '../api'
+import type { Health, OrgStore } from '../api/types'
 import { COLORS } from '../theme'
 
 const { Sider, Header, Content } = Layout
@@ -36,8 +38,9 @@ const ROLE_TAG_COLOR: Record<string, string> = {
 export default function MainLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { role, account, logout } = useAuthStore()
+  const { role, account, logout, storeId, storeName, setStore, canWrite } = useAuthStore()
   const [health, setHealth] = useState<Health | null>(null)
+  const [stores, setStores] = useState<OrgStore[]>([])
 
   useEffect(() => {
     let alive = true
@@ -52,6 +55,17 @@ export default function MainLayout() {
       clearInterval(timer)
     }
   }, [])
+
+  useEffect(() => {
+    fetchOrg()
+      .then((o) => {
+        setStores(o.stores || [])
+        if (!storeId && o.stores?.[0]) {
+          setStore({ storeId: o.stores[0].id, storeName: o.stores[0].name })
+        }
+      })
+      .catch(() => setStores([]))
+  }, [storeId, setStore])
 
   /* 菜单按角色过滤 */
   const menuItems: MenuProps['items'] = useMemo(() => {
@@ -77,6 +91,13 @@ export default function MainLayout() {
     navigate('/login', { replace: true })
   }
 
+  const onStoreChange = (id: string) => {
+    const s = stores.find((x) => x.id === id)
+    if (!s) return
+    setStore({ storeId: s.id, storeName: s.name })
+    message.success(`已切换门店：${s.name}`)
+  }
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider width={220} theme="dark">
@@ -92,7 +113,7 @@ export default function MainLayout() {
             background: '#111',
           }}
         >
-          熊猫五福 · 管理后台
+          熊猫五福 · SaaS
         </div>
         <Menu
           theme="dark"
@@ -121,7 +142,21 @@ export default function MainLayout() {
                 : []),
             ]}
           />
-          <Space size="middle">
+          <Space size="middle" wrap>
+            <Select
+              size="small"
+              style={{ minWidth: 200 }}
+              placeholder="选择门店"
+              value={storeId ?? undefined}
+              onChange={onStoreChange}
+              suffixIcon={<ShopOutlined />}
+              options={(stores.length
+                ? stores
+                : storeId
+                  ? [{ id: storeId, name: storeName || storeId }]
+                  : []
+              ).map((s) => ({ value: s.id, label: s.name }))}
+            />
             {health ? (
               <Tag icon={<SyncOutlined spin={false} />} color="success">
                 快照 rev {health.rev ?? '-'} ·{' '}
@@ -137,12 +172,9 @@ export default function MainLayout() {
             <Tag color={ROLE_TAG_COLOR[role ?? ''] ?? 'default'}>
               {role ?? '未知角色'}
             </Tag>
+            <Tag color={canWrite ? 'blue' : 'default'}>{canWrite ? '可写' : '只读'}</Tag>
             <Typography.Text type="secondary">{account}</Typography.Text>
-            <Button
-              type="text"
-              icon={<LogoutOutlined />}
-              onClick={onLogout}
-            >
+            <Button type="text" icon={<LogoutOutlined />} onClick={onLogout}>
               退出
             </Button>
           </Space>

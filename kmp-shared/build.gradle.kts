@@ -1,49 +1,53 @@
 plugins {
-    kotlin("multiplatform") version "1.9.24"
-    kotlin("plugin.serialization") version "1.9.24"
-    id("com.android.library") version "8.1.4"
-    id("com.squareup.sqldelight") version "1.5.5"
+    kotlin("multiplatform")
+    kotlin("plugin.serialization")
+    id("com.android.library")
+    id("app.cash.sqldelight")
 }
 
 group = "com.pandawufu"
 version = "0.1.0"
 
+/** Linux 上只编 Android；iOS target 需 macOS */
+val enableIos =
+    System.getProperty("os.name").orEmpty().contains("Mac", ignoreCase = true) ||
+        (findProperty("enableIos") as String?) == "true"
+
 kotlin {
     androidTarget {
         compilations.all {
-            kotlinOptions.jvmTarget = "17"
+            compileTaskProvider.configure {
+                compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            }
         }
     }
 
-    iosX64()
-    iosArm64()
-    iosSimulatorArm64()
-
-    // 导出给 iOS 的 Framework（Xcode 侧链接名 Shared.framework）
-    targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
-        binaries.framework {
-            baseName = "Shared"
-            isStatic = true
+    if (enableIos) {
+        listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { target ->
+            target.binaries.framework {
+                baseName = "Shared"
+                isStatic = true
+            }
         }
     }
 
     sourceSets {
-        val coroutinesVersion = "1.7.3"
+        val coroutinesVersion = "1.9.0"
         val ktorVersion = "2.3.12"
-        val serializationVersion = "1.6.3"
-        val sqldelightVersion = "1.5.5"
+        val serializationVersion = "1.7.3"
+        val sqldelightVersion = "2.0.2"
 
         val commonMain by getting {
             dependencies {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
-                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:$serializationVersion")
+                api("org.jetbrains.kotlinx:kotlinx-serialization-json:$serializationVersion")
 
                 implementation("io.ktor:ktor-client-core:$ktorVersion")
                 implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
                 implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
 
-                implementation("com.squareup.sqldelight:runtime:$sqldelightVersion")
-                implementation("com.squareup.sqldelight:coroutines-extensions:$sqldelightVersion")
+                implementation("app.cash.sqldelight:runtime:$sqldelightVersion")
+                implementation("app.cash.sqldelight:coroutines-extensions:$sqldelightVersion")
             }
         }
         val commonTest by getting {
@@ -55,21 +59,27 @@ kotlin {
         val androidMain by getting {
             dependencies {
                 implementation("io.ktor:ktor-client-okhttp:$ktorVersion")
-                implementation("com.squareup.sqldelight:android-driver:$sqldelightVersion")
+                implementation("app.cash.sqldelight:android-driver:$sqldelightVersion")
             }
         }
-        val iosMain by getting {
-            dependencies {
-                implementation("io.ktor:ktor-client-darwin:$ktorVersion")
-                implementation("com.squareup.sqldelight:native-driver:$sqldelightVersion")
+        if (enableIos) {
+            val iosMain by creating {
+                dependsOn(commonMain)
+                dependencies {
+                    implementation("io.ktor:ktor-client-darwin:$ktorVersion")
+                    implementation("app.cash.sqldelight:native-driver:$sqldelightVersion")
+                }
             }
+            val iosX64Main by getting { dependsOn(iosMain) }
+            val iosArm64Main by getting { dependsOn(iosMain) }
+            val iosSimulatorArm64Main by getting { dependsOn(iosMain) }
         }
     }
 }
 
 android {
     namespace = "com.pandawufu.shared"
-    compileSdk = 34
+    compileSdk = 35
     defaultConfig {
         minSdk = 26
     }
@@ -80,7 +90,9 @@ android {
 }
 
 sqldelight {
-    database("PandaWufuDb") {
-        packageName = "com.pandawufu.shared.db"
+    databases {
+        create("PandaWufuDb") {
+            packageName.set("com.pandawufu.shared.db")
+        }
     }
 }

@@ -9,5 +9,5 @@
   "serve_static": true,
   "static_root": ".",
   "index_file": "熊猫五福餐厅进销存系统_真实数据版.html",
-  "open_browser": true
+  "open_browser": false
 }

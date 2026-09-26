@@ -16,7 +16,7 @@
 参数：
   --store-url  店内服务地址（默认 http://127.0.0.1:8765）
   --bff-url    云端 BFF 地址（默认 http://127.0.0.1:8787）
-  --interval   循环间隔秒数（默认 900）
+  --interval   循环间隔秒数（默认 60）
   --once       只执行一次后退出
   --max-bytes  快照体积上限（默认 5*1024*1024，含 ext）
   --db         本地 sqlite 路径（默认 data/餐厅系统.db），ext 数据源
@@ -40,7 +40,7 @@ from datetime import datetime
 
 DEFAULT_STORE_URL = "http://127.0.0.1:8765"
 DEFAULT_BFF_URL = "http://127.0.0.1:8787"
-DEFAULT_INTERVAL = 900
+DEFAULT_INTERVAL = 60
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5MB
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -53,6 +53,40 @@ EXT_TABLES = {
     "sop_steps": ("tools", "inputs", "params"),
     "sop_workorders": ("qc_records",),
     "qc_records": (),
+    # Sprint 2 新增 10 模块（行直接序列化，无 JSON TEXT 列）
+    "staff_shifts": (),
+    "staff_clock": (),
+    "staff_perf": (),
+    "staff_train": (),
+    "fs_certs": (),
+    "fs_trace": (),
+    "fs_samples": (),
+    "fs_disinfect": (),
+    "bookings": (),
+    "queue": (),
+    "queue_serves": (),
+    # 主数据补齐：会员/外卖/口碑/设备/财务/桌台
+    "vip_members": (),
+    "vip_balance": (),
+    "vip_coupons": (),
+    "vip_visits": (),
+    "takeout_orders": (),
+    "takeout_reviews": (),
+    "takeout_reconcile": (),
+    "rv_reviews": (),
+    "rv_improve": (),
+    "eq_maintain": (),
+    "eq_energy": (),
+    "eq_temp": (),
+    "fin_invoices": (),
+    "fin_tax": (),
+    "fin_cash": (),
+    "fin_split": (),
+    "pos_tables": (),
+    "loss_reports": (),
+    "sup_vendors": (),
+    "sup_prices": (),
+    "sup_accounts": (),
 }
 
 log = logging.getLogger("snapshot_pusher")

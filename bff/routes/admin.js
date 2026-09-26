@@ -33,8 +33,12 @@ async function handle(req, res, ctx, pathname) {
       ctx.sendJSON(res, 400, { ok: false, error: 'missing account' });
       return true;
     }
-    const r = auth.login(body.account, body.device_fp, 'admin-web');
-    ctx.sendJSON(res, 200, { ok: true, token: r.token, role: r.role, expires_at: r.expires_at, source: 'admin-web' });
+    const r = auth.login(body.account, body.device_fp, 'admin-web', body.password);
+    if (!r || r.error) {
+      ctx.sendJSON(res, (r && r.status) || 401, { ok: false, error: (r && r.error) || 'login failed' });
+      return true;
+    }
+    ctx.sendJSON(res, 200, Object.assign({ ok: true, source: 'admin-web' }, r));
     return true;
   }
 

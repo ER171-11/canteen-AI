@@ -10,11 +10,13 @@
  *        → queued→待执行；rev 与当前快照 rev 不符 409
  *   GET|POST /api/actions/{id}/status       → {status, executed_at, error?}
  *   POST /api/actions/{id}/execute {result} → 店内消费器回调，置 已执行/已驳回
+ *   POST /api/actions/{id}/reject  {reason} → queued/待执行 → 已驳回（管理端审批）
  *
  * 状态机四态：待执行 / 已执行 / 已驳回 / 已过期（queued 或 待执行 超 24h 未执行自动过期）
  */
 const crypto = require('crypto');
 const store = require('../lib/store');
+const { WRITE_ROLES, mayWriteActions } = require('../lib/auth');
 const { loadSnapshot } = require('./snapshot');
 
 const FILE = 'actions_queue.json';
@@ -109,8 +111,16 @@ async function handle(req, res, ctx, pathname) {
     return true;
   }
 
-  // POST /api/actions —— 入队
+    // POST /api/actions —— 入队（需登录且可写）
   if (req.method === 'POST' && pathname === '/api/actions') {
+    if (!ctx.auth) {
+      ctx.sendJSON(res, 401, { ok: false, error: 'unauthorized: bearer token required' });
+      return true;
+    }
+    if (!mayWriteActions(ctx.auth)) {
+      ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: actions.write required（当前账号只读，请用老板/店长登录）' });
+      return true;
+    }
     const { buf } = await ctx.readBody(req);
     let body = null;
     try { body = JSON.parse(buf.toString('utf8')); } catch (e) {}
@@ -118,7 +128,8 @@ async function handle(req, res, ctx, pathname) {
       ctx.sendJSON(res, 400, { ok: false, error: 'missing type' });
       return true;
     }
-    const { action, dedup } = enqueue(body.type, body.payload, body.operator, ctx.traceId);
+    const operator = body.operator || ctx.auth.account || ctx.auth.role;
+    const { action, dedup } = enqueue(body.type, body.payload, operator, ctx.traceId);
     ctx.sendJSON(res, 200, {
       ok: true,
       id: action.id,
@@ -131,8 +142,8 @@ async function handle(req, res, ctx, pathname) {
     return true;
   }
 
-  // /api/actions/{id}/confirm|status|execute
-  const m = pathname.match(/^\/api\/actions\/([^/]+)\/(confirm|status|execute)$/);
+  // /api/actions/{id}/confirm|status|execute|reject
+  const m = pathname.match(/^\/api\/actions\/([^/]+)\/(confirm|status|execute|reject)$/);
   if (m) {
     const id = m[1];
     const sub = m[2];
@@ -150,12 +161,19 @@ async function handle(req, res, ctx, pathname) {
     if (sub === 'status') {
       ctx.sendJSON(res, 200, {
         ok: true, id: a.id, status: a.status,
-        executed_at: a.executed_at, error: a.error || undefined
+        executed_at: a.executed_at,
+        error: a.error || undefined,
+        result: a.result == null ? undefined : a.result,
+        desc: (a.result && (a.result.desc || a.result.detail)) || undefined
       });
       return true;
     }
 
     if (sub === 'confirm') {
+      if (!ctx.auth || !mayWriteActions(ctx.auth)) {
+        ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: actions.write required' });
+        return true;
+      }
       const { buf } = await ctx.readBody(req);
       let body = null;
       try { body = JSON.parse(buf.toString('utf8')); } catch (e) {}
@@ -174,7 +192,7 @@ async function handle(req, res, ctx, pathname) {
         return true;
       }
       a.status = '待执行';
-      a.confirmed_by = body.operator || null;
+      a.confirmed_by = body.operator || ctx.auth.account || ctx.auth.role || null;
       a.confirmed_at = new Date().toISOString();
       a.updated_at = a.confirmed_at;
       saveQueue(q);
@@ -192,14 +210,38 @@ async function handle(req, res, ctx, pathname) {
         return true;
       }
       const result = body.result;
-      const rejected = result && result.ok === false;
+      const rejected = (result && result.ok === false) || !!body.error;
       a.status = rejected ? '已驳回' : '已执行';
-      a.error = rejected ? String((result && result.error) || 'rejected by consumer') : null;
+      a.error = rejected
+        ? String((result && result.error) || body.error || 'rejected by consumer')
+        : null;
       a.result = result == null ? null : result;
       a.executed_at = new Date().toISOString();
       a.updated_at = a.executed_at;
       saveQueue(q);
       ctx.sendJSON(res, 200, { ok: true, id: a.id, status: a.status, executed_at: a.executed_at, error: a.error || undefined });
+      return true;
+    }
+
+    if (sub === 'reject') {
+      if (!ctx.auth || !mayWriteActions(ctx.auth)) {
+        ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: actions.write required' });
+        return true;
+      }
+      const { buf } = await ctx.readBody(req);
+      let body = null;
+      try { body = JSON.parse(buf.toString('utf8')); } catch (e) {}
+      body = body || {};
+      if (OPEN_STATES.indexOf(a.status) < 0) {
+        ctx.sendJSON(res, 409, { ok: false, error: 'invalid state: ' + a.status, id, status: a.status });
+        return true;
+      }
+      a.status = '已驳回';
+      a.error = String(body.reason || body.error || 'rejected by admin');
+      a.updated_at = new Date().toISOString();
+      a.executed_at = a.updated_at;
+      saveQueue(q);
+      ctx.sendJSON(res, 200, { ok: true, id: a.id, status: a.status, error: a.error });
       return true;
     }
   }

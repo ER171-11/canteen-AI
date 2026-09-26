@@ -3,6 +3,8 @@ package com.pandawufu.shared.repository
 import com.pandawufu.shared.model.IngredientDto
 import com.pandawufu.shared.model.PosTableDto
 import com.pandawufu.shared.model.RecvRecordDto
+import com.pandawufu.shared.model.RestockSuggestItemDto
+import com.pandawufu.shared.model.SnapshotDataDto
 import com.pandawufu.shared.model.SnapshotDto
 import com.pandawufu.shared.network.BffClient
 
@@ -17,24 +19,27 @@ data class StockItem(
     val status: StockStatus
 )
 
-/** 补货建议（由告急/偏低项推导；AI 建议·需确认，转单必须走 ConfirmGateway） */
+/** 补货建议（优先 BFF 日耗估算；回退安全线；转单必须走 ConfirmGateway → orders 草稿） */
 data class RestockSuggestion(
     val ingredientId: String,
     val name: String,
     val unit: String,
     val suggestQty: Double,
-    val reason: String
+    val reason: String,
+    val qty: Double? = null,
+    val safe: Double? = null,
+    val daysLeft: Double? = null,
+    val urgency: String? = null,
+    val source: String? = null
 )
 
 /**
- * 安全库存分档规则（Sprint 1 定版）：
- *  1. 安全线取值：ing.safe ?: ing.safety ?: ing.est × 2（est 为日耗估算，×2 = 两日安全垫）。
- *     三者皆缺时安全线=当前量（状态恒为充足），避免误报告急。
+ * 安全库存分档规则（Sprint 1 定版，仍用于库存 Tab 色标）：
+ *  1. 安全线取值：ing.safe ?: ing.safety ?: ing.est × 2
  *  2. ratio = qty / safety：
- *     ratio < 0.30        → 告急 CRITICAL（原型：0.44/2=22% → 告急）
- *     0.30 ≤ ratio < 0.75 → 偏低 LOW     （原型：0.9/2=45%、0.18/0.4=45% → 偏低）
- *     ratio ≥ 0.75        → 充足 ENOUGH  （原型：12.5/15=83%、6.2/8=77% → 充足）
- *  阈值取自原型 inv-stock 的 6 条样例反推，BFF 出正式规则后在此替换。
+ *     ratio < 0.30        → 告急 CRITICAL
+ *     0.30 ≤ ratio < 0.75 → 偏低 LOW
+ *     ratio ≥ 0.75        → 充足 ENOUGH
  */
 object StockPolicy {
     const val CRITICAL_RATIO = 0.30
@@ -44,7 +49,9 @@ object StockPolicy {
         ing.safe?.let { if (it > 0) return it }
         ing.safety?.let { if (it > 0) return it }
         ing.est?.let { if (it > 0) return it * 2 }
-        return (ing.qty ?: ing.stock ?: 0.0).coerceAtLeast(0.0)
+        // 无档案时：零库存按安全线 1 告急；有量不误判为充足（避免补货链空转）
+        val qty = ing.qty ?: ing.stock ?: 0.0
+        return if (qty <= 0.0) 1.0 else 0.0
     }
 
     fun classify(qty: Double, safety: Double): StockStatus {
@@ -63,38 +70,87 @@ object StockPolicy {
         return StockItem(ing, qty, safety, classify(qty, safety))
     }
 
-    /** 由库存项推导补货建议（补到安全线），告急/偏低项才应传入 */
+    /** 本地回退：补到安全线（无 BFF 建议时） */
     fun toSuggestion(item: StockItem): RestockSuggestion =
         RestockSuggestion(
             ingredientId = item.ingredient.id,
             name = item.ingredient.name,
             unit = item.ingredient.unit,
             suggestQty = (item.safety - item.qty).coerceAtLeast(0.0),
-            reason = "安全线 ${item.safety}${item.ingredient.unit}，现 ${item.qty}${item.ingredient.unit}（${item.status.label}）"
+            reason = "安全线 ${item.safety}${item.ingredient.unit}，现 ${item.qty}${item.ingredient.unit}（${item.status.label}）",
+            qty = item.qty,
+            safe = item.safety,
+            source = "safety_fallback"
+        )
+
+    fun fromBff(item: RestockSuggestItemDto): RestockSuggestion =
+        RestockSuggestion(
+            ingredientId = item.ingredientId,
+            name = item.name,
+            unit = item.unit,
+            suggestQty = item.suggestQty,
+            reason = item.reason,
+            qty = item.qty,
+            safe = item.safe,
+            daysLeft = item.daysLeft,
+            urgency = item.urgency,
+            source = item.source
         )
 }
 
-/** 进销存（库存/补货/采购/进货 + POS 桌台，全部只读快照） */
+/** 进销存（库存/补货/采购/进货 + POS 桌台） */
 interface InventoryRepository {
     suspend fun snapshot(): SnapshotDto
     suspend fun stockItems(): List<StockItem>
     suspend fun restockSuggestions(): List<RestockSuggestion>
+    suspend fun purchaseOrders(): List<RecvRecordDto>
     suspend fun recvRecords(): List<RecvRecordDto>
     suspend fun posTables(): List<PosTableDto>
 }
 
 class InventoryRepositoryImpl(private val bff: BffClient) : InventoryRepository {
 
-    override suspend fun snapshot(): SnapshotDto = bff.snapshotLatest()
+    override suspend fun snapshot(): SnapshotDto {
+        return try {
+            val s = bff.snapshotLatest()
+            // 404 体可能解成 ok=false；空开成空快照，避免进销整页失败
+            if (!s.ok && s.data == null && s.revText().isEmpty()) {
+                SnapshotDto(ok = true, data = SnapshotDataDto())
+            } else {
+                s
+            }
+        } catch (e: Exception) {
+            val fail = com.pandawufu.shared.util.LoadFailure.from(e)
+            if (fail.soft) SnapshotDto(ok = true, data = SnapshotDataDto()) else throw e
+        }
+    }
 
     override suspend fun stockItems(): List<StockItem> =
         snapshot().data?.ings.orEmpty().map(StockPolicy::toStockItem)
 
-    override suspend fun restockSuggestions(): List<RestockSuggestion> =
-        stockItems()
+    override suspend fun restockSuggestions(): List<RestockSuggestion> {
+        val remote = runCatching { bff.restockSuggest() }.getOrNull()
+        if (remote != null && remote.ok && remote.items.isNotEmpty()) {
+            return remote.items.map(StockPolicy::fromBff)
+        }
+        // 本地回退也只取告急/偏低前 15，避免首页一键变成上百项
+        return stockItems()
             .filter { it.status != StockStatus.ENOUGH }
-            .sortedByDescending { it.safety - it.qty }
+            .sortedWith(
+                compareBy<StockItem> {
+                    when (it.status) {
+                        StockStatus.CRITICAL -> 0
+                        StockStatus.LOW -> 1
+                        StockStatus.ENOUGH -> 2
+                    }
+                }.thenByDescending { it.safety - it.qty }
+            )
+            .take(15)
             .map(StockPolicy::toSuggestion)
+    }
+
+    override suspend fun purchaseOrders(): List<RecvRecordDto> =
+        snapshot().data?.orders.orEmpty()
 
     override suspend fun recvRecords(): List<RecvRecordDto> =
         snapshot().data?.recv.orEmpty()

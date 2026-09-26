@@ -270,6 +270,12 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         merged, conflicts = merge_mod.merge(base["data"], data, cur["data"])
+        # 云端队列消费者已在 baseRev 上应用动作；冲突时业务集合以 QUEUE 侧为准，
+        # 否则入库/重算库存会被对端旧 ings 盖回（orders/recv 也曾不参与合并）。
+        if str(machine).upper() == "QUEUE":
+            for coll in ("ings", "orders", "recv", "logs", "pos", "sales", "quotes"):
+                if isinstance(data.get(coll), list):
+                    merged[coll] = data[coll]
         res = STORE.put(cur["rev"], merged, machine, note="sync-merge")
         return self._json({
             "ok": True,

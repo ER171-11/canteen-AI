@@ -49,21 +49,31 @@ class HomeViewModel(
 
     private fun refresh() {
         scope.launch {
-            _state.update { it.copy(loading = true, error = null) }
+            val soft = _state.value.report != null
+            _state.update { it.copy(loading = !soft, error = null) }
             try {
-                val health = healthRepository.health()
+                val health = runCatching { healthRepository.health() }.getOrNull()
                 val report = reportRepository.daily()
-                val localRev = _state.value.report?.rev
+                val reportRev = report.revText().ifEmpty { null }
+                val healthRev = health?.revText()?.ifEmpty { null }
+                val localRev = _state.value.rev
                 _state.update {
                     it.copy(
                         loading = false,
                         report = report,
-                        rev = health.rev ?: report.rev,
-                        stale = RedlineGuard.isStale(localRev, health.rev ?: report.rev)
+                        rev = healthRev ?: reportRev,
+                        stale = RedlineGuard.isStale(localRev, healthRev ?: reportRev),
+                        error = null
                     )
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(loading = false, error = e.message ?: "network error") }
+                val fail = com.pandawufu.shared.util.LoadFailure.from(e)
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        error = fail.error ?: fail.hint ?: "暂时连不上门店数据"
+                    )
+                }
             }
         }
     }

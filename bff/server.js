@@ -27,14 +27,23 @@ const crypto = require('crypto');
 /* .env 加载（简易零依赖：仅读 KIMI_API_KEY，不依赖 dotenv）          */
 /* ------------------------------------------------------------------ */
 function loadEnv() {
-  if (process.env.KIMI_API_KEY) return;
   const envPath = path.join(__dirname, '.env');
   try {
     const content = fs.readFileSync(envPath, 'utf8');
-    const m = content.match(/^KIMI_API_KEY\s*=\s*(.+)$/m);
-    if (m) process.env.KIMI_API_KEY = m[1].trim();
+    for (const line of content.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const m = t.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!m) continue;
+      const key = m[1];
+      let val = m[2].trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[key] == null || process.env[key] === '') process.env[key] = val;
+    }
   } catch (e) {
-    // .env 不存在或读失败，由健康检查 key_loaded 暴露
+    // .env 不存在时忽略
   }
 }
 loadEnv();
@@ -47,12 +56,15 @@ const { loadSnapshot } = require('./routes/snapshot');
 
 const ROUTES = [
   require('./routes/auth'),
+  require('./routes/org'),
   require('./routes/snapshot'),
   require('./routes/report'),
+  require('./routes/inventory'),
   require('./routes/actions'),
   require('./routes/agent'),
   require('./routes/admin'),
-  require('./routes/kitchen')
+  require('./routes/kitchen'),
+  require('./routes/modules')
 ];
 
 const HOST = process.env.BFF_HOST || '127.0.0.1';
@@ -70,7 +82,7 @@ function sendJSON(res, status, obj, traceId) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Trace-Id',
     'Access-Control-Max-Age': '86400',
     'X-Trace-Id': traceId || ''
@@ -111,7 +123,8 @@ function readBody(req, limit) {
 // 公开端点：无需 Bearer token
 function isPublic(method, pathname) {
   if (method === 'GET' && (pathname === '/' || pathname === '/health' || pathname === '/api/health')) return true;
-  if (method === 'POST' && (pathname === '/api/auth/login' || pathname === '/api/admin/login')) return true;
+  if (method === 'POST' && (pathname === '/api/auth/login' || pathname === '/api/auth/register' || pathname === '/api/admin/login' || pathname === '/api/auth/wechat')) return true;
+  if (method === 'GET' && pathname === '/api/auth/wechat/config') return true;
   return false;
 }
 
@@ -127,8 +140,8 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Trace-Id',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Trace-Id, X-Store-Id',
       'Access-Control-Max-Age': '86400'
     });
     res.end();
@@ -152,6 +165,7 @@ const server = http.createServer(async (req, res) => {
 
   // 审计：所有 /api/ 请求（含被拒）在响应结束时落 audit.jsonl
   if (isApi) {
+    const storeHdr = String(req.headers['x-store-id'] || '').trim() || null;
     res.on('finish', () => {
       audit.write({
         ts: new Date().toISOString(),
@@ -159,6 +173,8 @@ const server = http.createServer(async (req, res) => {
         method: req.method,
         path: pathname,
         role: authRec ? authRec.role : null,
+        account: authRec ? authRec.account : null,
+        store_id: storeHdr || (authRec && authRec.store_id) || null,
         status: res.statusCode,
         dt_ms: Date.now() - started
       });
@@ -177,6 +193,7 @@ const server = http.createServer(async (req, res) => {
   const ctx = {
     traceId,
     auth: authRec,
+    storeId: String(req.headers['x-store-id'] || '').trim() || (authRec && authRec.store_id) || null,
     query: u.searchParams,
     readBody,
     sendJSON: (r, s, o) => sendJSON(r, s, o, traceId),

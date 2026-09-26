@@ -2,7 +2,9 @@ package com.pandawufu.shared.redline
 
 import com.pandawufu.shared.model.ActionDto
 import com.pandawufu.shared.model.ActionStatus
+import com.pandawufu.shared.model.toJsonObject
 import com.pandawufu.shared.repository.ActionRepository
+import kotlinx.serialization.json.JsonObject
 
 /**
  * 红线网关 —— 端侧任何写操作的唯一入口。
@@ -15,27 +17,45 @@ import com.pandawufu.shared.repository.ActionRepository
  */
 class ConfirmGateway(private val actionRepository: ActionRepository) {
 
-    /** 第一段：生成待确认动作（草稿态）。 */
-    suspend fun propose(type: String, payload: Map<String, String>, baseRev: String? = null): ActionDto =
+    /** 第一段：生成待确认动作（BFF status=queued）。 */
+    suspend fun propose(
+        type: String,
+        payload: JsonObject,
+        baseRev: String? = null,
+        operator: String? = null
+    ): ActionDto =
         actionRepository.create(
             ActionDto(
                 id = newActionId(),
                 type = type,
                 payload = payload,
                 status = ActionStatus.PENDING,
+                operator = operator,
                 baseRev = baseRev
             )
         )
 
-    /** 第二段：用户确认后提交执行。rev 过期时调用方必须先走 RedlineGuard 刷新。 */
-    suspend fun confirm(action: ActionDto): ActionDto =
-        actionRepository.confirm(action)
+    /** 便捷重载：扁平字符串 payload。 */
+    suspend fun propose(
+        type: String,
+        payload: Map<String, String>,
+        baseRev: String? = null,
+        operator: String? = null
+    ): ActionDto = propose(type, payload.toJsonObject(), baseRev, operator)
+
+    /** 第二段：用户确认后提交执行（queued → 待执行）。rev 过期时调用方必须先刷新。 */
+    suspend fun confirm(action: ActionDto, operator: String? = null, rev: String? = null): ActionDto =
+        actionRepository.confirm(
+            action.copy(
+                operator = operator ?: action.operator,
+                rev = rev ?: action.rev ?: action.baseRev
+            )
+        )
 
     private fun newActionId(): String =
         "act-${kotlin.random.Random.nextLong().toString(16)}-${kotlin.random.Random.nextInt(0, 0xFFFF)}"
 
     companion object {
-        /** 进程内单例。App 启动时通过 [init] 注入实现；测试可注入 mock。 */
         @Volatile
         private var instance: ConfirmGateway? = null
 

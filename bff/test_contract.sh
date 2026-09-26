@@ -74,16 +74,28 @@ ROTOKEN=$(json_get "$TMPD/ro.json" token)
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{}')
 assert_code "缺 account 登录" 400 "$CODE"
 
-# 无快照时只读端点一律 404（数据目录是全新的）
+# 无快照：snapshot 仍 404；厨房空开 200（菜单兜底 / 空工单），避免 App 整页加载失败
 CODE=$(curl -s -o "$TMPD/ns0.json" -w "%{http_code}" "$BASE/api/snapshot/latest" -H "$AUTH")
 assert_code "无快照 latest" 404 "$CODE"
 assert_grep "无快照错误体" "$TMPD/ns0.json" 'no snapshot'
-CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/sop/workorder" -H "$AUTH")
-assert_code "无快照 sop/workorder" 404 "$CODE"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/kitchen/recipes" -H "$AUTH")
-assert_code "无快照 kitchen/recipes" 404 "$CODE"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/kitchen/board" -H "$AUTH")
-assert_code "无快照 kitchen/board" 404 "$CODE"
+CODE=$(curl -s -o "$TMPD/ns_wo.json" -w "%{http_code}" "$BASE/api/sop/workorder" -H "$AUTH")
+assert_code "无快照 sop/workorder 空开" 200 "$CODE"
+assert_node "无快照 workorder hint" "$TMPD/ns_wo.json" 'j.ok&&j.hint==="no_snapshot"&&j.count===0'
+CODE=$(curl -s -o "$TMPD/ns_kr.json" -w "%{http_code}" "$BASE/api/kitchen/recipes" -H "$AUTH")
+assert_code "无快照 kitchen/recipes 空开" 200 "$CODE"
+assert_node "无快照 recipes 有菜单或空列表" "$TMPD/ns_kr.json" 'j.ok&&j.hint==="no_snapshot"&&Array.isArray(j.items)'
+CODE=$(curl -s -o "$TMPD/ns_kb.json" -w "%{http_code}" "$BASE/api/kitchen/board" -H "$AUTH")
+assert_code "无快照 kitchen/board 空开" 200 "$CODE"
+assert_node "无快照 board hint" "$TMPD/ns_kb.json" 'j.ok&&j.hint==="no_snapshot"'
+CODE=$(curl -s -o "$TMPD/ns_ms.json" -w "%{http_code}" "$BASE/api/modules/staff" -H "$AUTH")
+assert_code "无快照 modules/staff 空开" 200 "$CODE"
+assert_node "无快照 staff hint" "$TMPD/ns_ms.json" 'j.ok&&j.hint==="no_snapshot"&&Array.isArray(j.shifts)'
+CODE=$(curl -s -o "$TMPD/ns_ma.json" -w "%{http_code}" "$BASE/api/modules/analysis" -H "$AUTH")
+assert_code "无快照 modules/analysis 空开" 200 "$CODE"
+assert_node "无快照 analysis mock/hint" "$TMPD/ns_ma.json" 'j.ok&&j.hint==="no_snapshot"&&(j.mock===true||Array.isArray(j.trend))'
+CODE=$(curl -s -o "$TMPD/ns_mb.json" -w "%{http_code}" "$BASE/api/modules/booking" -H "$AUTH")
+assert_code "无快照 modules/booking 空开" 200 "$CODE"
+assert_node "无快照 booking hint" "$TMPD/ns_mb.json" 'j.ok&&j.hint==="no_snapshot"'
 
 # ---------- 3. 快照 ----------
 say "== 3. 快照 push/latest =="
@@ -178,6 +190,15 @@ if grep -q "\"id\":\"$BID\"" "$TMPD/ls.json"; then bad "过滤混入了已驳回
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/actions/$AID/confirm" \
   -H "$AUTH" -H 'Content-Type: application/json' -d '{"operator":"店长","rev":42}')
 assert_code "已执行后重复 confirm" 409 "$CODE"
+
+# 管理端 reject 入口（queued → 已驳回，无需先 confirm）
+curl -s -X POST "$BASE/api/actions" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"type":"config.update","payload":{"values":{"contract_reject":1}},"operator":"老板"}' > "$TMPD/a4.json"
+RID=$(json_get "$TMPD/a4.json" id)
+CODE=$(curl -s -o "$TMPD/rej.json" -w "%{http_code}" -X POST "$BASE/api/actions/$RID/reject" \
+  -H "$AUTH" -H 'Content-Type: application/json' -d '{"reason":"contract reject"}')
+assert_code "POST /actions/{id}/reject" 200 "$CODE"
+assert_grep "reject → 已驳回" "$TMPD/rej.json" '"status":"已驳回"'
 
 # ---------- 7. admin ----------
 say "== 7. admin =="
@@ -326,6 +347,112 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/kitchen/recipes
 assert_code "POST kitchen/recipes 只读" 404 "$CODE"
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/kitchen/board" -H "$KAUTH" -H 'Content-Type: application/json' -d '{}')
 assert_code "POST kitchen/board 只读" 404 "$CODE"
+
+# ---------- 10. modules（员工/预订/食安/分析）+ report 推导 ----------
+say "== 10. modules / report 推导 =="
+# 全新 token，避免前面用例耗尽标准桶
+MTOKEN=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d '{"account":"modules-tester"}' | node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).token)')
+MAUTH="Authorization: Bearer $MTOKEN"
+TODAY=$(date +%F)
+YDAY=$(date -d "yesterday" +%F 2>/dev/null || date -v-1d +%F)
+
+node -e '
+const fs=require("fs");
+const today=process.argv[2], yday=process.argv[3];
+const now=Date.now(), H=3600000, D=24*H;
+const iso=(ms)=>new Date(ms).toISOString();
+const plusD=(n)=>{const d=new Date(now+n*D);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");};
+const snap={rev:60,machine:"pos-m",
+  data:{
+    sales:[
+      {ts:today+"T11:30:00",amount:58.5},{ts:today+"T12:10:00",amount:102},
+      {ts:today+"T18:40:00",amount:76},
+      {ts:yday+"T12:00:00",amount:88},{ts:yday+"T19:00:00",amount:66.5}
+    ],
+    dishes:[
+      {name:"红饺",est:100,price:28,q:60},
+      {name:"黑饺",est:90,price:32,q:35},
+      {name:"白饺",est:40,price:26,q:58},
+      {name:"紫饺",est:30,price:30,q:30}
+    ],
+    ings:[{name:"面粉",qty:5,safe:20},{name:"猪肉",qty:30,safe:10}],
+    members:[{id:1}]
+  },
+  ext:{
+    staff_shifts:[{staff:"张三",shift:"早班"},{staff:"李四",shift:"晚班"}],
+    staff_clock:[{staff:"张三",ts:today+"T08:55:00"},{staff:"李四",ts:today+"T09:02:00"}],
+    staff_perf:[{staff:"张三",score:92}],
+    staff_train:[{staff:"王五",course:"食品安全"}],
+    fs_certs:[{name:"张三",expire:plusD(10)},{name:"李四",expire:plusD(100)}],
+    fs_trace:[{batch:"B2026",supplier:"双汇"}],
+    fs_samples:[{dish:"红饺",ts:iso(now-46*H)},{dish:"黄饺",ts:iso(now-10*H)}],
+    fs_disinfect:[{area:"后厨",ts:today+"T07:30:00"}],
+    bookings:[{id:"b1",date:today,people:4},{id:"b2",date:today,people:2},{id:"b3",date:yday,people:6}],
+    queue:[{no:"A05"},{no:"A06"},{no:"A07"},{no:"A08"},{no:"A09"}],
+    sop_workorders:[{id:"w1",date:today,status:"已完成"},{id:"w2",date:today,status:"进行中"}]
+  }};
+fs.writeFileSync(process.argv[1],JSON.stringify(snap));
+' "$TMPD/mod.json" "$TODAY" "$YDAY"
+
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/snapshot/push" \
+  -H "$MAUTH" -H 'Content-Type: application/json' --data-binary @"$TMPD/mod.json")
+assert_code "push 含新 ext 键快照" 200 "$CODE"
+
+curl -s "$BASE/api/modules/staff" -H "$MAUTH" > "$TMPD/mst.json"
+assert_node "modules/staff 四表形状" "$TMPD/mst.json" 'j.ok&&j.shifts.length===2&&j.clock.length===2&&j.perf.length===1&&j.train.length===1'
+assert_node "modules/staff 带 rev/generated_at" "$TMPD/mst.json" 'j.rev===60&&!!j.generated_at'
+
+curl -s "$BASE/api/modules/booking" -H "$MAUTH" > "$TMPD/mbk.json"
+assert_node "modules/booking 默认今日 2 条+queue 5" "$TMPD/mbk.json" 'j.ok&&j.date==="'$TODAY'"&&j.bookings.length===2&&j.queue.length===5'
+curl -s "$BASE/api/modules/booking?date=$YDAY" -H "$MAUTH" > "$TMPD/mbk2.json"
+assert_node "modules/booking 指定昨日 1 条" "$TMPD/mbk2.json" 'j.bookings.length===1&&j.bookings[0].id==="b3"'
+
+curl -s "$BASE/api/modules/foodsafe" -H "$MAUTH" > "$TMPD/mfs.json"
+assert_node "modules/foodsafe 四表形状" "$TMPD/mfs.json" 'j.ok&&j.certs.length===2&&j.trace.length===1&&j.samples.length===2&&j.disinfect.length===1'
+assert_node "foodsafe hours_left 46h前≈2h" "$TMPD/mfs.json" 'var s=j.samples.find(function(x){return x.dish==="红饺"});s.hours_left>=0&&s.hours_left<=4'
+assert_node "foodsafe hours_left 10h前≈38h" "$TMPD/mfs.json" 'var s=j.samples.find(function(x){return x.dish==="黄饺"});s.hours_left>=36&&s.hours_left<=39'
+
+curl -s "$BASE/api/modules/analysis" -H "$MAUTH" > "$TMPD/man.json"
+assert_node "analysis 真实聚合 mock:false" "$TMPD/man.json" 'j.ok&&j.mock===false'
+assert_node "analysis trend 按日 2 天" "$TMPD/man.json" 'j.trend.length===2&&j.trend[0].revenue>0&&j.trend[0].orders>0'
+assert_node "analysis heatmap 非空" "$TMPD/man.json" 'j.heatmap.length>0&&j.heatmap[0].hour!=null&&j.heatmap[0].weekday!=null'
+assert_node "analysis 矩阵象限 star/dog" "$TMPD/man.json" 'j.matrix.some(function(m){return m.quadrant==="star"})&&j.matrix.some(function(m){return m.quadrant==="dog"})'
+assert_node "analysis efficiency 客单价" "$TMPD/man.json" 'j.efficiency&&j.efficiency.avg_ticket>0&&j.efficiency.peak_hour!=null'
+assert_node "analysis forecast 7日+备货" "$TMPD/man.json" 'j.forecast&&j.forecast.days&&j.forecast.days.length>=7&&Array.isArray(j.forecast.restock)'
+
+curl -s "$BASE/api/modules/equipment" -H "$MAUTH" > "$TMPD/meq.json"
+assert_node "equipment temps 非空" "$TMPD/meq.json" 'j.ok&&Array.isArray(j.temps)&&j.temps.length>=1&&j.temps[0].device'
+assert_node "equipment energy_summary" "$TMPD/meq.json" 'j.energy_summary&&Array.isArray(j.energy_summary.items)'
+
+curl -s "$BASE/api/modules/vip" -H "$MAUTH" > "$TMPD/mvip.json"
+assert_node "vip members 数组" "$TMPD/mvip.json" 'j.ok&&Array.isArray(j.members)'
+
+curl -s "$BASE/api/report/daily?date=$TODAY" -H "$MAUTH" > "$TMPD/mrp.json"
+assert_node "report 带 rev/generated_at" "$TMPD/mrp.json" 'j.rev===60&&!!j.generated_at'
+assert_node "report todos 带 kind" "$TMPD/mrp.json" 'j.todos.every(function(t){return !t.text||typeof t.kind==="string"||t.kind==null})||j.todos.some(function(t){return t.kind})'
+assert_node "report alerts 或 equipment/vip 作战" "$TMPD/mrp.json" 'j.alerts.length>=0'
+assert_node "report todos 库存告急" "$TMPD/mrp.json" 'j.todos.some(function(t){return t.text.indexOf("库存告急：面粉")>=0})'
+assert_node "report todos 今日工单" "$TMPD/mrp.json" 'j.todos.some(function(t){return t.text.indexOf("今日工单 2 单")>=0})'
+assert_node "report todos 今日预订" "$TMPD/mrp.json" 'j.todos.some(function(t){return t.text.indexOf("今日预订 2 桌")>=0})'
+assert_node "report alerts 健康证<30天" "$TMPD/mrp.json" 'j.alerts.some(function(a){return a.text.indexOf("健康证")>=0&&a.text.indexOf("张三")>=0})'
+assert_node "report alerts 留样临近48h" "$TMPD/mrp.json" 'j.alerts.some(function(a){return a.text.indexOf("留样")>=0&&a.text.indexOf("红饺")>=0})'
+assert_node "report alerts 库存告急" "$TMPD/mrp.json" 'j.alerts.some(function(a){return a.text.indexOf("库存告急 1 项")>=0})'
+
+# mock 回退：空 data 快照
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/snapshot/push" \
+  -H "$MAUTH" -H 'Content-Type: application/json' -d '{"rev":61,"machine":"pos-m","data":{}}')
+assert_code "push 空 data 快照" 200 "$CODE"
+curl -s "$BASE/api/modules/analysis" -H "$MAUTH" > "$TMPD/man0.json"
+assert_node "analysis mock 回退" "$TMPD/man0.json" 'j.ok&&j.mock===true&&j.trend.length===4&&j.matrix.some(function(m){return m.quadrant==="star"})'
+assert_node "analysis mock efficiency 演示" "$TMPD/man0.json" 'j.efficiency&&j.efficiency.翻台率===3.2'
+curl -s "$BASE/api/report/daily?date=$TODAY" -H "$MAUTH" > "$TMPD/mrp0.json"
+assert_node "report 无数据回退 mock" "$TMPD/mrp0.json" 'j.mock===true&&j.rev===null&&j.kpi.length===8'
+
+# 只读性：写动词一律 404
+for ep in staff booking foodsafe analysis; do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/modules/$ep" -H "$MAUTH" -H 'Content-Type: application/json' -d '{}')
+  assert_code "POST modules/$ep 只读" 404 "$CODE"
+done
 
 # ---------- 汇总 ----------
 say ""

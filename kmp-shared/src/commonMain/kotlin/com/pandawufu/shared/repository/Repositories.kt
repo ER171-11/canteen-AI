@@ -43,11 +43,38 @@ interface ActionRepository {
 }
 
 class ActionRepositoryImpl(private val bff: BffClient) : ActionRepository {
-    override suspend fun create(action: ActionDto): ActionDto =
-        bff.postAction(action.copy(status = ActionStatus.PENDING))
+    override suspend fun create(action: ActionDto): ActionDto {
+        val resp = bff.postAction(action)
+        if (!resp.ok || resp.id.isNullOrBlank()) {
+            error(resp.error ?: "enqueue failed")
+        }
+        return action.copy(
+            id = resp.id,
+            status = ActionStatus.fromWire(resp.status),
+            rev = resp.revText().ifEmpty { action.baseRev },
+            createdAt = resp.createdAt,
+            traceId = resp.traceId
+        )
+    }
 
-    override suspend fun confirm(action: ActionDto): ActionDto =
-        bff.postAction(action.copy(status = ActionStatus.CONFIRMED))
+    override suspend fun confirm(action: ActionDto): ActionDto {
+        // 无店内快照时 rev 可为 null（BFF 两侧均为 null 即放行）
+        val rev = action.rev ?: action.baseRev
+        val resp = bff.confirmAction(action.id, action.operator, rev)
+        if (!resp.ok) {
+            val hint = listOfNotNull(
+                resp.error,
+                resp.expectedRev?.let { "期望 rev=$it" },
+                resp.gotRev?.let { "本地 rev=$it" }
+            ).joinToString(" · ").ifBlank { "confirm failed" }
+            error(hint)
+        }
+        return action.copy(
+            status = ActionStatus.fromWire(resp.status),
+            confirmedAt = resp.confirmedAt,
+            updatedAt = resp.confirmedAt
+        )
+    }
 }
 
 /** Kimi 视觉（图片仅内存传递，不落盘） */

@@ -61,5 +61,9 @@ class ConfirmGatewayTest {
         assertTrue(RedlineGuard.isStale(null, "20260924"))
         assertTrue(RedlineGuard.checkBeforeConfirm("20260924", "20260924"))
         assertTrue(!RedlineGuard.checkBeforeConfirm("1", "2"))
+        // 新店无快照：远端空白不过期
+        assertTrue(!RedlineGuard.isStale(null, null))
+        assertTrue(!RedlineGuard.isStale("1", null))
+        assertTrue(RedlineGuard.checkBeforeConfirm(null, null))
     }
 }

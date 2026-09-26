@@ -3,8 +3,14 @@ import { client } from './client'
 import type {
   ActionItem,
   ActionStatus,
+  AnalysisResp,
+  AuditItem,
+  BookingResp,
   Dish,
+  EquipmentResp,
+  FoodsafeResp,
   Health,
+  KimiLogItem,
   KitchenBoardItem,
   ListResp,
   LoginRequest,
@@ -14,13 +20,87 @@ import type {
   RecipesResp,
   ReportDaily,
   Snapshot,
+  StaffModuleResp,
+  VipResp,
   WorkorderResp,
+  OrgOverview,
+  OrgUser,
+  OrgPosition,
 } from './types'
 
 /** POST /api/admin/login */
 export async function login(req: LoginRequest): Promise<LoginResponse> {
   const { data } = await client.post<LoginResponse>('/admin/login', req)
   return data
+}
+
+/** GET /api/org */
+export async function fetchOrg(): Promise<OrgOverview> {
+  const { data } = await client.get<OrgOverview>('/org')
+  return data
+}
+
+/** POST /api/org/users */
+export async function createOrgUser(body: {
+  account: string
+  password?: string
+  display_name?: string
+  position_id?: string
+  store_id?: string
+}): Promise<{ ok: boolean; user: OrgUser }> {
+  const { data } = await client.post('/org/users', body)
+  return data
+}
+
+/** POST /api/org/users/update — 改岗/停用/改名 */
+export async function updateOrgUser(body: {
+  account?: string
+  id?: string
+  display_name?: string
+  position_id?: string
+  store_id?: string
+  status?: string
+}): Promise<{ ok: boolean; user: OrgUser }> {
+  const { data } = await client.post('/org/users/update', body)
+  return data
+}
+
+/** POST /api/org/users/reset-password */
+export async function resetOrgPassword(body: {
+  account: string
+  password?: string
+}): Promise<{ ok: boolean; account?: string }> {
+  const { data } = await client.post('/org/users/reset-password', body)
+  return data
+}
+
+/** POST /api/org/positions/update — 改岗位权限 */
+export async function updateOrgPosition(body: {
+  id?: string
+  position_id?: string
+  name?: string
+  write?: boolean
+  permissions?: string[]
+}): Promise<{ ok: boolean; position?: OrgPosition }> {
+  const { data } = await client.post('/org/positions/update', body)
+  return data
+}
+
+/**
+ * 管理端主数据写：入队 + 立即确认（仍走确认台状态机，不直连店内库）。
+ * 消费器异步落库后快照刷新。
+ */
+export async function submitConfirmedAction(
+  body: PostActionBody,
+): Promise<PostActionResult & { confirmed?: boolean }> {
+  const enq = await postAction(body)
+  const rev = enq.rev
+  try {
+    await confirmAction(enq.id, { operator: body.operator || 'admin', rev })
+    return { ...enq, status: '待执行', confirmed: true }
+  } catch {
+    return { ...enq, confirmed: false }
+  }
 }
 
 /*
@@ -58,6 +138,46 @@ export async function fetchActions(status?: ActionStatus): Promise<ActionItem[]>
     { params: status ? { status } : undefined },
   )
   return Array.isArray(data) ? data : data.items ?? []
+}
+
+export interface PostActionBody {
+  type: string
+  payload?: Record<string, unknown>
+  operator?: string
+}
+
+export interface PostActionResult {
+  ok: boolean
+  id: string
+  status: string
+  rev?: number | string
+  created_at?: string
+  dedup?: boolean
+  trace_id?: string
+}
+
+/** POST /api/actions — 写操作统一入队（不直连店内 sync） */
+export async function postAction(body: PostActionBody): Promise<PostActionResult> {
+  const { data } = await client.post<PostActionResult>('/actions', body)
+  return data
+}
+
+/** POST /api/actions/{id}/confirm */
+export async function confirmAction(
+  id: string,
+  body: { operator?: string; rev?: string | number },
+): Promise<{ ok: boolean; id: string; status: string }> {
+  const { data } = await client.post(`/actions/${encodeURIComponent(id)}/confirm`, body)
+  return data
+}
+
+/** POST /api/actions/{id}/reject */
+export async function rejectAction(
+  id: string,
+  body: { reason?: string } = {},
+): Promise<{ ok: boolean; id: string; status: string }> {
+  const { data } = await client.post(`/actions/${encodeURIComponent(id)}/reject`, body)
+  return data
 }
 
 /** GET /api/admin/{resource}（dishes/recipes/staff/members/tables/vendors） */
@@ -112,4 +232,86 @@ export async function fetchKitchenBoard(
     params: { date },
   })
   return data
+}
+
+/* ---------------- Sprint 2：modules 只读端点 + 审计 ---------------- */
+
+/** GET /api/modules/staff */
+export async function fetchModulesStaff(): Promise<StaffModuleResp> {
+  const { data } = await client.get<StaffModuleResp>('/modules/staff')
+  return data
+}
+
+/** GET /api/modules/booking?date= */
+export async function fetchBooking(date: string): Promise<BookingResp> {
+  const { data } = await client.get<BookingResp>('/modules/booking', {
+    params: { date },
+  })
+  return data
+}
+
+/** GET /api/modules/foodsafe */
+export async function fetchFoodsafe(): Promise<FoodsafeResp> {
+  const { data } = await client.get<FoodsafeResp>('/modules/foodsafe')
+  return data
+}
+
+/** GET /api/modules/analysis */
+export async function fetchAnalysis(): Promise<AnalysisResp> {
+  const { data } = await client.get<AnalysisResp>('/modules/analysis')
+  return data
+}
+
+/** GET /api/modules/vip */
+export async function fetchVip(): Promise<VipResp> {
+  const { data } = await client.get<VipResp>('/modules/vip')
+  return data
+}
+
+/** GET /api/modules/equipment */
+export async function fetchEquipment(): Promise<EquipmentResp> {
+  const { data } = await client.get<EquipmentResp>('/modules/equipment')
+  return data
+}
+
+/** GET /api/modules/takeout */
+export async function fetchTakeout(): Promise<Record<string, unknown>> {
+  const { data } = await client.get('/modules/takeout')
+  return data
+}
+
+/** GET /api/modules/finance */
+export async function fetchFinance(): Promise<Record<string, unknown>> {
+  const { data } = await client.get('/modules/finance')
+  return data
+}
+
+/** GET /api/modules/loss */
+export async function fetchLoss(): Promise<Record<string, unknown>> {
+  const { data } = await client.get('/modules/loss')
+  return data
+}
+
+/** GET /api/modules/review */
+export async function fetchReview(): Promise<Record<string, unknown>> {
+  const { data } = await client.get('/modules/review')
+  return data
+}
+
+/** GET /api/admin/kimi-log?limit= */
+export async function fetchKimiLog(limit = 100): Promise<KimiLogItem[]> {
+  const { data } = await client.get<{ ok: boolean; items: KimiLogItem[] }>(
+    '/admin/kimi-log',
+    { params: { limit } },
+  )
+  return data.items ?? []
+}
+
+/** GET /api/admin/audit?limit= */
+export async function fetchAuditLog(limit = 100): Promise<AuditItem[]> {
+  const { data } = await client.get<{ ok: boolean; items: AuditItem[] }>(
+    '/admin/audit',
+    { params: { limit } },
+  )
+  return data.items ?? []
 }

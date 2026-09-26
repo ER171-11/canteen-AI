@@ -10,6 +10,7 @@ interface KitchenRepository {
     suspend fun workorders(date: String? = null): WorkordersResponse
     suspend fun qc(date: String? = null): QcResponse
     suspend fun board(date: String? = null): BoardResponse
+    suspend fun demand(date: String? = null): KitchenDemandDto
 }
 
 class KitchenRepositoryImpl(private val bff: BffClient) : KitchenRepository {
@@ -18,4 +19,5 @@ class KitchenRepositoryImpl(private val bff: BffClient) : KitchenRepository {
     override suspend fun workorders(date: String?): WorkordersResponse = bff.kitchenWorkorders(date)
     override suspend fun qc(date: String?): QcResponse = bff.kitchenQc(date)
     override suspend fun board(date: String?): BoardResponse = bff.kitchenBoard(date)
+    override suspend fun demand(date: String?): KitchenDemandDto = bff.kitchenDemand(date)
 }

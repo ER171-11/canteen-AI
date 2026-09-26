@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#EEF1F5">
+<title>熊猫五福 · 老板 AI App</title>
+<link rel="icon" href="/logo.png">
+<link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+<div class="phone">
+  <div class="notch"></div>
+  <div class="screen">
+    <div class="statusbar">
+      <span>9:24</span>
+      <div class="right">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 17h3v3H2zM6 13h3v7H6zM10 9h3v11h-3zM14 5h3v15h-3zM18 1h3v19h-3z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C7 3 3 7 3 12h2c0-4 3-7 7-7s7 3 7 7h2c0-5-4-9-9-9z" opacity=".4"/><path d="M12 7c-3 0-5 2-5 5h2c0-2 1-3 3-3s3 1 3 3h2c0-3-2-5-5-5z"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2" stroke-linecap="round"/><rect x="4" y="9" width="12" height="6" rx="1" fill="currentColor"/></svg>
+      </div>
+    </div>
+
+    <div class="app" id="app">
+      <div class="ptr hide" id="ptr"><span class="spin"></span><span class="txt">下拉刷新</span></div>
+
+      <!-- ============ 1. 简报 ============ -->
+      <section class="screen-body" id="p-home">
+        <div class="brand">
+          <div class="brand-l">
+            <img class="panda-logo" src="" alt="熊猫五福">
+            <div><div class="t">熊猫五福</div><div class="s">老板 AI 助手 · v3</div></div>
+          </div>
+          <div class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        </div>
+
+        <div class="greet">
+          <h1>早上好，宋师傅 <span>·功夫当道</span></h1>
+          <p><span id="greetDate">2026年9月24日 周四</span> · 今日 28 道菜出品 · 五福饺子9款+热菜8+凉菜4+汤点3+甜品3<span class="fresh"><i class="dot"></i>数据 09:21 更新</span></p>
+        </div>
+
+        <div class="sum-banner">
+          <div class="sb-lab">昨日营收（<span id="ydayLabel">9月23日</span>）</div>
+          <div class="sb-val">¥ 8,640 <small>· 单 312 · 实收 ¥8,210</small></div>
+          <div class="sb-delta up">↑ 6.8% vs 上周三 · 毛利 41.2% · 翻台 3.2</div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>核心 KPI</div><div class="more" onclick="goModule('analysis')">经营分析 ›</div></div>
+          <div class="kpi kpi4">
+            <div class="b"><div class="lab">今日已售</div><div class="val">156<small>份</small></div><div class="delta up">目标 48.7%</div></div>
+            <div class="b"><div class="lab">实时毛利</div><div class="val">42.6<small>%</small></div><div class="delta up">↑1.4pct</div></div>
+            <div class="b"><div class="lab">客单价</div><div class="val">¥27.7</div><div class="delta up">↑¥1.2</div></div>
+            <div class="b"><div class="lab">实收</div><div class="val">¥3.2<small>k</small></div><div class="delta up">↑8%</div></div>
+            <div class="b"><div class="lab">翻台率</div><div class="val" id="kpiTurn">3.2<small>次</small></div><div class="delta up">↑0.3</div></div>
+            <div class="b"><div class="lab">坪效</div><div class="val">¥680<small>/㎡</small></div><div class="delta up">↑¥40</div></div>
+            <div class="b"><div class="lab">人效</div><div class="val">¥648<small>/人</small></div><div class="delta up">↑¥35</div></div>
+            <div class="b" onclick="goModule('pos')"><div class="lab">桌位</div><div class="val">5<small>/8</small></div><div class="delta" style="color:var(--sub)">午峰将至</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>时段热力 · 今日</div><div class="more" onclick="goModule('analysis')">详情 ›</div></div>
+          <div class="heat-mini" id="homeHeat"></div>
+          <div class="legend"><span>0</span><i style="background:#EEF1F5;width:18px;height:8px;border-radius:2px"></i><i style="background:#FBD3CC;width:18px;height:8px;border-radius:2px"></i><i style="background:#F48FB1;width:18px;height:8px;border-radius:2px"></i><i style="background:#C2185B;width:18px;height:8px;border-radius:2px"></i><span>峰值</span><span style="margin-left:auto">11:30 / 18:30 双峰</span></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>实时营收趋势</div><div class="more" onclick="goModule('analysis')">详情 ›</div></div>
+          <div class="chart-wrap">
+            <svg class="spark" viewBox="0 0 320 46" preserveAspectRatio="none">
+              <path d="M0,38 L40,34 L80,36 L120,28 L160,22 L200,18 L240,24 L280,14 L320,8" fill="none" stroke="#F48FB1" stroke-width="2.2"/>
+              <path d="M0,40 L40,38 L80,34 L120,32 L160,30 L200,28 L240,30 L280,26 L320,22" fill="none" stroke="#C9CDD4" stroke-width="1.8" stroke-dasharray="3,3"/>
+            </svg>
+            <div class="legend"><span><i style="background:#F48FB1"></i>今日</span><span><i style="background:#C9CDD4"></i>昨日同时段</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>明日预测</div><div class="more" onclick="goModule('analysis')">详情 ›</div></div>
+          <div class="kv"><span>明日天气</span><b>🌧 降温+小雨 · 周五</b></div>
+          <div class="kpi kpi4" style="margin-top:10px">
+            <div class="b"><div class="lab">预计营收</div><div class="val">¥9.2<small>k</small></div><div class="delta up">↑6.5%</div></div>
+            <div class="b"><div class="lab">预计单量</div><div class="val">340<small>单</small></div><div class="delta up">↑4%</div></div>
+            <div class="b"><div class="lab">预计翻台</div><div class="val">6.2<small>次</small></div><div class="delta up">↑0.4</div></div>
+            <div class="b"><div class="lab">较平日</div><div class="val">+12<small>%</small></div><div class="delta" style="color:var(--sub)">雨天提振</div></div>
+          </div>
+          <div class="five" style="margin-top:12px">
+            <div class="frow"><div class="dot5 f-red">红</div><div class="fbar"><div class="top"><b>长寿饺</b><span class="c up">↑ 78份</span></div><div class="track"><i style="width:82%;background:linear-gradient(90deg,#FFB6B0,#E8584A)"></i></div></div></div>
+            <div class="frow"><div class="dot5 f-blk">黑</div><div class="fbar"><div class="top"><b>三鲜饺</b><span class="c">→ 62份</span></div><div class="track"><i style="width:70%;background:linear-gradient(90deg,#9aa,#3a3a3a)"></i></div></div></div>
+            <div class="frow"><div class="dot5 f-yel">黄</div><div class="fbar"><div class="top"><b>富贵饺</b><span class="c down">↓ 45份</span></div><div class="track"><i style="width:52%;background:linear-gradient(90deg,#FFE08A,#F2B233)"></i></div></div></div>
+            <div class="frow"><div class="dot5 f-grn">绿</div><div class="fbar"><div class="top"><b>玉米饺</b><span class="c up">↑ 51份</span></div><div class="track"><i style="width:58%;background:linear-gradient(90deg,#A8DCA8,#5BA85B)"></i></div></div></div>
+            <div class="frow"><div class="dot5 f-pur">紫</div><div class="fbar"><div class="top"><b>好德饺</b><span class="c">→ 41份</span></div><div class="track"><i style="width:48%;background:linear-gradient(90deg,#D4B8E8,#9B6BBF)"></i></div></div></div>
+          </div>
+          <div class="note" style="margin-top:10px">🌧 雨天+降温：热汤/长寿红饺 ↑14%。备货提示：<b>火龙果汁备 2.4kg</b> · 墨鱼汁 0.4kg · 冬菇 1.8kg。节假日：无。<span class="ai-badge">AI 预测</span> · 预测≠下单，需确认 → /api/sync</div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>今日待办</div><div class="more" onclick="openSheet('confirm')">3 项 ›</div></div>
+          <div class="todo">
+            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('boss.confirm',{from:'swipe'},'已确认')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="titem" style="border:none"><div class="ic" style="background:#FCE4E1"><svg viewBox="0 0 24 24" fill="none" stroke="#E8584A" stroke-width="2"><path d="M3 3h18v4H3zM5 7v14h14V7M9 11h6" stroke-linecap="round"/></svg></div><div class="info"><div class="ti">补货转单 · 火龙果汁/墨鱼汁</div><div class="ds">库存仅够 2 天 · 预估 ¥620</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'restock2po',items:[{name:'火龙果汁',cur:'0.44kg',suggest:'补 2.2kg',price:620},{name:'墨鱼汁',cur:'0.18kg',suggest:'补 0.5kg',price:86}],vendor:'菜篮子 / 海南食品'})">确认</button></div></div></div>
+            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('boss.confirm',{from:'swipe'},'已确认')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="titem" style="border:none"><div class="ic" style="background:#E2F0E2"><svg viewBox="0 0 24 24" fill="none" stroke="#5BA85B" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="info"><div class="ti">结算单审批 · 供应商张记</div><div class="ds">进货款 ¥2,180 · 对账一致</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'settlement',vendor:'张记',amount:2180})">确认</button></div></div></div>
+            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('boss.confirm',{from:'swipe'},'已确认')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="titem" style="border:none"><div class="ic" style="background:#FCEDD0"><svg viewBox="0 0 24 24" fill="none" stroke="#C8881A" stroke-width="2"><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M6 6L4 4M20 20l-2-2M18 6l2-2M4 20l2-2" stroke-linecap="round"/><circle cx="12" cy="12" r="4"/></svg></div><div class="info"><div class="ti">3 位会员本周生日 · 营销待发券</div><div class="ds">储值会员 2 人 · 普通 1 人</div></div><button class="pbtn" onclick="goModule('vip')">去发券</button></div></div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>预订 / 排队</div><div class="more" onclick="goModule('booking')">详情 ›</div></div>
+          <div class="kv"><span>今日预订</span><b>12 桌 / 38 人</b></div>
+          <div class="kv"><span>当前排队</span><b style="color:var(--red)">4 桌 · 叫号 A08</b></div>
+          <div class="kv"><span>下一时段</span><b>11:30 午餐 · 预订已满 80%</b></div>
+          <div class="kv"><span>翻台预估</span><b style="color:var(--green)">~10 分钟</b></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>门店状态</div></div>
+          <div class="status-grid">
+            <div class="st-cell"><div class="lb">开餐倒计时</div><div class="vl">02:06 <small>hrs</small></div></div>
+            <div class="st-cell"><div class="lb">厨房负荷</div>
+              <div class="ring"><svg width="46" height="46"><circle cx="23" cy="23" r="18" fill="none" stroke="#F1F2F5" stroke-width="5"/><circle cx="23" cy="23" r="18" fill="none" stroke="#5BA85B" stroke-width="5" stroke-dasharray="113" stroke-dashoffset="32" stroke-linecap="round"/></svg><div class="c">72%</div></div>
+            </div>
+            <div class="st-cell" onclick="goModule('pos')" style="cursor:pointer"><div class="lb">桌位占用</div><div class="vl">5<small>/8 · 翻台 3.2</small></div></div>
+            <div class="st-cell" onclick="goModule('takeout')" style="cursor:pointer"><div class="lb">美团待结算</div><div class="vl">¥1,920</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>五福销量 · 昨日</div><div class="more" onclick="goModule('analysis')">详情 ›</div></div>
+          <div class="five">
+            <div class="frow"><div class="dot5 f-red">红</div><div class="fbar"><div class="top"><b>长寿·冬菇荸荠</b><span class="c">68份</span></div><div class="track"><i style="width:78%;background:linear-gradient(90deg,#FFB6B0,#E8584A)"></i></div></div></div>
+            <div class="frow"><div class="dot5 f-blk">黑</div><div class="fbar"><div class="top"><b>聚财·猪肉三鲜</b><span class="c">59份</span></div><div class="track"><i style="width:68%;background:linear-gradient(90deg,#9aa,#3a3a3a)"></i></div></div></div>
+            <div class="frow"><div class="dot5 f-yel">黄</div><div class="fbar"><div class="top"><b>富贵·茴香大葱</b><span class="c">52份</span></div><div class="track"><i style="width:60%;background:linear-gradient(90deg,#FFE08A,#F2B233)"></i></div></div></div>
+            <div class="frow"><div class="dot5 f-grn">绿</div><div class="fbar"><div class="top"><b>康宁·猪肉玉米</b><span class="c">47份</span></div><div class="track"><i style="width:54%;background:linear-gradient(90deg,#A8DCA8,#5BA85B)"></i></div></div></div>
+            <div class="frow"><div class="dot5 f-pur">紫</div><div class="fbar"><div class="top"><b>好德·猪肉香芹</b><span class="c">41份</span></div><div class="track"><i style="width:47%;background:linear-gradient(90deg,#D4B8E8,#9B6BBF)"></i></div></div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>热销 TOP3</div></div>
+          <div class="top3">
+            <div class="tr"><div class="rank" style="background:linear-gradient(135deg,#F2B233,#E8920C)">1</div><div class="info"><div class="nm">红色·冬菇荸荠饺</div><div class="sl">毛利 43.1% · 复购高</div></div><div class="vl">68</div></div>
+            <div class="tr"><div class="rank" style="background:linear-gradient(135deg,#9aa,#3a3a3a)">2</div><div class="info"><div class="nm">黑色·猪肉三鲜饺</div><div class="sl">毛利 38.6% · 含虾仁</div></div><div class="vl">59</div></div>
+            <div class="tr"><div class="rank" style="background:linear-gradient(135deg,#FFB6B0,#E8584A)">3</div><div class="info"><div class="nm">黄色·茴香大葱饺</div><div class="sl">毛利 42.0%</div></div><div class="vl">52</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>预警中心</div><div class="more" onclick="goModule('foodsafe')">全部 ›</div></div>
+          <div class="alert" onclick="go('inventory')"><div class="st" style="background:#E8584A"></div><div class="ct"><div class="t2">火龙果汁库存告急</div><div class="d2">剩余 440g · 仅够红色饺子 2 天</div></div></div>
+          <div class="alert" onclick="goModule('supply')"><div class="st" style="background:#F2B233"></div><div class="ct"><div class="t2">墨鱼汁采购价环比 +8%</div><div class="d2">拉低黑色饺子毛利 1.2pct</div></div></div>
+          <div class="alert" onclick="goModule('equipment')"><div class="st" style="background:#E8584A"></div><div class="ct"><div class="t2">冷柜 B 温度 7.2℃ 超温</div><div class="d2">应 ≤5℃ · 已 18 分钟 · 请核查</div></div></div>
+          <div class="alert" onclick="goModule('staff')"><div class="st" style="background:#F2B233"></div><div class="ct"><div class="t2">3 名员工健康证 30 天内到期</div><div class="d2">王师傅/张师傅/钱收银 · 限期体检</div></div></div>
+          <div class="alert" onclick="goModule('takeout')"><div class="st" style="background:#87CEEB"></div><div class="ct"><div class="t2">美团差评 · 订单 #MT-0923-51</div><div class="d2">"出餐慢" · 待回复 · 已转店长</div></div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>全部应用</div><div class="more" onclick="go('more')">更多 12 模块 ›</div></div>
+          <div class="more-grid">
+            <div class="more-cell" onclick="goModule('analysis')"><div class="mi" style="background:#EDE3F4"><svg viewBox="0 0 24 24" fill="none" stroke="#9B6BBF" stroke-width="2"><path d="M3 3v18h18M7 14l4-4 3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="ml">经营分析</div><div class="ms">趋势·矩阵</div></div>
+            <div class="more-cell" onclick="goModule('staff')"><div class="mi" style="background:#E3EDF7"><svg viewBox="0 0 24 24" fill="none" stroke="#3A6EA5" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 8a3 3 0 0 1 0 6M22 20c0-2-1-3-3-4" stroke-linecap="round"/></svg></div><div class="ml">排班员工</div><div class="ms">6人·健康证</div></div>
+            <div class="more-cell" onclick="goModule('vip')"><div class="mi" style="background:#FCE4E1"><svg viewBox="0 0 24 24" fill="none" stroke="#E8584A" stroke-width="2"><path d="M12 21s-7-4-7-10a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 6-7 10-7 10z" stroke-linejoin="round"/></svg></div><div class="ml">会员营销</div><div class="ms">储值/生日</div></div>
+            <div class="more-cell" onclick="goModule('pos')"><div class="mi" style="background:#FCEDD0"><svg viewBox="0 0 24 24" fill="none" stroke="#C8881A" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 14h4" stroke-linecap="round"/></svg></div><div class="ml">堂食收银</div><div class="ms">8桌·并拆单</div></div>
+            <div class="more-cell" onclick="goModule('takeout')"><div class="mi" style="background:#E2F0E2"><svg viewBox="0 0 24 24" fill="none" stroke="#2E7D32" stroke-width="2"><path d="M3 10h14v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM17 12h3l1 3v3a2 2 0 0 1-2 2h-2M6 22a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 22a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" stroke-linejoin="round"/></svg></div><div class="ml">外卖平台</div><div class="ms">3平台</div></div>
+            <div class="more-cell" onclick="goModule('booking')"><div class="mi" style="background:#EDE3F4"><svg viewBox="0 0 24 24" fill="none" stroke="#9B6BBF" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4" stroke-linecap="round"/></svg></div><div class="ml">预订排队</div><div class="ms">叫号A08</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="ttl"><i class="em"></i>快捷操作</div></div>
+          <div class="short-grid">
+            <div class="short" onclick="go('chat')"><div class="si" style="background:#EDE3F4"><svg viewBox="0 0 24 24" fill="none" stroke="#9B6BBF" stroke-width="2"><path d="M12 2a3 3 0 0 1 3 3v1h2a3 3 0 0 1 3 3v3a5 5 0 0 1-5 5h-1l-3 3v-3a5 5 0 0 1-5-5V9a3 3 0 0 1 3-3h2V5a3 3 0 0 1 1-3z" stroke-linejoin="round"/></svg></div><div class="sl">问店</div></div>
+            <div class="short" onclick="go('inventory')"><div class="si" style="background:#FCE4E1"><svg viewBox="0 0 24 24" fill="none" stroke="#E8584A" stroke-width="2"><path d="M3 3h18v4H3zM5 7v14h14V7" stroke-linecap="round"/></svg></div><div class="sl">补货</div></div>
+            <div class="short" onclick="go('inventory')"><div class="si" style="background:#FCEDD0"><svg viewBox="0 0 24 24" fill="none" stroke="#C8881A" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke-linejoin="round"/></svg></div><div class="sl">盘点</div></div>
+            <div class="short" onclick="goModule('finance')"><div class="si" style="background:#E2F0E2"><svg viewBox="0 0 24 24" fill="none" stroke="#5BA85B" stroke-width="2"><path d="M3 3v18h18M7 14l4-4 3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="sl">对账</div></div>
+            <div class="short" onclick="go('inventory')"><div class="si" style="background:#EDE3F4"><svg viewBox="0 0 24 24" fill="none" stroke="#9B6BBF" stroke-width="2"><path d="M3 7h4l2-2h6l2 2h4v12H3z" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5"/></svg></div><div class="sl">拍照验货</div></div>
+            <div class="short" onclick="go('kitchen')"><div class="si" style="background:#FCE4E1"><svg viewBox="0 0 24 24" fill="none" stroke="#E8584A" stroke-width="2"><path d="M3 7h4l2-2h6l2 2h4v12H3z" stroke-linejoin="round"/><path d="M9 13l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="sl">视觉品控</div></div>
+            <div class="short" onclick="goModule('pos')"><div class="si" style="background:#FCEDD0"><svg viewBox="0 0 24 24" fill="none" stroke="#C8881A" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 14h4" stroke-linecap="round"/></svg></div><div class="sl">堂食收银</div></div>
+            <div class="short" onclick="goModule('staff')"><div class="si" style="background:#E3EDF7"><svg viewBox="0 0 24 24" fill="none" stroke="#3A6EA5" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5" stroke-linecap="round"/></svg></div><div class="sl">排班</div></div>
+            <div class="short" onclick="goModule('takeout')"><div class="si" style="background:#E2F0E2"><svg viewBox="0 0 24 24" fill="none" stroke="#2E7D32" stroke-width="2"><path d="M3 10h14v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" stroke-linejoin="round"/></svg></div><div class="sl">外卖</div></div>
+            <div class="short" onclick="goModule('booking')"><div class="si" style="background:#E3EDF7"><svg viewBox="0 0 24 24" fill="none" stroke="#3A6EA5" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4" stroke-linecap="round"/></svg></div><div class="sl">预订</div></div>
+            <div class="short" onclick="goModule('foodsafe')"><div class="si" style="background:#E2F0E2"><svg viewBox="0 0 24 24" fill="none" stroke="#2E7D32" stroke-width="2"><path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="sl">食安</div></div>
+            <div class="short" onclick="goModule('equipment')"><div class="si" style="background:#FCEDD0"><svg viewBox="0 0 24 24" fill="none" stroke="#C8881A" stroke-width="2"><path d="M6 3v6a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4V3M14 13v8M10 13v8M6 21h12" stroke-linecap="round"/></svg></div><div class="sl">设备</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 2. 进销 ============ -->
+      <section class="screen-body hide" id="p-inventory">
+        <div class="sec-ttl"><i class="em"></i>进销存</div>
+        <div class="pill-grp" id="inv-pills">
+          <div class="pill on" data-sp="inv-stock">库存</div><div class="pill" data-sp="inv-restock">补货</div><div class="pill" data-sp="inv-po">采购</div><div class="pill" data-sp="inv-recv">进货</div>
+        </div>
+
+        <div class="sub-page on" id="inv-stock">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>库存价值与安全线</div></div>
+            <div class="donut-wrap">
+              <div class="donut" style="background:conic-gradient(#5BA85B 0 58%,#F2B233 58% 82%,#E8584A 82% 100%)"><div class="hole"><div class="pct">¥3.2k</div><div class="lb">总库存</div></div></div>
+              <div class="donut-leg">
+                <div class="li"><span><i style="background:#5BA85B"></i>充足</span><span>18 项</span></div>
+                <div class="li"><span><i style="background:#F2B233"></i>偏低</span><span>5 项</span></div>
+                <div class="li"><span><i style="background:#E8584A"></i>告急</span><span>3 项</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>原料库存</div><div class="more" onclick="toast('盘点单功能即将上线')">盘点 ›</div></div>
+            <div class="inv-row"><div class="nm"><div class="n">火龙果汁</div><div class="d">红面色源 · 安全 2kg</div></div><div class="inv-bar"><div class="top"><b>0.44</b>/2kg</div><div class="inv-track"><i style="width:22%;background:#E8584A"></i></div></div><span class="tag danger">告急</span></div>
+            <div class="inv-row"><div class="nm"><div class="n">墨鱼汁</div><div class="d">黑色面色源 · 安全 0.4kg</div></div><div class="inv-bar"><div class="top"><b>0.18</b>/0.4kg</div><div class="inv-track"><i style="width:45%;background:#F2B233"></i></div></div><span class="tag warn">偏低</span></div>
+            <div class="inv-row"><div class="nm"><div class="n">五得利雪花粉八星</div><div class="d">面主料 · 安全 15kg</div></div><div class="inv-bar"><div class="top"><b>12.5</b>/15kg</div><div class="inv-track"><i style="width:83%;background:#5BA85B"></i></div></div><span class="tag ok">充足</span></div>
+            <div class="inv-row"><div class="nm"><div class="n">猪前肩肉</div><div class="d">主料 · 安全 8kg</div></div><div class="inv-bar"><div class="top"><b>6.2</b>/8kg</div><div class="inv-track"><i style="width:77%;background:#5BA85B"></i></div></div><span class="tag ok">充足</span></div>
+            <div class="inv-row"><div class="nm"><div class="n">冬菇</div><div class="d">红馅辅料 · 安全 2kg</div></div><div class="inv-bar"><div class="top"><b>0.9</b>/2kg</div><div class="inv-track"><i style="width:45%;background:#F2B233"></i></div></div><span class="tag warn">偏低</span></div>
+            <div class="inv-row"><div class="nm"><div class="n">菠菜汁</div><div class="d">绿面色源 · 安全 2kg</div></div><div class="inv-bar"><div class="top"><b>1.7</b>/2kg</div><div class="inv-track"><i style="width:85%;background:#5BA85B"></i></div></div><span class="tag ok">充足</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>拍照盘点 · Kimi 视觉</div><div class="more" onclick="toast('盘点历史即将上线')">历史</div></div>
+            <div class="photo-cap" onclick="mockScan(this,'stock')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h4l2-2h6l2 2h4v12H3z" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5"/></svg><div class="pt">拍照盘点</div><div class="pd">对准货架/冷柜 · Kimi 估算库存并核对账面</div></div>
+            <div class="kimi-card" id="kimiStock" style="display:none"></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="inv-restock">
+          <div class="note">⚠ 补货建议由 AI 自动生成，<b>自动生成 ≠ 自动下单</b>。转单后进采购管理，需老板/店长确认。</div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>补货建议（3条）</div><div class="more">全部 ›</div></div>
+            <div class="rs-row"><div class="info"><div class="ti">火龙果汁 · 补 2kg</div><div class="ds">按红色饺子近7天日均68份推算，2天后断料</div><span class="ai-badge">AI 建议</span></div><div><div class="amt">¥120</div><button class="pbtn" style="margin-top:6px" onclick="openSheet('confirm',{kind:'restock2po',items:[{name:'火龙果汁',cur:'0.44kg',suggest:'补 2kg',price:120}]})">转单</button></div></div>
+            <div class="rs-row"><div class="info"><div class="ti">墨鱼汁 · 补 0.3kg</div><div class="ds">外接比价 3 家，张记最低 ¥58/0.1kg</div><span class="ai-badge">AI 比价</span></div><div><div class="amt">¥174</div><button class="pbtn" style="margin-top:6px" onclick="openSheet('confirm',{kind:'restock2po',items:[{name:'墨鱼汁',cur:'0.18kg',suggest:'补 0.3kg',price:174}],vendor:'张记'})">转单</button></div></div>
+            <div class="rs-row"><div class="info"><div class="ti">冬菇 · 补 1.5kg</div><div class="ds">红馅辅料，安全线 2kg，现 0.9kg</div><span class="ai-badge">AI 建议</span></div><div><div class="amt">¥90</div><button class="pbtn" style="margin-top:6px" onclick="openSheet('confirm',{kind:'restock2po',items:[{name:'冬菇',cur:'0.9kg',suggest:'补 1.5kg',price:90}]})">转单</button></div></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="inv-po">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>采购单</div><button class="pbtn" onclick="openSheet('confirm',{kind:'generic',title:'新建采购单',desc:'手工创建采购单草稿，可引用补货建议一键带入',actionType:'po.create',confirmLabel:'创建草稿'})">+ 新建</button></div>
+            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('order.confirm',{from:'swipe'},'确认采购单')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="po-row" style="border:none"><div style="flex:1"><div class="no">PO-0924-01</div><div class="dt">张记调料 · 草稿</div></div><span class="tag warn">待发</span><div class="am">¥384</div></div></div></div>
+            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('order.confirm',{from:'swipe'},'确认采购单')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="po-row" style="border:none"><div style="flex:1"><div class="no">PO-0923-02</div><div class="dt">海南菜篮子 · 已发</div></div><span class="tag ok">已发</span><div class="am">¥1,260</div></div></div></div>
+            <div class="swipe-row"><div class="swipe-act"><button class="act-btn act-yes" onclick="bossConfirmAction('order.confirm',{from:'swipe'},'确认采购单')">确认</button><button class="act-btn act-no" onclick="this.closest('.swipe-row').querySelector('.swipe-cnt').style.transform='';toast('已删除（仅原型）')">删除</button></div><div class="swipe-cnt"><div class="po-row" style="border:none"><div style="flex:1"><div class="no">PO-0922-05</div><div class="dt">张记 · 已收货</div></div><span class="tag ok">已收</span><div class="am">¥520</div></div></div></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="inv-recv">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>进货入库</div></div>
+            <div class="po-row"><div style="flex:1"><div class="no">REC-0924 · 张记</div><div class="dt">墨鱼汁0.3kg+冬菇1.5kg</div></div><span class="tag warn">待收货</span><button class="pbtn alt" onclick="openSheet('confirm',{kind:'generic',title:'进货入库 · REC-0924',desc:'张记：墨鱼汁 0.3kg + 冬菇 1.5kg · 到货核对数量/鲜度后入库',actionType:'recv.stockIn',confirmLabel:'确认入库'})">入库</button></div>
+            <div class="po-row"><div style="flex:1"><div class="no">REC-0923 · 菜篮子</div><div class="dt">猪肉10kg+面粉20kg</div></div><span class="tag ok">已入库</span><div class="am">¥1,260</div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>拍照验货 · Kimi 视觉</div><div class="more" onclick="toast('验货历史即将上线')">历史</div></div>
+            <div class="photo-cap" onclick="mockScan(this,'recv')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h4l2-2h6l2 2h4v12H3z" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5"/></svg><div class="pt">拍照验货</div><div class="pd">对准送货单/实物 · Kimi 自动核对数量·鲜度·规格</div></div>
+            <div class="kimi-card" id="kimiRecv" style="display:none"></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>结算单（只读输出层）</div><div class="more" onclick="goModule('finance')">审批 ›</div></div>
+            <div class="note">进货入库下游·只读输出层。结算单数据来自 <code>DB.recv</code>，模板存独立 localStorage，不写 DB。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 3. AI 对话 ============ -->
+      <section class="screen-body hide" id="p-chat">
+        <div class="brand"><div class="brand-l"><img class="panda-logo" src="" alt=""><div><div class="t">五福 AI</div><div class="s">问店 · 随时决策</div></div></div><div class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6v6l4 2M21 12a9 9 0 1 1-9-9" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+
+        <div class="suggest-grid">
+          <div class="sg" onclick="ask('上周黑色三鲜饺子毛利多少？')"><div class="st2">上周黑饺毛利</div><div class="sd">结构测算 · 价格波动</div></div>
+          <div class="sg" onclick="ask('今天做500份红饺要多少料？')"><div class="st2">500份红饺用量</div><div class="sd">菜谱换算 · 转采购</div></div>
+          <div class="sg" onclick="ask('哪个色毛利最低？为什么？')"><div class="st2">毛利最低分析</div><div class="sd">成本拆解 · 调价建议</div></div>
+          <div class="sg" onclick="ask('下周该备多少货？')"><div class="st2">下周备货建议</div><div class="sd">补货闭环 · 销量预测</div></div>
+        </div>
+
+        <div class="chat-wrap" id="chatWrap">
+          <div class="msg ai">
+            <div class="who"><img class="panda-logo" src="" alt=""><b>五福 AI · 在线</b></div>
+            宋师傅早上好，今日 3 条待办、5 条预警。可直接问我销量、毛利、库存、菜谱用量、排班、外卖、会员，或让我生成调价/补货/营销建议。
+          </div>
+        </div>
+        <div class="ask-bar"><div class="ask"><input id="askInput" placeholder="问问五福 AI…"><button class="mic" onclick="toast('语音输入即将上线')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v4" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="send" onclick="sendAsk()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
+      </section>
+
+      <!-- ============ 4. 厨房 ============ -->
+      <section class="screen-body hide" id="p-kitchen">
+        <div class="sec-ttl"><i class="em"></i>厨房中枢</div>
+        <div class="pill-grp" id="kt-pills">
+          <div class="pill on" data-sp="kt-rec">菜谱</div><div class="pill" data-sp="kt-sop">工单</div><div class="pill" data-sp="kt-board">出品看板</div><div class="pill" data-sp="kt-qc">品控</div>
+        </div>
+
+        <div class="sub-page on" id="kt-rec">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>功夫菜单</div><div class="more">28 道</div></div>
+            <div class="menu-cat" id="menucat">
+              <div class="mc on" data-f="all">全部 28</div><div class="mc" data-f="jiao">五福饺子 9</div><div class="mc" data-f="hot">宫廷热菜 8</div><div class="mc" data-f="cold">凉菜 4</div><div class="mc" data-f="soup">汤品主食 4</div><div class="mc" data-f="dessert">甜品饮 3</div>
+            </div>
+            <div class="rec-row" data-cat="jiao" onclick="openSheet('recipe')"><div class="rec-dot f-red">红</div><div class="rec-info"><div class="nm">红色·冬菇荸荠饺</div><div class="ds">火龙果汁和面 · 寓意长寿</div><div class="rec-tags"><span>非遗</span><span>无人工色素</span></div></div><div class="rec-cost"><div class="v">¥3.42</div><div class="l">成本/份</div></div></div>
+            <div class="rec-row" data-cat="jiao" onclick="openSheet('recipe')"><div class="rec-dot f-blk">黑</div><div class="rec-info"><div class="nm">黑色·猪肉三鲜饺</div><div class="ds">墨鱼汁和面 · 寓意聚财</div><div class="rec-tags"><span>非遗</span><span>含虾仁</span></div></div><div class="rec-cost"><div class="v">¥3.42</div><div class="l">成本/份</div></div></div>
+            <div class="rec-row" data-cat="jiao" onclick="openSheet('recipe')"><div class="rec-dot f-yel">黄</div><div class="rec-info"><div class="nm">黄色·茴香大葱饺</div><div class="ds">南瓜泥和面 · 寓意富贵</div><div class="rec-tags"><span>非遗</span></div></div><div class="rec-cost"><div class="v">¥3.20</div><div class="l">成本/份</div></div></div>
+            <div class="rec-row" data-cat="jiao" onclick="openSheet('recipe')"><div class="rec-dot f-grn">绿</div><div class="rec-info"><div class="nm">绿色·猪肉玉米饺</div><div class="ds">菠菜汁和面 · 寓意康宁</div><div class="rec-tags"><span>非遗</span></div></div><div class="rec-cost"><div class="v">¥3.30</div><div class="l">成本/份</div></div></div>
+            <div class="rec-row" data-cat="jiao" onclick="openSheet('recipe')"><div class="rec-dot f-pur">紫</div><div class="rec-info"><div class="nm">紫色·猪肉香芹饺</div><div class="ds">紫薯粉和面 · 寓意好德</div><div class="rec-tags"><span>非遗</span></div></div><div class="rec-cost"><div class="v">¥3.25</div><div class="l">成本/份</div></div></div>
+            <div class="rec-row" data-cat="hot" onclick="openSheet('recipe')"><div class="rec-dot" style="background:#FBE4D6;color:#C8651A">热</div><div class="rec-info"><div class="nm">御膳狮子头</div><div class="ds">宫廷菜 · 三肥七瘦 · 寓意团圆</div><div class="rec-tags"><span>非遗</span><span>招牌</span></div></div><div class="rec-cost"><div class="v">¥8.50</div><div class="l">成本/份</div></div></div>
+            <div class="rec-row" data-cat="hot" onclick="openSheet('recipe')"><div class="rec-dot" style="background:#FBE4D6;color:#C8651A">热</div><div class="rec-info"><div class="nm">功夫水煮鱼</div><div class="ds">麻辣鲜香 · 现杀活鱼</div><div class="rec-tags"><span>招牌</span></div></div><div class="rec-cost"><div class="v">¥12.0</div><div class="l">成本/份</div></div></div>
+            <div class="rec-row" data-cat="cold" onclick="openSheet('recipe')"><div class="rec-dot" style="background:#DFF0E8;color:#2E8B57">凉</div><div class="rec-info"><div class="nm">五彩大拉皮</div><div class="ds">五色蔬菜丝 · 麻酱汁</div><div class="rec-tags"><span>解腻</span></div></div><div class="rec-cost"><div class="v">¥2.40</div><div class="l">成本/份</div></div></div>
+            <div class="rec-row" data-cat="soup" onclick="openSheet('recipe')"><div class="rec-dot" style="background:#E3EDF7;color:#3A6EA5">汤</div><div class="rec-info"><div class="nm">五福长寿面</div><div class="ds">宫廷手擀 · 长面喻长寿</div><div class="rec-tags"><span>主食</span></div></div><div class="rec-cost"><div class="v">¥4.20</div><div class="l">成本/份</div></div></div>
+            <div class="rec-row" data-cat="dessert" onclick="openSheet('recipe')"><div class="rec-dot" style="background:#F6E7F0;color:#A24E7E">甜</div><div class="rec-info"><div class="nm">桂花酒酿圆子</div><div class="ds">宫廷甜品 · 寓意团圆</div><div class="rec-tags"><span>甜品</span></div></div><div class="rec-cost"><div class="v">¥3.10</div><div class="l">成本/份</div></div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>用量换算 · 红色饺子</div></div>
+            <div class="slider-row"><input type="range" min="50" max="1000" value="500" step="50" oninput="calcQty(this)"><div class="qty"><span id="qtyN">500</span><small> 份</small></div></div>
+            <div class="calc-box" id="calcBox">
+              <div class="lab"><span>调 calcQtyOf（只读·确定性）</span><span>500 份</span></div>
+              <div class="calc-line"><span>五得利雪花粉八星</span><span>5.0 kg</span></div>
+              <div class="calc-line"><span>火龙果汁</span><span class="g">2.20 kg</span></div>
+              <div class="calc-line"><span>猪前肩肉</span><span>5.0 kg</span></div>
+              <div class="calc-line"><span>冬菇 / 荸荠</span><span>1.0 / 1.0 kg</span></div>
+              <div class="calc-line"><span>食盐 / 香油</span><span>15g / 65g</span></div>
+              <div class="calc-line"><span>预估总成本</span><span class="g">¥ 1,710</span></div>
+            </div>
+            <div class="note" style="margin-top:8px">⚠ 色源锁定：红色必须火龙果，不可替换；辅料荸荠不足时 AI 仅建议调量并备注影响。</div>
+            <div class="chip-row" style="margin-top:8px"><span class="chip act" onclick="openSheet('confirm',{kind:'generic',title:'转采购清单',desc:'将本次换算用量（500 份红饺）生成采购清单草稿，与现有库存冲抵后列缺口',actionType:'kitchen.recipe2po',confirmLabel:'生成采购清单'})">转采购清单</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'转厨房工单',desc:'将本次换算用量生成厨房工单，含面/馅分批与醒发计时',actionType:'kitchen.recipe2wo',confirmLabel:'生成工单'})">转厨房工单</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'缺料替换',desc:'色源锁定：红色火龙果汁不可替换；辅料荸荠不足时仅建议调量并备注影响',actionType:'kitchen.substitute',confirmLabel:'提交替换申请'})">缺料替换</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="kt-sop">
+          <div class="sop-head"><div class="sop-clock">11:30 开餐</div><div style="font-size:11px;color:var(--sub)">今日 5 SKU 并行 · 倒排时间线</div></div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>红色饺子 · 工单</div><span class="tag ok">进行中</span></div>
+            <div class="timeline">
+              <div class="tl-step done"><div class="tl-time">10:00</div><div class="tl-ti">和面 · 5色面团</div><div class="tl-ds">雪花粉+色源汁，压面机压制至光滑</div><span class="tl-qc">✓ 已完成</span></div>
+              <div class="tl-step done"><div class="tl-time">10:00–10:30</div><div class="tl-ti">醒发 30 分钟</div><div class="tl-ds">保鲜膜覆盖，关键工艺点</div><span class="tl-qc">✓ 计时准点</span></div>
+              <div class="tl-step now"><div class="tl-time">10:30–11:00</div><div class="tl-ti">备馅 · 拌馅</div><div class="tl-ds">料水分三次加入，顺同一方向搅至上劲</div><span class="tl-qc" style="background:#FCE4E1;color:#E8584A">● 进行中</span></div>
+              <div class="tl-step"><div class="tl-time">11:00–11:20</div><div class="tl-ti">包制</div><div class="tl-ds">剂子10–11g · 成品25–27g · 褶纹规整</div></div>
+              <div class="tl-step"><div class="tl-time">11:20–11:30</div><div class="tl-ti">煮制</div><div class="tl-ds">分三次点凉水至浮起鼓胀</div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>其他SKU工单</div></div>
+            <div class="stat-line"><span>黑色·三鲜饺</span><span style="color:var(--sub)">11:00 包制</span></div>
+            <div class="stat-line"><span>黄色·茴香大葱</span><span style="color:var(--sub)">10:45 拌馅</span></div>
+            <div class="stat-line"><span>绿色·玉米</span><span style="color:var(--sub)">10:30 备料</span></div>
+            <div class="stat-line"><span>白色·酸菜/牛肉</span><span style="color:var(--sub)">10:50 包制</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="kt-board">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>今日出品看板</div><span class="fresh"><i class="dot"></i>实时</span></div>
+            <div class="ob-row"><div class="nm"><span class="dot5 f-red" style="display:inline-flex;width:20px;height:20px;font-size:11px;margin-right:6px">红</span>冬菇荸荠</div><div class="pr"><div class="top"><b>48</b>/68</div><div class="track"><i style="width:70%;background:#E8584A"></i></div></div></div>
+            <div class="ob-row"><div class="nm"><span class="dot5 f-blk" style="display:inline-flex;width:20px;height:20px;font-size:11px;margin-right:6px">黑</span>猪肉三鲜</div><div class="pr"><div class="top"><b>40</b>/59</div><div class="track"><i style="width:68%;background:#3a3a3a"></i></div></div></div>
+            <div class="ob-row"><div class="nm"><span class="dot5 f-yel" style="display:inline-flex;width:20px;height:20px;font-size:11px;margin-right:6px">黄</span>茴香大葱</div><div class="pr"><div class="top"><b>35</b>/52</div><div class="track"><i style="width:67%;background:#F2B233"></i></div></div></div>
+            <div class="ob-row"><div class="nm"><span class="dot5 f-grn" style="display:inline-flex;width:20px;height:20px;font-size:11px;margin-right:6px">绿</span>猪肉玉米</div><div class="pr"><div class="top"><b>28</b>/47</div><div class="track"><i style="width:60%;background:#5BA85B"></i></div></div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>废品率</div></div>
+            <div class="stat-line"><span>今日废品率</span><span style="font-weight:800;color:var(--green)">1.8% ↓</span></div>
+            <div class="stat-line"><span>主因</span><span style="color:var(--sub)">包制破皮（已提醒）</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="kt-qc">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>视觉品控 · Kimi 成品拍照</div><div class="more" onclick="toast('品控历史即将上线')">历史</div></div>
+            <div class="photo-cap" onclick="mockScan(this,'qc')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h4l2-2h6l2 2h4v12H3z" stroke-linejoin="round"/><path d="M9 13l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg><div class="pt">拍成品照</div><div class="pd">饺子成品 · Kimi 识别褶纹/色泽/形态/重量估值</div></div>
+            <div class="kimi-card" id="kimiQc" style="display:none"></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>摆盘质检 · Kimi 拍照</div><div class="more" onclick="toast('摆盘 SOP 文档即将上线')">SOP</div></div>
+            <div class="photo-cap" onclick="mockScan(this,'plate')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h4l2-2h6l2 2h4v12H3z" stroke-linejoin="round"/><path d="M9 13l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5"/></svg><div class="pt">摆盘质检拍照</div><div class="pd">出餐前对准成品盘 · Kimi 识别摆盘规范/分量/配色/点缀</div></div>
+            <div class="kimi-card" id="kimiPlate" style="display:none"></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>AI 品控抽查</div></div>
+            <div class="stat-line"><span>剂子抽检 (10–11g)</span><span style="font-weight:800;color:var(--green)">合格 98%</span></div>
+            <div class="stat-line"><span>成品抽检 (25–27g)</span><span style="font-weight:800;color:var(--green)">合格 96%</span></div>
+            <div class="stat-line"><span>点水次数核查</span><span style="font-weight:800;color:var(--green)">合规</span></div>
+            <div class="stat-line"><span>褶纹规整（拍照识别）</span><span style="font-weight:800;color:var(--green)">合格 94%</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>合格率趋势（7日）</div></div>
+            <svg class="spark" viewBox="0 0 320 50" preserveAspectRatio="none">
+              <path d="M0,30 L45,26 L90,22 L135,20 L180,18 L225,15 L270,12 L320,10" fill="none" stroke="#5BA85B" stroke-width="2.2"/>
+            </svg>
+            <div class="legend"><span><i style="background:#5BA85B"></i>成品合格率 ↑ 持续改善</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>新人培训跟做</div></div>
+            <div class="stat-line"><span>李师傅 · 红饺 SOP</span><span class="tag ok">已通过</span></div>
+            <div class="stat-line"><span>王师傅 · 黑饺 SOP</span><span class="tag warn">进行中 3/5</span></div>
+            <div class="note" style="margin-top:8px">关键工艺点 AI 抽查：料水分三次加入、分三次点凉水、醒发30分钟。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 5. 更多（九宫格应用启动器） ============ -->
+      <section class="screen-body hide" id="p-more">
+        <div class="sec-ttl"><i class="em"></i>更多 · 应用中心</div>
+        <div class="more-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3" stroke-linecap="round"/></svg>
+          <input id="moreSearch" placeholder="搜索模块名 / 关键词（如 收银、食安、对账）">
+          <span class="clr" id="moreClr">×</span>
+        </div>
+        <div class="fav-row">
+          <div class="rh"><span>★ 常用收藏</span><span class="ed" id="favHint">长按模块可收藏</span></div>
+          <div class="mini-chips" id="favRow"><div class="mini-chip empty">长按下方模块添加常用</div></div>
+        </div>
+        <div class="recent-row">
+          <div class="rh"><span>🕒 最近访问</span><span class="ed" id="recentClr">清空</span></div>
+          <div class="mini-chips" id="recentRow"><div class="mini-chip empty">最近访问的模块将显示在此</div></div>
+        </div>
+        <div class="note" style="margin-bottom:14px">⚠ AI 仅<b>只读 + 确认</b>：自动生成 ≠ 自动下单；结算单只读输出层不写 DB；计价与三向合并核心零改动。</div>
+        <div class="more-grid" id="moreGrid">
+          <div class="more-cell" data-m="analysis" onclick="goModule('analysis')"><span class="star">★</span><div class="mi" style="background:#EDE3F4"><svg viewBox="0 0 24 24" fill="none" stroke="#9B6BBF" stroke-width="2"><path d="M3 3v18h18M7 14l4-4 3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="ml">经营分析</div><div class="ms">趋势·矩阵</div></div>
+          <div class="more-cell" data-m="staff" onclick="goModule('staff')"><span class="star">★</span><div class="mi" style="background:#E3EDF7"><svg viewBox="0 0 24 24" fill="none" stroke="#3A6EA5" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 8a3 3 0 0 1 0 6M22 20c0-2-1-3-3-4" stroke-linecap="round"/></svg></div><div class="ml">排班员工</div><div class="ms">6人·健康证</div><span class="badge">3</span></div>
+          <div class="more-cell" data-m="vip" onclick="goModule('vip')"><span class="star">★</span><div class="mi" style="background:#FCE4E1"><svg viewBox="0 0 24 24" fill="none" stroke="#E8584A" stroke-width="2"><path d="M12 21s-7-4-7-10a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 6-7 10-7 10z" stroke-linejoin="round"/></svg></div><div class="ml">会员营销</div><div class="ms">储值/生日</div><span class="badge">3</span></div>
+          <div class="more-cell" data-m="pos" onclick="goModule('pos')"><span class="star">★</span><div class="mi" style="background:#FCEDD0"><svg viewBox="0 0 24 24" fill="none" stroke="#C8881A" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 14h4" stroke-linecap="round"/></svg></div><div class="ml">堂食收银</div><div class="ms">8桌·并拆单</div></div>
+          <div class="more-cell" data-m="takeout" onclick="goModule('takeout')"><span class="star">★</span><div class="mi" style="background:#E2F0E2"><svg viewBox="0 0 24 24" fill="none" stroke="#2E7D32" stroke-width="2"><path d="M3 10h14v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM17 12h3l1 3v3a2 2 0 0 1-2 2h-2M6 22a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 22a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" stroke-linejoin="round"/></svg></div><div class="ml">外卖平台</div><div class="ms">3平台·差评</div><span class="badge">1</span></div>
+          <div class="more-cell" data-m="booking" onclick="goModule('booking')"><span class="star">★</span><div class="mi" style="background:#EDE3F4"><svg viewBox="0 0 24 24" fill="none" stroke="#9B6BBF" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4" stroke-linecap="round"/></svg></div><div class="ml">预订排队</div><div class="ms">叫号A08</div><span class="badge">4</span></div>
+          <div class="more-cell" data-m="foodsafe" onclick="goModule('foodsafe')"><span class="star">★</span><div class="mi" style="background:#E2F0E2"><svg viewBox="0 0 24 24" fill="none" stroke="#2E7D32" stroke-width="2"><path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="ml">食安证照</div><div class="ms">留样·溯源</div><span class="badge">3</span></div>
+          <div class="more-cell" data-m="equipment" onclick="goModule('equipment')"><span class="star">★</span><div class="mi" style="background:#FCEDD0"><svg viewBox="0 0 24 24" fill="none" stroke="#C8881A" stroke-width="2"><path d="M6 3v6a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4V3M14 13v8M10 13v8M6 21h12" stroke-linecap="round"/></svg></div><div class="ml">设备能耗</div><div class="ms">温度·维保</div><span class="badge">1</span></div>
+          <div class="more-cell" data-m="finance" onclick="goModule('finance')"><span class="star">★</span><div class="mi" style="background:#E3EDF7"><svg viewBox="0 0 24 24" fill="none" stroke="#3A6EA5" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M7 9v6" stroke-linecap="round"/></svg></div><div class="ml">财务税务</div><div class="ms">发票·分账</div></div>
+          <div class="more-cell" data-m="supply" onclick="goModule('supply')"><span class="star">★</span><div class="mi" style="background:#FCE4E1"><svg viewBox="0 0 24 24" fill="none" stroke="#E8584A" stroke-width="2"><path d="M3 7l9-4 9 4-9 4-9-4zM3 7v10l9 4 9-4V7M12 11v10" stroke-linejoin="round" stroke-linecap="round"/></svg></div><div class="ml">供应链</div><div class="ms">比价·账期</div></div>
+          <div class="more-cell" data-m="review" onclick="goModule('review')"><span class="star">★</span><div class="mi" style="background:#F6E7F0"><svg viewBox="0 0 24 24" fill="none" stroke="#A24E7E" stroke-width="2"><path d="M12 2l3 6 6 .9-4.5 4.4 1 6.6L12 17l-5.5 3 1-6.6L3 8.9 9 8z" stroke-linejoin="round"/></svg></div><div class="ml">顾客口碑</div><div class="ms">多平台评分</div><span class="badge">2</span></div>
+          <div class="more-cell" data-m="loss" onclick="goModule('loss')"><span class="star">★</span><div class="mi" style="background:#E6E6E6"><svg viewBox="0 0 24 24" fill="none" stroke="#3A3A3A" stroke-width="2"><path d="M3 6h18l-2 14H5zM9 10v6M15 10v6M10 6V3h4v3" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="ml">损耗报损</div><div class="ms">审批·分析</div></div>
+        </div>
+        <div id="moreEmpty"></div>
+      </section>
+
+      <!-- ============ 模块 1：经营分析 ============ -->
+      <section class="screen-body hide" id="p-m-analysis">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">经营分析</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'导出周报',desc:'导出本周经营周报（营收/毛利/矩阵/人效），只读输出层不写 DB',actionType:'report.export',confirmLabel:'导出周报'})">导出周报</div></div>
+        <div class="pill-grp" id="an-pills"><div class="pill on" data-sp="an-trend">趋势</div><div class="pill" data-sp="an-heat">时段</div><div class="pill" data-sp="an-mx">菜单矩阵</div><div class="pill" data-sp="an-eff">效率</div><div class="pill" data-sp="an-fcst">AI 销量预测</div></div>
+
+        <div class="sub-page on" id="an-trend">
+          <div class="sum-banner"><div class="sb-lab">本周营收 / 毛利 · 第38周</div><div class="sb-val">¥58,210 <small>· 毛利 40.1%</small></div><div class="sb-delta up">↑ 4.2% vs 上周 · 同比 ↑11.6%</div></div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>营收/毛利趋势（4周）</div></div>
+            <svg class="spark" viewBox="0 0 320 70" preserveAspectRatio="none" style="height:70px">
+              <path d="M0,55 L80,48 L160,32 L240,22 L320,12" fill="none" stroke="#F48FB1" stroke-width="2.6"/>
+              <path d="M0,62 L80,58 L160,50 L240,42 L320,36" fill="none" stroke="#9B6BBF" stroke-width="2.2" stroke-dasharray="4,3"/>
+            </svg>
+            <div class="legend"><span><i style="background:#F48FB1"></i>营收(¥万)</span><span><i style="background:#9B6BBF"></i>毛利(%)</span><span style="margin-left:auto">W35→W38</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>各色周表现</div></div>
+            <div class="wk-grid">
+              <div class="wk-cell"><div class="c5 f-red">红</div><div class="nm">长寿</div><div class="sl">486</div><div class="ml up">+8%</div></div>
+              <div class="wk-cell"><div class="c5 f-blk">黑</div><div class="nm">聚财</div><div class="sl">413</div><div class="ml down">-1.2%</div></div>
+              <div class="wk-cell"><div class="c5 f-yel">黄</div><div class="nm">富贵</div><div class="sl">372</div><div class="ml up">+3%</div></div>
+              <div class="wk-cell"><div class="c5 f-wht">白</div><div class="nm">团圆</div><div class="sl">315</div><div class="ml up">+6%</div></div>
+              <div class="wk-cell"><div class="c5 f-grn">绿</div><div class="nm">康宁</div><div class="sl">331</div><div class="ml down">-2%</div></div>
+              <div class="wk-cell"><div class="c5 f-pur">紫</div><div class="nm">好德</div><div class="sl">289</div><div class="ml up">+5%</div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>AI 下周建议</div></div>
+            <div class="note">① 红色饺子连续两周增长，建议主推位前置；② 墨鱼汁价涨，黑色可试点 +¥0.5；③ 绿色环比转跌，建议试推「菠菜汁+新馅料」变体探需求；④ 周三/周四为销售洼地，可设五福套餐；⑤ 周六 18:30 为峰段，建议加排 1 人。</div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="an-heat">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>时段热力图（24h × 7天）</div><div class="more" onclick="toast('周对比视图即将上线')">本周</div></div>
+            <div class="heat-wrap"><div class="heatmap" id="heatGrid"></div></div>
+            <div class="legend"><span>谷</span><i style="background:#FFF1F5;width:16px;height:8px;border-radius:2px"></i><i style="background:#FBD3CC;width:16px;height:8px;border-radius:2px"></i><i style="background:#F48FB1;width:16px;height:8px;border-radius:2px"></i><i style="background:#C2185B;width:16px;height:8px;border-radius:2px"></i><span>峰</span><span style="margin-left:auto">午11:30 / 晚18:30</span></div>
+            <div class="heat-tip" id="heatTip">点击单元格查看该时段营收/单量（钻取只读）</div>
+            <div class="note" style="margin-top:8px">晚峰 18:00–19:30 营收占全天 38%；周六晚峰提前 30 分钟并放大 22%；雨天气温下降 3℃ 时热汤点单 +14%（近 4 周关联）。</div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="an-mx">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>波士顿菜单矩阵</div><div class="more" onclick="drillMatrix('all')">9 款饺子</div></div>
+            <svg class="matrix-svg" id="matrixSvg" viewBox="0 0 320 220">
+              <rect class="quad" data-q="star" x="42" y="22" width="126" height="76" fill="#5BA85B" fill-opacity=".08" rx="6"/>
+              <rect class="quad" data-q="puzzle" x="172" y="22" width="126" height="76" fill="#F2B233" fill-opacity=".08" rx="6"/>
+              <rect class="quad" data-q="cow" x="42" y="102" width="126" height="76" fill="#9B6BBF" fill-opacity=".08" rx="6"/>
+              <rect class="quad" data-q="dog" x="172" y="102" width="126" height="76" fill="#888" fill-opacity=".08" rx="6"/>
+              <line x1="40" y1="180" x2="300" y2="180" stroke="#C9CDD4" stroke-width="1"/>
+              <line x1="40" y1="20" x2="40" y2="180" stroke="#C9CDD4" stroke-width="1"/>
+              <line x1="170" y1="20" x2="170" y2="180" stroke="#ECEEF2" stroke-dasharray="3,3"/>
+              <line x1="40" y1="100" x2="300" y2="100" stroke="#ECEEF2" stroke-dasharray="3,3"/>
+              <text x="50" y="34" font-size="11" font-weight="700" fill="#5BA85B">★ 明星</text>
+              <text x="248" y="34" font-size="11" font-weight="700" fill="#C8881A">? 问题</text>
+              <text x="50" y="174" font-size="11" font-weight="700" fill="#9B6BBF">¥ 金牛</text>
+              <text x="248" y="174" font-size="11" font-weight="700" fill="#888">狗 瘦狗</text>
+              <text x="170" y="200" font-size="9" fill="#8A8F98" text-anchor="middle">销量 →</text>
+              <text x="20" y="100" font-size="9" fill="#8A8F98" text-anchor="middle" transform="rotate(-90 20 100)">毛利 →</text>
+              <circle cx="110" cy="62" r="9" fill="#E8584A"/><text x="110" y="65" font-size="9" fill="#fff" text-anchor="middle" font-weight="700">红</text>
+              <circle cx="230" cy="78" r="9" fill="#3a3a3a"/><text x="230" y="81" font-size="9" fill="#fff" text-anchor="middle" font-weight="700">黑</text>
+              <circle cx="145" cy="70" r="7" fill="#F2B233"/><text x="145" y="73" font-size="8" fill="#fff" text-anchor="middle" font-weight="700">黄</text>
+              <circle cx="95" cy="140" r="7" fill="#888"/><text x="95" y="143" font-size="8" fill="#fff" text-anchor="middle" font-weight="700">白</text>
+              <circle cx="205" cy="120" r="7" fill="#5BA85B"/><text x="205" y="123" font-size="8" fill="#fff" text-anchor="middle" font-weight="700">绿</text>
+              <circle cx="245" cy="150" r="6" fill="#9B6BBF"/><text x="245" y="153" font-size="8" fill="#fff" text-anchor="middle" font-weight="700">紫</text>
+              <circle cx="75" cy="78" r="6" fill="#C8651A"/><text x="75" y="81" font-size="7" fill="#fff" text-anchor="middle" font-weight="700">狮</text>
+              <circle cx="130" cy="155" r="6" fill="#3A6EA5"/><text x="130" y="158" font-size="7" fill="#fff" text-anchor="middle" font-weight="700">鱼</text>
+              <circle cx="265" cy="110" r="6" fill="#A24E7E"/><text x="265" y="113" font-size="7" fill="#fff" text-anchor="middle" font-weight="700">凉</text>
+            </svg>
+            <div class="mx-legend">
+              <span class="lg" data-q="star" onclick="drillMatrix('star')"><i style="background:#5BA85B"></i>明星：红/狮（高销高利）</span>
+              <span class="lg" data-q="puzzle" onclick="drillMatrix('puzzle')"><i style="background:#F2B233"></i>问题：黑/凉（高销低利）</span>
+              <span class="lg" data-q="cow" onclick="drillMatrix('cow')"><i style="background:#9B6BBF"></i>金牛：白（低销稳利）</span>
+              <span class="lg" data-q="dog" onclick="drillMatrix('dog')"><i style="background:#888"></i>瘦狗：紫（低销低利）</span>
+            </div>
+            <div class="note" style="margin-top:8px">点击象限或图例可钻取该象限菜品清单与建议（只读输出）。</div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="an-eff">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>效率指标</div><div class="more" onclick="toast('效率周报即将上线')">本周</div></div>
+            <div class="gauge-row">
+              <div class="gauge-cell"><div class="ring"><svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="#F1F2F5" stroke-width="6"/><circle cx="28" cy="28" r="22" fill="none" stroke="#5BA85B" stroke-width="6" stroke-dasharray="138" stroke-dashoffset="36" stroke-linecap="round"/></svg><div class="c" style="font-size:13px">3.2</div></div><div class="lb">翻台率</div><div class="vl up">↑0.3</div></div>
+              <div class="gauge-cell"><div class="ring"><svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="#F1F2F5" stroke-width="6"/><circle cx="28" cy="28" r="22" fill="none" stroke="#F2B233" stroke-width="6" stroke-dasharray="138" stroke-dashoffset="48" stroke-linecap="round"/></svg><div class="c" style="font-size:13px">¥680</div></div><div class="lb">坪效/㎡</div><div class="vl up">↑¥40</div></div>
+              <div class="gauge-cell"><div class="ring"><svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="#F1F2F5" stroke-width="6"/><circle cx="28" cy="28" r="22" fill="none" stroke="#9B6BBF" stroke-width="6" stroke-dasharray="138" stroke-dashoffset="60" stroke-linecap="round"/></svg><div class="c" style="font-size:13px">¥648</div></div><div class="lb">人效/人</div><div class="vl up">↑¥35</div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>同环比 · 4周</div></div>
+            <div class="stat-line"><span>营收环比</span><span class="up" style="font-weight:800">+4.2%</span></div>
+            <div class="stat-line"><span>营收同比</span><span class="up" style="font-weight:800">+11.6%</span></div>
+            <div class="stat-line"><span>毛利环比</span><span class="up" style="font-weight:800">+0.8pct</span></div>
+            <div class="stat-line"><span>客单价同比</span><span class="up" style="font-weight:800">+¥2.4</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>天气 / 节假日关联</div></div>
+            <div class="stat-line"><span>雨天热汤点单</span><span class="up" style="font-weight:800">+14%</span></div>
+            <div class="stat-line"><span>气温每降 3℃</span><span style="color:var(--sub)">汤品主食 +8%</span></div>
+            <div class="stat-line"><span>中秋节庆前 3 天</span><span class="up" style="font-weight:800">团圆白饺 +32%</span></div>
+            <div class="stat-line"><span>周末峰段</span><span style="color:var(--sub)">18:30 提前 + 放大 22%</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="an-fcst">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>未来 7 天销量预测</div><span class="ai-badge">AI 预测</span></div>
+            <div class="fcst-conf-row">
+              <span class="fcst-lab">置信度</span>
+              <input type="range" id="fcstConfSlider" min="80" max="95" value="90" step="1" oninput="updateFcstConf(this.value)">
+              <div class="fcst-val"><span id="fcstConfVal">90</span><small>% · 区间随置信度变化</small></div>
+            </div>
+            <svg class="spark" viewBox="0 0 320 80" preserveAspectRatio="none" style="height:80px">
+              <path id="fcstBandFill" d="M270,37 L300,28 L320,20 L320,36 L300,40 L270,47 Z" fill="#FFB6C1" fill-opacity="0.12" stroke="none"/>
+              <path d="M0,55 L45,52 L90,48 L135,50 L180,46 L225,44 L270,42" fill="none" stroke="#C9CDD4" stroke-width="2" stroke-dasharray="4,3"/>
+              <path d="M270,42 L300,34 L320,28" fill="none" stroke="#9B6BBF" stroke-width="2.6" stroke-dasharray="2,2"/>
+              <path id="fcstOptLine" d="M270,37 L300,28 L320,20" fill="none" stroke="#FFB6C1" stroke-width="1.6" stroke-dasharray="3,2" opacity="0.9"/>
+              <path id="fcstConsLine" d="M270,47 L300,40 L320,36" fill="none" stroke="#8A8F98" stroke-width="1.6" stroke-dasharray="3,2" opacity="0.8"/>
+              <path d="M0,55 L45,52 L90,48 L135,50 L180,46 L225,44 L270,42 L300,34 L320,28" fill="none" stroke="#F48FB1" stroke-width="2.4"/>
+              <line x1="270" y1="10" x2="270" y2="70" stroke="#E8584A" stroke-width="1" stroke-dasharray="2,3"/>
+              <text x="274" y="18" font-size="8" fill="#E8584A">今日</text>
+              <circle cx="320" cy="28" r="2.8" fill="#F48FB1"/>
+              <text id="fcstPeakTxt" x="172" y="11" font-size="7.5" fill="#9B6BBF" font-weight="700">峰值日 · 上界¥118 / 预测¥100 / 下界¥82</text>
+              <line x1="306" y1="13" x2="318" y2="25" stroke="#9B6BBF" stroke-width="0.7"/>
+            </svg>
+            <div class="legend"><span><i style="background:#F48FB1"></i>预测</span><span><i style="background:#FFB6C1;opacity:.9"></i>乐观</span><span><i style="background:#8A8F98;opacity:.8"></i>保守</span><span><i style="background:rgba(255,182,197,.25);border:1px solid #F48FB1"></i>置信区间</span><span><i style="background:#C9CDD4"></i>历史同期</span><span style="margin-left:auto">未来 7 日</span></div>
+            <div class="note" style="margin-top:8px">三因子模型：<b>天气 + 历史 4 周 + 节假日</b>。周五雨降温 → 红饺/热汤 ↑14%；中秋前 3 天白饺 +32%。<span class="ai-badge">AI 预测</span> · 预测≠下单，需确认 → /api/sync</div>
+          </div>
+
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>天气-销量关联系数</div></div>
+            <table class="mini-tbl">
+              <tr><td>天气</td><td style="text-align:right">红</td><td style="text-align:right">黑</td><td style="text-align:right">黄</td><td style="text-align:right">绿</td><td style="text-align:right">白</td></tr>
+              <tr><td>☀ 晴</td><td style="text-align:right">+2%</td><td style="text-align:right">0</td><td style="text-align:right">+5%</td><td style="text-align:right">+3%</td><td style="text-align:right" class="r">+6%</td></tr>
+              <tr><td>🌧 雨</td><td style="text-align:right" class="r">+14%</td><td style="text-align:right">+3%</td><td style="text-align:right">-2%</td><td style="text-align:right">0</td><td style="text-align:right">+8%</td></tr>
+              <tr><td>❄ 降温 3℃</td><td style="text-align:right" class="r">+8%</td><td style="text-align:right">+4%</td><td style="text-align:right">-1%</td><td style="text-align:right">+2%</td><td style="text-align:right" class="r">+12%</td></tr>
+              <tr><td>节假日</td><td style="text-align:right">+5%</td><td style="text-align:right">+3%</td><td style="text-align:right">+4%</td><td style="text-align:right">+2%</td><td style="text-align:right" class="r">+32%</td></tr>
+            </table>
+            <div class="note" style="margin-top:8px">系数基于近 4 周同时段回归，仅作参考；节气/活动另行标注。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>节假日效应标注</div></div>
+            <div class="stat-line"><span>中秋前 3 天</span><span class="up" style="font-weight:800">白饺 +32%</span></div>
+            <div class="stat-line"><span>中秋团圆</span><span class="up" style="font-weight:800">团圆套餐 +28%</span></div>
+            <div class="stat-line"><span>国庆假期</span><span class="up" style="font-weight:800">总单量 +45%</span></div>
+            <div class="stat-line"><span>周末晚峰</span><span style="color:var(--sub)">18:30 提前 +22%</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>AI 备货建议清单</div><span class="ai-badge">AI 建议</span></div>
+            <div class="rs-row"><div class="info"><div class="ti">火龙果汁 · 备货区间</div><div class="ds"><span class="fcst-ds" data-pred="2.4" data-prec="1" data-unit="kg">保守 2.0 / 预测 2.4 / 乐观 2.8 kg</span> · 红饺 78 份/日 · 现库 0.44kg</div><span class="ai-badge">雨天 ↑14%</span></div><div><div class="amt">¥288</div><span class="chip act" style="margin-top:6px;display:inline-block" onclick="openSheet('confirm',{kind:'aiForecast2po',items:[{name:'火龙果汁',range:'保守 2.0 / 预测 2.4 / 乐观 2.8 kg',price:288}]})">转采购</span></div></div>
+            <div class="rs-row"><div class="info"><div class="ti">墨鱼汁 · 备货区间</div><div class="ds"><span class="fcst-ds" data-pred="0.4" data-prec="2" data-unit="kg">保守 0.33 / 预测 0.4 / 乐观 0.47 kg</span> · 黑饺 62 份/日 · 现库 0.18kg</div><span class="ai-badge">稳</span></div><div><div class="amt">¥232</div><span class="chip act" style="margin-top:6px;display:inline-block" onclick="openSheet('confirm',{kind:'aiForecast2po',items:[{name:'墨鱼汁',range:'保守 0.33 / 预测 0.4 / 乐观 0.47 kg',price:232}]})">转采购</span></div></div>
+            <div class="rs-row"><div class="info"><div class="ti">猪前肩肉 · 备货区间</div><div class="ds"><span class="fcst-ds" data-pred="8.5" data-prec="1" data-unit="kg">保守 7.0 / 预测 8.5 / 乐观 10.0 kg</span> · 五色通用主料 · 中秋加备</div><span class="ai-badge">节庆 +20%</span></div><div><div class="amt">¥680</div><span class="chip act" style="margin-top:6px;display:inline-block" onclick="openSheet('confirm',{kind:'aiForecast2po',items:[{name:'猪前肩肉',range:'保守 7.0 / 预测 8.5 / 乐观 10.0 kg',price:680}]})">转采购</span></div></div>
+            <div class="rs-row"><div class="info"><div class="ti">冬菇 · 备货区间</div><div class="ds"><span class="fcst-ds" data-pred="1.8" data-prec="1" data-unit="kg">保守 1.5 / 预测 1.8 / 乐观 2.1 kg</span> · 红馅辅料 · 现库 0.9kg</div><span class="ai-badge">AI 建议</span></div><div><div class="amt">¥108</div><span class="chip act" style="margin-top:6px;display:inline-block" onclick="openSheet('confirm',{kind:'aiForecast2po',items:[{name:'冬菇',range:'保守 1.5 / 预测 1.8 / 乐观 2.1 kg',price:108}]})">转采购</span></div></div>
+            <div class="note" style="margin-top:8px">⚠ 备货建议由 AI 生成，<b>预测≠下单</b>。转采购后进采购管理，需老板/店长确认 → /api/sync。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 2：排班员工 ============ -->
+      <section class="screen-body hide" id="p-m-staff">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">排班员工</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增排班',desc:'选择员工与班次（A 早 / B 中 / C 晚）后生成排班草稿，店长确认后生效',actionType:'staff.schedule',confirmLabel:'生成排班草稿'})">+ 排班</div></div>
+        <div class="pill-grp" id="st-pills"><div class="pill on" data-sp="st-sched">排班</div><div class="pill" data-sp="st-clock">打卡</div><div class="pill" data-sp="st-perf">绩效</div><div class="pill" data-sp="st-train">培训</div></div>
+
+        <div class="sub-page on" id="st-sched">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>周排班表</div><div class="more" id="weekRange">9.22–9.28</div></div>
+            <div class="wk-sched">
+              <div class="hd"></div><div class="hd">一</div><div class="hd">二</div><div class="hd">三</div><div class="hd">四</div><div class="hd">五</div><div class="hd">六</div><div class="hd">日</div>
+              <div class="rl">宋师傅</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-R">休</div>
+              <div class="rl">李厨师长</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-B">B</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-R">休</div>
+              <div class="rl">王师傅</div><div class="shft sh-B">B</div><div class="shft sh-B">B</div><div class="shft sh-A">A</div><div class="shft sh-B">B</div><div class="shft sh-B">B</div><div class="shft sh-R">休</div><div class="shft sh-A">A</div>
+              <div class="rl">张师傅</div><div class="shft sh-C">C</div><div class="shft sh-C">C</div><div class="shft sh-C">C</div><div class="shft sh-C">C</div><div class="shft sh-R">休</div><div class="shft sh-C">C</div><div class="shft sh-C">C</div>
+              <div class="rl">赵店长</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-A">A</div><div class="shft sh-R">休</div>
+              <div class="rl">钱收银</div><div class="shft sh-B">B</div><div class="shft sh-B">B</div><div class="shft sh-B">B</div><div class="shft sh-B">B</div><div class="shft sh-R">休</div><div class="shft sh-B">B</div><div class="shft sh-B">B</div>
+            </div>
+            <div class="legend" style="margin-top:10px"><span><i style="background:#FCE4E1"></i>A 早 9–17</span><span><i style="background:#E3EDF7"></i>B 中 11–21</span><span><i style="background:#E2F0E2"></i>C 晚 14–23</span><span><i style="background:#F1F2F5"></i>休</span><span><i style="background:#FCEDD0"></i>请假</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>本周工时汇总</div></div>
+            <div class="fb-row"><div class="lb">宋师傅</div><div class="fb-bar"><i style="width:96%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl">48h</div></div>
+            <div class="fb-row"><div class="lb">李厨师长</div><div class="fb-bar"><i style="width:90%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl">45h</div></div>
+            <div class="fb-row"><div class="lb">王师傅</div><div class="fb-bar"><i style="width:84%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl">42h</div></div>
+            <div class="fb-row"><div class="lb">张师傅</div><div class="fb-bar"><i style="width:88%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl">44h</div></div>
+            <div class="fb-row"><div class="lb">赵店长</div><div class="fb-bar"><i style="width:96%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl">48h</div></div>
+            <div class="fb-row"><div class="lb">钱收银</div><div class="fb-bar"><i style="width:84%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl">42h</div></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="st-clock">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>今日打卡</div><span class="fresh"><i class="dot"></i>09:24</span></div>
+            <div class="stat-line"><span>应到 / 实到</span><span><b>6 / 5</b> · 在岗</span></div>
+            <div class="stat-line"><span>在岗</span><span class="tag ok">4 人</span></div>
+            <div class="stat-line"><span>迟到</span><span class="tag warn">1 人 · 王师傅 +12 分</span></div>
+            <div class="stat-line"><span>缺勤</span><span class="tag danger">0 人</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>打卡明细</div></div>
+            <div class="rc-row"><div class="info"><div class="ti">宋师傅 · 早班</div><div class="ds">打卡 08:58 · 准点</div></div><span class="tag ok">在岗</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">李厨师长 · 早班</div><div class="ds">打卡 09:02 · 准点</div></div><span class="tag ok">在岗</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">王师傅 · 中班</div><div class="ds">应 11:00 · 打卡 11:12</div></div><span class="tag warn">迟到</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">赵店长 · 早班</div><div class="ds">打卡 09:05 · 准点</div></div><span class="tag ok">在岗</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">张师傅 · 晚班</div><div class="ds">14:00 上班 · 待打卡</div></div><span class="tag">待</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="st-perf">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>绩效排行 · 本周</div></div>
+            <div class="top3">
+              <div class="tr"><div class="rank" style="background:linear-gradient(135deg,#F2B233,#E8920C)">1</div><div class="info"><div class="nm">李厨师长</div><div class="sl">出品 412 份 · 废品 1.2%</div></div><div class="vl">98.5</div></div>
+              <div class="tr"><div class="rank" style="background:linear-gradient(135deg,#9aa,#3a3a3a)">2</div><div class="info"><div class="nm">宋师傅</div><div class="sl">出品 386 份 · 配方 100%</div></div><div class="vl">96.8</div></div>
+              <div class="tr"><div class="rank" style="background:linear-gradient(135deg,#FFB6B0,#E8584A)">3</div><div class="info"><div class="nm">赵店长</div><div class="sl">服务 0 差评 · 翻台 3.4</div></div><div class="vl">95.2</div></div>
+              <div class="tr"><div class="rank" style="background:#D8DBE0;color:#666">4</div><div class="info"><div class="nm">张师傅</div><div class="sl">出品 298 份 · 废品 2.1%</div></div><div class="vl">91.0</div></div>
+              <div class="tr"><div class="rank" style="background:#D8DBE0;color:#666">5</div><div class="info"><div class="nm">钱收银</div><div class="sl">实收 0 差错 · 储值 +¥3.8k</div></div><div class="vl">90.5</div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>工时 vs 产出</div></div>
+            <div class="bar-mini"><i style="height:80%"></i><i style="height:92%"></i><i style="height:70%"></i><i style="height:60%"></i><i style="height:88%"></i><i style="height:65%"></i></div>
+            <div class="legend"><span>宋</span><span>李</span><span>王</span><span>张</span><span>赵</span><span>钱</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="st-train">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>培训进度</div></div>
+            <div class="stat-line"><span>李师傅 · 红饺 SOP</span><span class="tag ok">已通过 5/5</span></div>
+            <div class="stat-line"><span>王师傅 · 黑饺 SOP</span><span class="tag warn">进行中 3/5</span></div>
+            <div class="stat-line"><span>新人入职培训</span><span class="tag warn">2 人待考</span></div>
+            <div class="stat-line"><span>食安知识考核</span><span class="tag ok">6/6 通过</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>健康证到期预警</div><span class="tag warn">3 人</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">王师傅 · 健康证</div><div class="ds">2026-10-22 到期 · 剩 28 天</div></div><span class="tag warn">待体检</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">张师傅 · 健康证</div><div class="ds">2026-10-19 到期 · 剩 25 天</div></div><span class="tag warn">待体检</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">钱收银 · 健康证</div><div class="ds">2026-10-15 到期 · 剩 21 天</div></div><span class="tag warn">待体检</span></div>
+            <div class="note" style="margin-top:8px">⚠ 健康证逾期不得上岗；食品安全合规第一。AI 仅提示，不自动预约体检。</div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>着装 / SOP 合规 · Kimi 拍照</div><div class="more" onclick="toast('着装 SOP 文档即将上线')">SOP</div></div>
+            <div class="photo-cap" onclick="mockScan(this,'uniform')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h4l2-2h6l2 2h4v12H3z" stroke-linejoin="round"/><path d="M9 13l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg><div class="pt">着装合规拍照</div><div class="pd">对准员工 · Kimi 识别工服/帽子/口罩/洗手/SOP 合规</div></div>
+            <div class="kimi-card" id="kimiUniform" style="display:none"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 3：会员营销 ============ -->
+      <section class="screen-body hide" id="p-m-vip">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">会员营销</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'发放优惠券',desc:'选择券模板与目标会员分组后发放，企微自动触达',actionType:'vip.coupon',confirmLabel:'发券'})">+ 发券</div></div>
+        <div class="pill-grp" id="vip-pills"><div class="pill on" data-sp="vip-overview">概览</div><div class="pill" data-sp="vip-balance">储值</div><div class="pill" data-sp="vip-coupon">优惠券</div><div class="pill" data-sp="vip-birthday">生日</div></div>
+
+        <div class="sub-page on" id="vip-overview">
+          <div class="sum-banner"><div class="sb-lab">会员资产总额</div><div class="sb-val">¥38,420 <small>· 积分 128k</small></div><div class="sb-delta up">↑ 本周新增 12 人 · 储值 +¥1,820</div></div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>会员结构</div><div class="more">860 人</div></div>
+            <div class="donut-wrap">
+              <div class="donut" style="background:conic-gradient(#E8584A 0 55%,#F2B233 55% 83%,#9B6BBF 83% 100%)"><div class="hole"><div class="pct">860</div><div class="lb">总会员</div></div></div>
+              <div class="donut-leg">
+                <div class="li"><span><i style="background:#E8584A"></i>储值卡 473 (55%)</span></div>
+                <div class="li"><span><i style="background:#F2B233"></i>积分会员 240 (28%)</span></div>
+                <div class="li"><span><i style="background:#9B6BBF"></i>普通 147 (17%)</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>近 4 周新增</div></div>
+            <svg class="spark" viewBox="0 0 320 50" preserveAspectRatio="none"><path d="M0,42 L80,30 L160,34 L240,20 L320,12" fill="none" stroke="#E8584A" stroke-width="2.4"/></svg>
+            <div class="legend"><span><i style="background:#E8584A"></i>新增会员 · 储值转化 38%</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="vip-balance">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>储值余额变化 · 本周</div></div>
+            <div class="fb-row"><div class="lb">充值</div><div class="fb-bar"><i style="width:80%;background:linear-gradient(90deg,#5BA85B,#3a8a3a)"></i></div><div class="vl up">+¥2,400</div></div>
+            <div class="fb-row"><div class="lb">消费</div><div class="fb-bar"><i style="width:58%;background:linear-gradient(90deg,#E8584A,#a83028)"></i></div><div class="vl down">-¥580</div></div>
+            <div class="fb-row"><div class="lb">净增</div><div class="fb-bar"><i style="width:62%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl up">+¥1,820</div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>大额储值 · 本周</div><div class="more">点击展开</div></div>
+            <div class="rc-row expand" onclick="toggleVipCard(this)"><div class="info"><div class="ti">王总 · 充值 ¥1,000</div><div class="ds">送 ¥120 · 09-22 19:30</div></div><span class="tag ok">已到账</span><span class="caret">▼</span><div class="vip-det">余额变动：<b>+¥1,120</b>（含赠送）<br>消费记录：09-22 晚餐 ¥186 · 09-23 午餐 ¥98<br>储值次数：累计 5 次 · 累计 ¥4,200<br>复购周期：约 4 天 · 偏好红色长寿饺</div></div>
+            <div class="rc-row expand" onclick="toggleVipCard(this)"><div class="info"><div class="ti">李姐 · 充值 ¥500</div><div class="ds">送 ¥60 · 09-23 12:10</div></div><span class="tag ok">已到账</span><span class="caret">▼</span><div class="vip-det">余额变动：<b>+¥560</b><br>消费记录：09-23 午餐 ¥54<br>储值次数：累计 3 次 · 累计 ¥1,500<br>复购周期：约 6 天 · 偏好黑色三鲜</div></div>
+            <div class="rc-row expand" onclick="toggleVipCard(this)"><div class="info"><div class="ti">张先生 · 充值 ¥300</div><div class="ds">送 ¥30 · 09-23 18:45</div></div><span class="tag ok">已到账</span><span class="caret">▼</span><div class="vip-det">余额变动：<b>+¥330</b><br>消费记录：09-23 晚餐 ¥88<br>储值次数：累计 2 次 · 累计 ¥600<br>复购周期：约 5 天 · 偏好黄色富贵饺</div></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="vip-coupon">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>优惠券核销</div><div class="more">本周</div></div>
+            <div class="stat-line"><span>已发券</span><span><b>128 张</b></span></div>
+            <div class="stat-line"><span>已核销</span><span class="up" style="font-weight:800">100 张 · 78%</span></div>
+            <div class="stat-line"><span>待发券</span><span style="color:var(--sub)">3 张 · 待激活</span></div>
+            <div class="stat-line"><span>过期未用</span><span class="down">25 张</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>活动券 · 状态机</div><div class="more">点击流转</div></div>
+            <div class="coupon-card" data-cid="c1"><div class="cc-h"><div><div class="cc-ti">五福饺子 8 折券</div><div class="cc-ds">核销 68/80 · 转化率 85%</div></div><span class="cc-st cc-s-sent">已发</span></div><div class="cc-act"><button class="mini-btn gk" onclick="cycleCoupon('c1')">核销</button><button class="mini-btn gp" onclick="resetCoupon('c1')">重置</button></div></div>
+            <div class="coupon-card" data-cid="c2"><div class="cc-h"><div><div class="cc-ti">满 50 减 8</div><div class="cc-ds">客单 +¥6.2 · 转化中</div></div><span class="cc-st cc-s-pending">待发</span></div><div class="cc-act"><button class="mini-btn gp" onclick="cycleCoupon('c2')">发放</button><button class="mini-btn gk" onclick="cycleCoupon('c2')">核销</button></div></div>
+            <div class="coupon-card" data-cid="c3"><div class="cc-h"><div><div class="cc-ti">生日赠五福饺</div><div class="cc-ds">满意度 100% · 10/10</div></div><span class="cc-st cc-s-used">已用</span></div><div class="cc-act"><button class="mini-btn gp" onclick="resetCoupon('c3')">重发</button></div></div>
+            <div class="note" style="margin-top:8px">状态机：待发 → 已发 → 已用 → 过期。点击「核销/发放/重置」流转状态（原型演示，写操作需确认 → /api/sync）。</div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="vip-birthday">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>本周生日会员</div><span class="badge">3</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">王总 · 储值卡</div><div class="ds" id="bd1" data-tel="138****">09-25 周五 · 电话 138****</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'birthdayCoupon',member:'王总',level:'储值卡',face:'长寿红饺一份 + 8 折券'})">发券</button></div>
+            <div class="rc-row"><div class="info"><div class="ti">李姐 · 储值卡</div><div class="ds" id="bd2" data-tel="139****">09-26 周六 · 电话 139****</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'birthdayCoupon',member:'李姐',level:'储值卡',face:'长寿红饺一份 + 8 折券'})">发券</button></div>
+            <div class="rc-row"><div class="info"><div class="ti">张先生 · 普通</div><div class="ds" id="bd3" data-tel="137****">09-27 周日 · 电话 137****</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'birthdayCoupon',member:'张先生',level:'普通',face:'8 折券'})">发券</button></div>
+            <div class="note" style="margin-top:8px">建议：储值会员赠「长寿红饺一份」+ 8 折券；普通会员赠 8 折券。</div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>企微社群活跃</div></div>
+            <div class="stat-line"><span>群成员</span><span><b>320 人</b></span></div>
+            <div class="stat-line"><span>本周发言</span><span class="up">186 条</span></div>
+            <div class="stat-line"><span>红包活动参与</span><span class="up">78%</span></div>
+            <div class="stat-line"><span>下周活动建议</span><span style="color:var(--sub)">中秋团圆白饺尝鲜会</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 4：堂食收银 ============ -->
+      <section class="screen-body hide" id="p-m-pos">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">堂食收银</span></div><div class="ma" onclick="goPosFloor()">+ 开台</div></div>
+        <div class="pill-grp" id="pos-pills"><div class="pill on" data-sp="pos-floor">桌台</div><div class="pill" data-sp="pos-pay">收银</div><div class="pill" data-sp="pos-real">实收</div></div>
+
+        <div class="sub-page on" id="pos-floor">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>桌台平面图</div><div class="more">点击桌台 · 长按改状态</div></div>
+            <div class="pos-toolbar" id="posToolbar">
+              <button class="pt-btn" id="ptMerge" onclick="enterMergeMode()">并单</button>
+              <button class="pt-btn" id="ptSplit" onclick="enterSplitMode()">拆单</button>
+              <button class="pt-btn" id="ptHistory" onclick="openSheet('posHistory')">历史</button>
+              <span class="pt-status" id="posStatus">点击桌台查看账单 · 长按循环状态</span>
+            </div>
+            <div class="floor" id="floorGrid"></div>
+            <div class="floor-leg" id="floorLeg"><span><i style="background:#E2F0E2"></i>空闲 <b id="lc-free">0</b></span><span><i style="background:#FCE4E1"></i>用餐 <b id="lc-busy">0</b></span><span><i style="background:#FCEDD0"></i>待清 <b id="lc-clean">0</b></span></div>
+            <div class="note" style="margin-top:8px">点击桌台 → 弹出账单/结账；长按(右键) → 循环状态 空闲→就餐→待清→空闲。<b>并单/拆单</b>为收银操作，需确认 → <code>/api/sync</code>（不自动落库）。进入并拆单模式后单击改为选择。</div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="pos-pay">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>支付方式 · 今日</div></div>
+            <div class="donut-wrap">
+              <div class="donut" style="background:conic-gradient(#5BA85B 0 45%,#3A6EA5 45% 75%,#F2B233 75% 83%,#9B6BBF 83% 100%)"><div class="hole"><div class="pct">¥6.7k</div><div class="lb">今日</div></div></div>
+              <div class="donut-leg">
+                <div class="li"><span><i style="background:#5BA85B"></i>微信 45%</span></div>
+                <div class="li"><span><i style="background:#3A6EA5"></i>支付宝 30%</span></div>
+                <div class="li"><span><i style="background:#F2B233"></i>现金 8%</span></div>
+                <div class="li"><span><i style="background:#9B6BBF"></i>储值 17%</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>支付明细</div></div>
+            <div class="stat-line"><span>微信支付</span><span><b>¥3,024</b></span></div>
+            <div class="stat-line"><span>支付宝</span><span><b>¥2,016</b></span></div>
+            <div class="stat-line"><span>现金</span><span><b>¥538</b></span></div>
+            <div class="stat-line"><span>会员储值</span><span><b>¥1,142</b></span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="pos-real">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>今日实收</div><span class="fresh"><i class="dot"></i>实时</span></div>
+            <div class="sum-banner" style="margin-bottom:10px"><div class="sb-lab">实收总额</div><div class="sb-val">¥6,720</div><div class="sb-delta up">↑ vs 昨日 +8.2%</div></div>
+            <div class="bar-mini"><i style="height:30%"></i><i style="height:55%"></i><i style="height:80%"></i><i style="height:65%"></i><i style="height:90%"></i><i style="height:70%"></i><i style="height:45%"></i><i style="height:60%"></i></div>
+            <div class="legend"><span>9h</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>17</span><span>18</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>翻台率实时</div></div>
+            <div class="gauge-row">
+              <div class="gauge-cell"><div class="ring"><svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="#F1F2F5" stroke-width="6"/><circle cx="28" cy="28" r="22" fill="none" stroke="#5BA85B" stroke-width="6" stroke-dasharray="138" stroke-dashoffset="32" stroke-linecap="round"/></svg><div class="c" style="font-size:13px" id="gTurn">3.2</div></div><div class="lb">翻台率</div></div>
+              <div class="gauge-cell"><div class="ring"><svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="#F1F2F5" stroke-width="6"/><circle cx="28" cy="28" r="22" fill="none" stroke="#F2B233" stroke-width="6" stroke-dasharray="138" stroke-dashoffset="48" stroke-linecap="round"/></svg><div class="c" style="font-size:13px">¥560</div></div><div class="lb">桌均</div></div>
+              <div class="gauge-cell"><div class="ring"><svg width="56" height="56"><circle cx="28" cy="28" r="22" fill="none" stroke="#F1F2F5" stroke-width="6"/><circle cx="28" cy="28" r="22" fill="none" stroke="#9B6BBF" stroke-width="6" stroke-dasharray="138" stroke-dashoffset="60" stroke-linecap="round"/></svg><div class="c" style="font-size:13px">2.4</div></div><div class="lb">人均</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 5：外卖平台 ============ -->
+      <section class="screen-body hide" id="p-m-takeout">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">外卖平台</span></div><div class="ma">3 平台</div></div>
+        <div class="pill-grp" id="to-pills"><div class="pill on" data-sp="to-overview">概览</div><div class="pill" data-sp="to-reconcile">对账</div><div class="pill" data-sp="to-bad">差评</div></div>
+
+        <div class="sub-page on" id="to-overview">
+          <div class="sum-banner"><div class="sb-lab">外卖营收 · 今日</div><div class="sb-val">¥1,920 <small>· 38 单</small></div><div class="sb-delta up">↑ 4.5% · 占总营收 22%</div></div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>平台分布</div></div>
+            <div class="plat"><div class="pi" style="background:#FFC700;color:#333">美</div><div class="info"><div class="ti">美团外卖</div><div class="ds">22 单 · 评分 4.6</div></div><div class="vl">¥1,180<small> · 61%</small></div></div>
+            <div class="plat"><div class="pi" style="background:#2396E6">饿</div><div class="info"><div class="ti">饿了么</div><div class="ds">11 单 · 评分 4.4</div></div><div class="vl">¥520<small> · 27%</small></div></div>
+            <div class="plat"><div class="pi" style="background:#FE2C55">抖</div><div class="info"><div class="ti">抖音团购</div><div class="ds">5 单 · 评分 4.5</div></div><div class="vl">¥220<small> · 12%</small></div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>外卖热销 TOP</div></div>
+            <div class="stat-line"><span>红色·长寿饺</span><span><b>16 份</b> · 42%</span></div>
+            <div class="stat-line"><span>黑色·三鲜饺</span><span><b>12 份</b> · 31%</span></div>
+            <div class="stat-line"><span>御膳狮子头</span><span><b>5 份</b> · 13%</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="to-reconcile">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>T+1 待结算</div><span class="tag warn">¥1,920</span></div>
+            <div class="stat-line"><span>美团 (T+1)</span><span><b>¥1,180</b> · <span id="t1Date">09-24 到账</span></span></div>
+            <div class="stat-line"><span>饿了么 (T+1)</span><span><b>¥520</b> · <span id="t1Date2">09-24 到账</span></span></div>
+            <div class="stat-line"><span>抖音 (T+7)</span><span><b>¥220</b> · <span id="t7Date">09-30 到账</span></span></div>
+            <div class="note" style="margin-top:8px">⚠ 外卖对账为只读核对层，结算单不写 DB，需人工核对差异后确认入账。</div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>对账明细 · <span id="reconDate">09-23</span></div></div>
+            <div class="rc-row"><div class="info"><div class="ti">美团 #MT-0923-51</div><div class="ds">红色长寿饺 ×2 · ¥68 · 平台扣 18%</div></div><span class="am">¥55.8</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">美团 #MT-0923-52</div><div class="ds">狮子头 ×1 · ¥36 · 平台扣 18%</div></div><span class="am">¥29.5</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">饿了么 #EL-0923-33</div><div class="ds">黑色三鲜 ×1 · ¥34 · 平台扣 16%</div></div><span class="am">¥28.6</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="to-bad">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>差评预警</div><span class="badge">1</span></div>
+            <div class="alert" onclick="goModule('review')"><div class="st" style="background:#E8584A"></div><div class="ct"><div class="t2">美团 · "出餐慢"</div><div class="d2">#MT-0923-51 · 18 分钟 · 已转店长</div></div></div>
+            <div class="note" style="margin-top:8px">原因分析：午峰 11:30 并发单激增，红色饺子备料不足。建议：①备半成品；②提前 15 分钟切料；③对外卖单设预订单窗口。</div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>差评回复</div></div>
+            <div class="note">用户评价："等了快20分钟，下次不来了。"</div>
+            <div class="ask-bar" style="margin-top:8px"><div class="ask"><input placeholder="输入回复…"><button class="send" onclick="bossConfirmAction('review.reply',{from:'takeout'},'已提交回复')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
+            <div class="chip-row" style="margin-top:8px"><span class="chip act" onclick="openSheet('confirm',{kind:'generic',title:'差评回复 · 致歉+红包',desc:'策略：公开致歉 + 私信补偿红包 ¥10，24h 内跟进回访',actionType:'review.reply',actionPayload:{strategy:'apology_redpack'},confirmLabel:'提交回复'})">致歉+红包</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'差评回复 · 邀复购',desc:'策略：致歉 + 赠 8 折复购券（7 天有效），邀再次到店体验',actionType:'review.reply',actionPayload:{strategy:'repurchase'},confirmLabel:'提交回复'})">邀复购</span><span class="chip" onclick="openSheet('confirm',{kind:'generic',title:'差评回复 · 升级投诉',desc:'策略：升级店长专线处理，2h 内电话回访并记录工单',actionType:'review.reply',actionPayload:{strategy:'escalate'},confirmLabel:'升级处理'})">升级投诉</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 6：预订排队 ============ -->
+      <section class="screen-body hide" id="p-m-booking">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">预订排队</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增预订',desc:'录入时段 / 人数 / 电话后生成预订单，到店自动叫号关联',actionType:'booking.create',confirmLabel:'创建预订'})">+ 预订</div></div>
+        <div class="pill-grp" id="bk-pills"><div class="pill on" data-sp="bk-today">今日预订</div><div class="pill" data-sp="bk-queue">排队叫号</div><div class="pill" data-sp="bk-turn">翻台预估</div></div>
+
+        <div class="sub-page on" id="bk-today">
+          <div class="sum-banner"><div class="sb-lab">今日预订</div><div class="sb-val">5 桌 / 18 人</div><div class="sb-delta up">已确认 4 · 待确认 1</div></div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>预订清单</div></div>
+            <div class="rc-row"><div class="info"><div class="ti">11:30 · 王总 4 人</div><div class="ds">电话 138****1234 · 大桌 05</div></div><span class="tag ok">已确认</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">12:00 · 李姐 3 人</div><div class="ds">电话 139****5678 · 中桌 03</div></div><span class="tag ok">已确认</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">18:30 · 张先生 6 人</div><div class="ds">电话 137****9012 · 包间</div></div><span class="tag ok">已确认</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">19:00 · 陈女士 2 人</div><div class="ds">电话 136****3456 · 小桌 07</div></div><span class="tag warn">待确认</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">19:30 · 赵先生 3 人</div><div class="ds">电话 135****7890 · 中桌 10</div></div><span class="tag ok">已确认</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="bk-queue">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>当前排队</div><span class="fresh"><i class="dot"></i>实时</span></div>
+            <div class="sum-banner" style="margin-bottom:10px"><div class="sb-lab">叫号</div><div class="sb-val" style="color:var(--red)">A08</div><div class="sb-delta">等位 4 桌 · 预计 18 分钟</div></div>
+            <div class="stat-line"><span>A05 · 2 人</span><span class="tag ok">已入座</span></div>
+            <div class="stat-line"><span>A06 · 4 人</span><span class="tag ok">已入座</span></div>
+            <div class="stat-line"><span>A07 · 3 人</span><span class="tag warn">就座中</span></div>
+            <div class="stat-line"><span>A08 · 2 人</span><span style="color:var(--red);font-weight:800">叫号中</span></div>
+            <div class="stat-line"><span>A09 · 4 人</span><span style="color:var(--sub)">等位 ~10 分</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>候餐服务</div></div>
+            <div class="stat-line"><span>已发茶水</span><span><b>4 杯</b></span></div>
+            <div class="stat-line"><span>已发小食</span><span><b>2 份</b> · 拌花生</span></div>
+            <div class="stat-line"><span>等位流失预警</span><span class="tag warn">0 单</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="bk-turn">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>翻台预估 · 下一时段</div></div>
+            <div class="sum-banner" style="margin-bottom:10px"><div class="sb-lab">平均翻台时长</div><div class="sb-val" style="color:var(--green)">~10 分钟</div><div class="sb-delta up">优于昨日 2 分</div></div>
+            <div class="stat-line"><span>大桌 (4-6人)</span><span><b>~12 分钟</b></span></div>
+            <div class="stat-line"><span>中桌 (2-3人)</span><span><b>~8 分钟</b></span></div>
+            <div class="stat-line"><span>包间</span><span><b>~15 分钟</b></span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>时段占用预估</div></div>
+            <div class="bar-mini"><i style="height:30%"></i><i style="height:60%"></i><i style="height:90%"></i><i style="height:75%"></i><i style="height:50%"></i><i style="height:40%"></i><i style="height:80%"></i><i style="height:95%"></i></div>
+            <div class="legend"><span>11</span><span>12</span><span>13</span><span>14</span><span>17</span><span>18</span><span>19</span><span>20</span></div>
+            <div class="note" style="margin-top:8px">晚峰 18:30–19:30 占用率峰值 95%，建议加排 1 人服务。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 7：食安证照 ============ -->
+      <section class="screen-body hide" id="p-m-foodsafe">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">食安证照</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增留样',desc:'登记菜品 / 克重 / 留样时间，48h 到期自动提醒',actionType:'foodsafe.sample',confirmLabel:'登记留样'})">+ 留样</div></div>
+        <div class="pill-grp" id="fs-pills"><div class="pill on" data-sp="fs-cert">证照</div><div class="pill" data-sp="fs-trace">溯源</div><div class="pill" data-sp="fs-sample">留样</div><div class="pill" data-sp="fs-disinfect">消毒</div></div>
+
+        <div class="sub-page on" id="fs-cert">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>证照台账</div><span class="badge">3</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">健康证 · 王师傅</div><div class="ds">2026-10-22 到期 · 剩 28 天</div></div><span class="tag warn">待体检</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">健康证 · 张师傅</div><div class="ds">2026-10-19 到期 · 剩 25 天</div></div><span class="tag warn">待体检</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">健康证 · 钱收银</div><div class="ds">2026-10-15 到期 · 剩 21 天</div></div><span class="tag warn">待体检</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>店铺证照</div></div>
+            <div class="stat-line"><span>营业执照</span><span class="tag ok">2027-12-31</span></div>
+            <div class="stat-line"><span>食品经营许可证</span><span class="tag ok">2027-06-30</span></div>
+            <div class="stat-line"><span>消防安全证</span><span class="tag ok">2028-03-15</span></div>
+            <div class="stat-line"><span>环保备案</span><span class="tag warn">2026-11-30 · 待续</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="fs-trace">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>扫码溯源</div></div>
+            <div class="photo-cap" onclick="toast('溯源请在批次列表查看 BFF 数据；扫码硬件待接')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 7h10v10H7z" stroke-linecap="round" stroke-linejoin="round"/></svg><div class="pt">扫码查批次</div><div class="pd">对准食材包装 · 查询进货批次/供应商/检验报告</div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>批次追溯 · 今日</div></div>
+            <div class="rc-row"><div class="info"><div class="ti">猪肉前肩 · 批次 B0924</div><div class="ds">供应商 张记 · 检验 09-24 合格</div></div><span class="tag ok">已溯源</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">墨鱼汁 · 批次 M0922</div><div class="ds">供应商 海南食品 · 检验 09-22 合格</div></div><span class="tag ok">已溯源</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">火龙果汁 · 批次 H0923</div><div class="ds">供应商 菜篮子 · 检验 09-23 合格</div></div><span class="tag ok">已溯源</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="fs-sample">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>留样记录 · 48h</div><div class="more">今日</div></div>
+            <div class="rc-row"><div class="info"><div class="ti">红色·长寿饺</div><div class="ds">留样 125g · 今日 11:30 · 48h 到期</div></div><span class="tag ok">留样</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">黑色·三鲜饺</div><div class="ds">留样 130g · 今日 11:35 · 48h 到期</div></div><span class="tag ok">留样</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">御膳狮子头</div><div class="ds">留样 200g · 今日 12:00 · 48h 到期</div></div><span class="tag ok">留样</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>留样拍照 · Kimi</div><div class="more" onclick="toast('留样 SOP 文档即将上线')">SOP</div></div>
+            <div class="photo-cap" onclick="mockScan(this,'sample')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h4l2-2h6l2 2h4v12H3z" stroke-linejoin="round"/><path d="M9 13l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg><div class="pt">留样登记拍照</div><div class="pd">对准留样盒 · Kimi 识别菜品/克重/标签/48h 到期</div></div>
+            <div class="kimi-card" id="kimiSample" style="display:none"></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="fs-disinfect">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>消毒记录 · 今日</div></div>
+            <div class="stat-line"><span>餐具消毒柜</span><span class="tag ok">09:30 已完成</span></div>
+            <div class="stat-line"><span>砧板刀具</span><span class="tag ok">10:00 已消毒</span></div>
+            <div class="stat-line"><span>操作台紫外线</span><span class="tag ok">昨晚 22:00</span></div>
+            <div class="stat-line"><span>餐厅地面</span><span class="tag warn">待执行 · 14:00</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>消毒达标率 · 7日</div></div>
+            <svg class="spark" viewBox="0 0 320 50" preserveAspectRatio="none"><path d="M0,18 L45,16 L90,14 L135,12 L180,10 L225,8 L270,7 L320,6" fill="none" stroke="#5BA85B" stroke-width="2.2"/></svg>
+            <div class="legend"><span><i style="background:#5BA85B"></i>达标率 100% 持续</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 8：设备能耗 ============ -->
+      <section class="screen-body hide" id="p-m-equipment">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">设备能耗</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'设备报修',desc:'选择设备与故障描述，生成维修工单并通知维保商',actionType:'equipment.repair',confirmLabel:'提交报修'})">+ 报修</div></div>
+        <div class="pill-grp" id="eq-pills"><div class="pill on" data-sp="eq-temp">温度</div><div class="pill" data-sp="eq-energy">能耗</div><div class="pill" data-sp="eq-maintain">维保</div></div>
+
+        <div class="sub-page on" id="eq-temp">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>冷柜温度 · 实时</div><span class="fresh"><i class="dot"></i>09:24</span></div>
+            <div class="stat-line"><span>冷柜 A (冷藏)</span><span class="tag ok">4.2℃</span></div>
+            <div class="stat-line"><span>冷柜 B (冷冻)</span><span class="tag danger">7.2℃ · 超温</span></div>
+            <div class="stat-line"><span>冷柜 C (蔬菜)</span><span class="tag ok">3.8℃</span></div>
+            <div class="alert" onclick="goEqMaintain()"><div class="st" style="background:#E8584A"></div><div class="ct"><div class="t2">冷柜 B 超温 18 分钟</div><div class="d2">应 ≤5℃ · 当前 7.2℃ · 请立即核查</div></div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>冷柜 B 温度曲线</div></div>
+            <svg class="spark" viewBox="0 0 320 50" preserveAspectRatio="none"><path d="M0,30 L40,28 L80,26 L120,22 L160,18 L200,12 L240,8 L280,6 L320,5" fill="none" stroke="#E8584A" stroke-width="2.2"/></svg>
+            <div class="legend"><span><i style="background:#E8584A"></i>超温上升 · 已 18 分钟</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="eq-energy">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>本月能耗费用</div><div class="more">09月</div></div>
+            <div class="fb-row"><div class="lb">燃气</div><div class="fb-bar"><i style="width:75%;background:linear-gradient(90deg,#F2B233,#E8920C)"></i></div><div class="vl">¥2,180</div></div>
+            <div class="fb-row"><div class="lb">水</div><div class="fb-bar"><i style="width:30%;background:linear-gradient(90deg,#87CEEB,#3A6EA5)"></i></div><div class="vl">¥320</div></div>
+            <div class="fb-row"><div class="lb">电</div><div class="fb-bar"><i style="width:62%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl">¥1,680</div></div>
+            <div class="fb-row"><div class="lb">合计</div><div class="fb-bar"><i style="width:80%;background:linear-gradient(90deg,#5BA85B,#3a8a3a)"></i></div><div class="vl">¥4,180</div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>同比环比</div></div>
+            <div class="stat-line"><span>能耗费用同比</span><span class="down">+6.2%</span></div>
+            <div class="stat-line"><span>能耗费用环比</span><span class="up">-3.1%</span></div>
+            <div class="stat-line"><span>营收能耗比</span><span style="color:var(--sub)">4.8% · 行业 5.5%</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="eq-maintain">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>设备维保到期</div><span class="badge">1</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">中央空调 · 滤网清洗</div><div class="ds">建议周期 30 天 · 已 32 天</div></div><span class="tag warn">待维保</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">抽油烟机 · 深度清洁</div><div class="ds">建议周期 90 天 · 已 45 天</div></div><span class="tag ok">正常</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">冷柜 B · 压缩机</div><div class="ds">建议周期 180 天 · 已 90 天</div></div><span class="tag ok">正常</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">蒸饭车 · 密封圈</div><div class="ds">建议周期 60 天 · 已 30 天</div></div><span class="tag ok">正常</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 9：财务税务 ============ -->
+      <section class="screen-body hide" id="p-m-finance">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">财务税务</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'手动入账',desc:'录入收支条目（金额 / 类别 / 凭证），进入财务待审队列后入账',actionType:'finance.entry',confirmLabel:'提交入账'})">+ 入账</div></div>
+        <div class="pill-grp" id="fin-pills"><div class="pill on" data-sp="fin-invoice">发票</div><div class="pill" data-sp="fin-tax">税务</div><div class="pill" data-sp="fin-cash">现金流</div><div class="pill" data-sp="fin-split">分账</div></div>
+
+        <div class="sub-page on" id="fin-invoice">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>发票额度</div></div>
+            <div class="fb-row"><div class="lb">额度</div><div class="fb-bar"><i style="width:100%;background:#ECEEF2"></i></div><div class="vl">¥50,000</div></div>
+            <div class="fb-row"><div class="lb">已开</div><div class="fb-bar"><i style="width:36%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl">¥18,200</div></div>
+            <div class="fb-row"><div class="lb">剩余</div><div class="fb-bar"><i style="width:64%;background:linear-gradient(90deg,#5BA85B,#3a8a3a)"></i></div><div class="vl up">¥31,800</div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>近期开票</div></div>
+            <div class="rc-row"><div class="info"><div class="ti">¥2,180 · 供应商张记</div><div class="ds">进项票 · 09-22 · 已认证</div></div><span class="tag ok">已入账</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">¥680 · 会员充值</div><div class="ds">销项票 · 09-23</div></div><span class="tag ok">已开</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="fin-tax">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>税务预估 · 本月</div></div>
+            <div class="stat-line"><span>营业额</span><span><b>¥186,000</b></span></div>
+            <div class="stat-line"><span>增值税 (3% 简易)</span><span><b>¥5,580</b></span></div>
+            <div class="stat-line"><span>城建附加 (12%)</span><span><b>¥670</b></span></div>
+            <div class="stat-line"><span>个人所得税</span><span><b>¥2,400</b></span></div>
+            <div class="stat-line"><span>合计应缴</span><span style="color:var(--red);font-weight:800">¥8,650</span></div>
+            <div class="note" style="margin-top:8px">⚠ 税务预估仅供参考，最终以税务机关核定为准。</div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="fin-cash">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>现金流 · 本周</div></div>
+            <div class="fb-row"><div class="lb">收入</div><div class="fb-bar"><i style="width:78%;background:linear-gradient(90deg,#5BA85B,#3a8a3a)"></i></div><div class="vl up">¥58,210</div></div>
+            <div class="fb-row"><div class="lb">支出</div><div class="fb-bar"><i style="width:52%;background:linear-gradient(90deg,#E8584A,#a83028)"></i></div><div class="vl down">¥38,640</div></div>
+            <div class="fb-row"><div class="lb">净流</div><div class="fb-bar"><i style="width:34%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl up">+¥19,570</div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>主要支出 · 本周</div></div>
+            <div class="stat-line"><span>食材采购</span><span><b>¥22,180</b> · 57%</span></div>
+            <div class="stat-line"><span>员工薪资</span><span><b>¥12,400</b> · 32%</span></div>
+            <div class="stat-line"><span>水电燃气</span><span><b>¥1,860</b> · 5%</span></div>
+            <div class="stat-line"><span>租金分摊</span><span><b>¥2,200</b> · 6%</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="fin-split">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>股东分账</div></div>
+            <div class="donut-wrap">
+              <div class="donut" style="background:conic-gradient(#9B6BBF 0 60%,#F48FB1 60% 100%)"><div class="hole"><div class="pct">2人</div><div class="lb">股东</div></div></div>
+              <div class="donut-leg">
+                <div class="li"><span><i style="background:#9B6BBF"></i>宋师傅 60%</span></div>
+                <div class="li"><span><i style="background:#F48FB1"></i>合伙人 40%</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>本月可分利润</div></div>
+            <div class="stat-line"><span>净利润</span><span><b>¥28,400</b></span></div>
+            <div class="stat-line"><span>宋师傅 60%</span><span class="up">¥17,040</span></div>
+            <div class="stat-line"><span>合伙人 40%</span><span class="up">¥11,360</span></div>
+            <div class="note" style="margin-top:8px">⚠ 结算单只读输出层，不写 DB；分账需人工确认 + 签字后入账。</div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>结算单审批</div><div class="more" onclick="openSheet('confirm',{kind:'settlement',vendor:'张记',amount:2180})">详情</div></div>
+            <div class="rc-row"><div class="info"><div class="ti">供应商张记 · 结算 ¥2,180</div><div class="ds">对账一致 · 待老板审批</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'settlement',vendor:'张记',amount:2180})">审批</button></div>
+            <div class="rc-row"><div class="info"><div class="ti">员工薪资 · ¥12,400</div><div class="ds">9月工资 · 待发放</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'salary',month:'2026年9月',count:6,total:12400})">审批</button></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 10：供应链 ============ -->
+      <section class="screen-body hide" id="p-m-supply">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">供应链</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'发起询价',desc:'选择原料向已建档供应商群发询价，回报后自动比价',actionType:'supply.inquiry',confirmLabel:'发起询价'})">+ 询价</div></div>
+        <div class="pill-grp" id="sup-pills"><div class="pill on" data-sp="sup-vendor">供应商</div><div class="pill" data-sp="sup-compare">比价</div><div class="pill" data-sp="sup-account">账期</div></div>
+
+        <div class="sub-page on" id="sup-vendor">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>供应商档案</div><div class="more">6 家</div></div>
+            <div class="rc-row"><div class="info"><div class="ti">张记肉业</div><div class="ds">猪前肩 · 月供 ¥8,200</div></div><span class="stars">★★★★<span class="e">★</span></span></div>
+            <div class="rc-row"><div class="info"><div class="ti">菜篮子生鲜</div><div class="ds">蔬菜 · 月供 ¥4,600</div></div><span class="stars">★★★★<span class="e">★</span></span></div>
+            <div class="rc-row"><div class="info"><div class="ti">海南食品</div><div class="ds">墨鱼汁/海鲜 · 月供 ¥2,180</div></div><span class="stars">★★★<span class="e">★★</span></span></div>
+            <div class="rc-row"><div class="info"><div class="ti">五得利面粉</div><div class="ds">雪花粉八星 · 月供 ¥3,200</div></div><span class="stars">★★★★<span class="e">★</span></span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="sup-compare">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>墨鱼汁比价 · 本周</div></div>
+            <div class="kv"><span>海南食品 (现供)</span><b>¥86/kg</b></div>
+            <div class="kv"><span>广州海味</span><b>¥82/kg</b></div>
+            <div class="kv"><span>青岛水产</span><b>¥88/kg</b></div>
+            <div class="note" style="margin-top:8px">建议：广州海味低 ¥4/kg，但需起订 5kg；当前月用 3kg，建议询组合价。AI 仅建议，不自动切换供应商。</div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>价格波动 · 4周</div></div>
+            <svg class="spark" viewBox="0 0 320 50" preserveAspectRatio="none"><path d="M0,30 L80,28 L160,22 L240,18 L320,14" fill="none" stroke="#E8584A" stroke-width="2.2"/><path d="M0,40 L80,38 L160,36 L240,34 L320,32" fill="none" stroke="#C9CDD4" stroke-width="1.8" stroke-dasharray="3,3"/></svg>
+            <div class="legend"><span><i style="background:#E8584A"></i>墨鱼汁 ↑8%</span><span><i style="background:#C9CDD4"></i>猪前肩 持平</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="sup-account">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>合同账期</div></div>
+            <div class="stat-line"><span>张记肉业</span><span>月结 30 天</span></div>
+            <div class="stat-line"><span>菜篮子生鲜</span><span>周结 7 天</span></div>
+            <div class="stat-line"><span>海南食品</span><span>月结 45 天</span></div>
+            <div class="stat-line"><span>五得利面粉</span><span>月结 30 天</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>应付账龄</div></div>
+            <div class="fb-row"><div class="lb">0-30 天</div><div class="fb-bar"><i style="width:70%;background:linear-gradient(90deg,#5BA85B,#3a8a3a)"></i></div><div class="vl">¥6,200</div></div>
+            <div class="fb-row"><div class="lb">31-60 天</div><div class="fb-bar"><i style="width:30%;background:linear-gradient(90deg,#F2B233,#E8920C)"></i></div><div class="vl">¥2,180</div></div>
+            <div class="fb-row"><div class="lb">逾期</div><div class="fb-bar"><i style="width:5%;background:linear-gradient(90deg,#E8584A,#a83028)"></i></div><div class="vl">¥0</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 11：顾客口碑 ============ -->
+      <section class="screen-body hide" id="p-m-review">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">顾客口碑</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'回复评价',desc:'选择平台评价并提交回复，差评优先 24h 内处理',actionType:'review.reply',confirmLabel:'提交回复'})">+ 回复</div></div>
+        <div class="pill-grp" id="rv-pills"><div class="pill on" data-sp="rv-score">评分</div><div class="pill" data-sp="rv-improve">差评改进</div><div class="pill" data-sp="rv-good">好评语录</div></div>
+
+        <div class="sub-page on" id="rv-score">
+          <div class="sum-banner"><div class="sb-lab">多平台聚合评分</div><div class="sb-val">4.6 <small>/5.0</small></div><div class="sb-delta up">↑ 0.1 vs 上周</div></div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>平台评分</div></div>
+            <div class="stat-line"><span>美团</span><span><b>4.6</b> · 386 条</span></div>
+            <div class="stat-line"><span>饿了么</span><span><b>4.4</b> · 220 条</span></div>
+            <div class="stat-line"><span>抖音</span><span><b>4.5</b> · 96 条</span></div>
+            <div class="stat-line"><span>大众点评</span><span><b>4.7</b> · 158 条</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>评分趋势 · 4周</div></div>
+            <svg class="spark" viewBox="0 0 320 50" preserveAspectRatio="none"><path d="M0,32 L80,28 L160,24 L240,18 L320,12" fill="none" stroke="#5BA85B" stroke-width="2.4"/></svg>
+            <div class="legend"><span><i style="background:#5BA85B"></i>聚合评分 ↑ 持续上升</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="rv-improve">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>差评改进闭环</div><span class="badge">2</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">"出餐慢" · 美团 #MT-0923-51</div><div class="ds">原因：午峰并发 · 已加备料 · 状态：改进中</div></div><span class="tag warn">跟进</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">"饺子偏咸" · 大众点评</div><div class="ds">原因：食盐用量 · 已调整至 14g · 状态：已闭环</div></div><span class="tag ok">已闭环</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>改进措施</div></div>
+            <div class="stat-line"><span>出餐慢 · 午峰</span><span class="tag ok">+ 备半成品</span></div>
+            <div class="stat-line"><span>偏咸 · 食盐</span><span class="tag ok">15g→14g</span></div>
+            <div class="stat-line"><span>摆盘不齐</span><span class="tag warn">培训中</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="rv-good">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>好评精选 · 本周</div></div>
+            <div class="note" style="background:#F8F9FB;border-left:3px solid #5BA85B">"红色长寿饺是非遗的味道，褶纹漂亮，馅料扎实，下次带朋友来。" — 美团用户 09-22</div>
+            <div class="note" style="background:#F8F9FB;border-left:3px solid #5BA85B;margin-top:8px">"御膳狮子头入口即化，三肥七瘦比例刚好，不愧是宫廷菜传承。" — 大众点评 09-21</div>
+            <div class="note" style="background:#F8F9FB;border-left:3px solid #5BA85B;margin-top:8px">"五福寓意好，带爸妈来吃的团圆白饺，老人很喜欢，服务也周到。" — 抖音 09-20</div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>好评关键词</div></div>
+            <div class="toggle-row"><span class="tg on">非遗</span><span class="tg on">褶纹规整</span><span class="tg on">宫廷味</span><span class="tg">服务好</span><span class="tg">寓意好</span><span class="tg">分量足</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 模块 12：损耗报损 ============ -->
+      <section class="screen-body hide" id="p-m-loss">
+        <div class="mod-head"><div class="back" onclick="backMore()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="crumb"><span class="b1" onclick="backMore()">更多</span><span class="sep">›</span><span class="b2">损耗报损</span></div><div class="ma" onclick="openSheet('confirm',{kind:'generic',title:'新增报损',desc:'录入报损原料 / 数量 / 金额 / 原因并附照片，店长审批后入账',actionType:'loss.report',confirmLabel:'提交报损'})">+ 报损</div></div>
+        <div class="pill-grp" id="ls-pills"><div class="pill on" data-sp="ls-analysis">损耗分析</div><div class="pill" data-sp="ls-report">报损单</div><div class="pill" data-sp="ls-inventory">盘点差异</div></div>
+
+        <div class="sub-page on" id="ls-analysis">
+          <div class="sum-banner"><div class="sb-lab">本月损耗</div><div class="sb-val">¥1,820 <small>· 0.9%</small></div><div class="sb-delta up">↓ 0.2pct vs 上月</div></div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>按原料损耗</div></div>
+            <div class="fb-row"><div class="lb">猪肉前肩</div><div class="fb-bar"><i style="width:65%;background:linear-gradient(90deg,#E8584A,#a83028)"></i></div><div class="vl">¥780</div></div>
+            <div class="fb-row"><div class="lb">墨鱼汁</div><div class="fb-bar"><i style="width:42%;background:linear-gradient(90deg,#9B6BBF,#7a5aa3)"></i></div><div class="vl">¥420</div></div>
+            <div class="fb-row"><div class="lb">火龙果汁</div><div class="fb-bar"><i style="width:30%;background:linear-gradient(90deg,#F48FB1,#9B6BBF)"></i></div><div class="vl">¥320</div></div>
+            <div class="fb-row"><div class="lb">蔬菜类</div><div class="fb-bar"><i style="width:22%;background:linear-gradient(90deg,#5BA85B,#3a8a3a)"></i></div><div class="vl">¥300</div></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>损耗原因</div></div>
+            <div class="donut-wrap">
+              <div class="donut" style="background:conic-gradient(#E8584A 0 48%,#F2B233 48% 76%,#9B6BBF 76% 100%)"><div class="hole"><div class="pct">¥1.8k</div><div class="lb">月损耗</div></div></div>
+              <div class="donut-leg">
+                <div class="li"><span><i style="background:#E8584A"></i>过期 48%</span></div>
+                <div class="li"><span><i style="background:#F2B233"></i>制作损耗 28%</span></div>
+                <div class="li"><span><i style="background:#9B6BBF"></i>运输破损 24%</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="ls-report">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>报损录入</div></div>
+            <div class="ask-bar"><div class="ask"><input placeholder="报损原因 / 数量 / 金额…"><button class="send" onclick="bossConfirmAction('loss.report',{from:'loss'},'已提交报损')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
+            <div class="note" style="margin-top:8px">报损单需附照片/原因，经店长审批后入账。</div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>报损单审批</div><span class="badge">1</span></div>
+            <div class="rc-row"><div class="info"><div class="ti">墨鱼汁 · 过期 200g</div><div class="ds">原因：冷藏超温 · 金额 ¥86</div></div><button class="pbtn" onclick="openSheet('confirm',{kind:'generic',title:'报损审批 · 墨鱼汁',desc:'过期 200g · 原因：冷藏超温 · 金额 ¥86，审批后计入本月损耗',actionType:'loss.approve',confirmLabel:'审批通过'})">审批</button></div>
+            <div class="rc-row"><div class="info"><div class="ti">蔬菜 · 萎蔫 1.2kg</div><div class="ds">原因：未及时使用 · 金额 ¥24</div></div><span class="tag ok">已审批</span></div>
+          </div>
+        </div>
+
+        <div class="sub-page" id="ls-inventory">
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>盘点差异 · 昨日</div></div>
+            <div class="stat-line"><span>猪前肩 · 盘亏</span><span class="down">-0.4 kg · ¥16</span></div>
+            <div class="stat-line"><span>墨鱼汁 · 盘亏</span><span class="down">-50g · ¥4.3</span></div>
+            <div class="stat-line"><span>雪花粉 · 盘盈</span><span class="up">+0.8 kg · ¥12</span></div>
+            <div class="stat-line"><span>火龙果汁 · 一致</span><span class="tag ok">0 差异</span></div>
+          </div>
+          <div class="card">
+            <div class="card-h"><div class="ttl"><i class="em"></i>差异分析</div></div>
+            <div class="stat-line"><span>盘亏主因</span><span style="color:var(--sub)">分份误差 + 损耗</span></div>
+            <div class="stat-line"><span>盘盈主因</span><span style="color:var(--sub)">入库多送</span></div>
+            <div class="stat-line"><span>建议</span><span style="color:var(--sub)">加强分份规范 + 入库复核</span></div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /app -->
+
+    <!-- ============ 底部抽屉 ============ -->
+    <div class="sheet-mask" id="sheetMask" onclick="closeSheet()"></div>
+    <div class="sheet" id="sheet">
+      <div class="grab"></div>
+      <div class="sheet-h"><div class="ti" id="sheetTitle">详情</div><div class="x" onclick="closeSheet()">×</div></div>
+      <div class="sheet-body" id="sheetContent"></div>
+    </div>
+
+    <!-- ============ Tab Bar ============ -->
+    <div class="tabbar">
+      <div class="tab on" data-p="home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9M5 10v10h14V10" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="lb">简报</span>
+      </div>
+      <div class="tab" data-p="inventory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v4H3zM5 7v14h14V7M9 11h6" stroke-linecap="round"/></svg>
+        <span class="lb">进销</span>
+      </div>
+      <div class="tab ai-fab" data-p="chat">
+        <img class="panda-logo" src="" alt="AI">
+      </div>
+      <div class="tab" data-p="kitchen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h4l2-2h6l2 2h4v12H3z" stroke-linejoin="round"/><path d="M9 13l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="lb">厨房</span>
+      </div>
+      <div class="tab" data-p="more">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+        <span class="lb">更多</span>
+      </div>
+    </div>
+    <div class="home-indicator"></div>
+  </div><!-- /screen -->
+</div><!-- /phone -->
+<script type="module" src="/src/main.js"></script>
+<script defer src="/app.js"></script>
+</body>
+</html>

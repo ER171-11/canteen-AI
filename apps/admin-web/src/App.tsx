@@ -5,12 +5,28 @@ import MainLayout from './layouts/MainLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import ActionsPage from './pages/ActionsPage'
+import OrgPage from './pages/OrgPage'
+import ModuleBrowsePage from './pages/ModuleBrowsePage'
 import PlaceholderPage from './pages/PlaceholderPage'
+import SystemConfigPage from './pages/SystemConfigPage'
 import DishesPage from './pages/kitchen/DishesPage'
 import RecipesPage from './pages/kitchen/RecipesPage'
 import SopPage from './pages/kitchen/SopPage'
 import WorkorderPage from './pages/kitchen/WorkorderPage'
 import QcPage from './pages/kitchen/QcPage'
+import StockPage from './pages/inventory/StockPage'
+import PurchasePage from './pages/inventory/PurchasePage'
+import InboundPage from './pages/inventory/InboundPage'
+import VendorsPage from './pages/inventory/VendorsPage'
+import LedgerPage from './pages/inventory/LedgerPage'
+import RestockPage from './pages/inventory/RestockPage'
+import TablesPage from './pages/dinein/TablesPage'
+import BookingPage from './pages/dinein/BookingPage'
+import SchedulePage from './pages/hr/SchedulePage'
+import AttendancePage from './pages/hr/AttendancePage'
+import PerformancePage from './pages/hr/PerformancePage'
+import LicensesPage from './pages/safety/LicensesPage'
+import TracePage from './pages/safety/TracePage'
 
 /** 路由守卫：未登录跳 /login */
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -40,7 +56,10 @@ export default function App() {
         >
           <Route index element={<HomeRedirect />} />
           <Route path="dashboard" element={<DashboardPage />} />
+          <Route path="ops/analysis" element={<ModuleBrowsePage routeKey="ops/analysis" />} />
           <Route path="platform/actions" element={<ActionsPage />} />
+          <Route path="platform/org" element={<OrgPage />} />
+          <Route path="platform/system" element={<SystemConfigPage />} />
 
           {/* 菜品厨房 */}
           <Route path="kitchen/dishes" element={<DishesPage />} />
@@ -50,49 +69,52 @@ export default function App() {
           <Route path="kitchen/qc" element={<QcPage />} />
 
           {/* 进销存 */}
-          <Route path="inventory/stock" element={<PlaceholderPage title="原料库存" />} />
-          <Route path="inventory/purchase" element={<PlaceholderPage title="采购单" />} />
-          <Route path="inventory/inbound" element={<PlaceholderPage title="入库单" />} />
-          <Route path="inventory/vendors" element={<PlaceholderPage title="供应商比价" />} />
+          <Route path="inventory/stock" element={<StockPage />} />
+          <Route path="inventory/purchase" element={<PurchasePage />} />
+          <Route path="inventory/inbound" element={<InboundPage />} />
+          <Route path="inventory/ledger" element={<LedgerPage />} />
+          <Route path="inventory/restock" element={<RestockPage />} />
+          <Route path="inventory/vendors" element={<VendorsPage />} />
+          <Route path="inventory/loss" element={<ModuleBrowsePage routeKey="inventory/loss" />} />
 
           {/* 堂食外卖 */}
-          <Route path="dinein/tables" element={<PlaceholderPage title="桌台管理" />} />
-          <Route path="dinein/orders" element={<PlaceholderPage title="订单查询" />} />
-          <Route path="dinein/delivery" element={<PlaceholderPage title="外卖对账" />} />
-          <Route path="dinein/reviews" element={<PlaceholderPage title="差评管理" />} />
+          <Route path="dinein/tables" element={<TablesPage />} />
+          <Route path="dinein/booking" element={<BookingPage />} />
+          <Route path="dinein/orders" element={<ModuleBrowsePage routeKey="dinein/orders" />} />
+          <Route path="dinein/delivery" element={<ModuleBrowsePage routeKey="dinein/delivery" />} />
+          <Route path="dinein/reviews" element={<ModuleBrowsePage routeKey="dinein/reviews" />} />
 
           {/* 会员营销 */}
-          <Route path="member/list" element={<PlaceholderPage title="会员列表" />} />
-          <Route path="member/stored" element={<PlaceholderPage title="储值" />} />
-          <Route path="member/coupons" element={<PlaceholderPage title="优惠券" />} />
-          <Route path="member/birthday" element={<PlaceholderPage title="生日营销" />} />
+          <Route path="member/list" element={<ModuleBrowsePage routeKey="member/list" />} />
+          <Route path="member/stored" element={<ModuleBrowsePage routeKey="member/stored" />} />
+          <Route path="member/coupons" element={<ModuleBrowsePage routeKey="member/coupons" />} />
+          <Route path="member/birthday" element={<ModuleBrowsePage routeKey="member/birthday" />} />
 
           {/* 人员 */}
-          <Route path="hr/staff" element={<PlaceholderPage title="员工档案" />} />
-          <Route path="hr/schedule" element={<PlaceholderPage title="排班" />} />
-          <Route path="hr/attendance" element={<PlaceholderPage title="打卡" />} />
-          <Route path="hr/performance" element={<PlaceholderPage title="绩效" />} />
-          <Route path="hr/health-cert" element={<PlaceholderPage title="健康证" />} />
+          <Route path="hr/staff" element={<ModuleBrowsePage routeKey="hr/staff" />} />
+          <Route path="hr/schedule" element={<SchedulePage />} />
+          <Route path="hr/attendance" element={<AttendancePage />} />
+          <Route path="hr/performance" element={<PerformancePage />} />
+          <Route path="hr/health-cert" element={<ModuleBrowsePage routeKey="hr/health-cert" />} />
 
           {/* 食安设备 */}
-          <Route path="safety/licenses" element={<PlaceholderPage title="证照" />} />
-          <Route path="safety/trace" element={<PlaceholderPage title="溯源批次" />} />
-          <Route path="safety/sample" element={<PlaceholderPage title="留样消毒" />} />
-          <Route path="safety/devices" element={<PlaceholderPage title="设备温度能耗" />} />
+          <Route path="safety/licenses" element={<LicensesPage />} />
+          <Route path="safety/trace" element={<TracePage />} />
+          <Route path="safety/sample" element={<ModuleBrowsePage routeKey="safety/sample" />} />
+          <Route path="safety/devices" element={<ModuleBrowsePage routeKey="safety/devices" />} />
 
           {/* 财务 */}
-          <Route path="finance/invoice" element={<PlaceholderPage title="发票" />} />
-          <Route path="finance/tax" element={<PlaceholderPage title="税务" />} />
-          <Route path="finance/cashflow" element={<PlaceholderPage title="现金流" />} />
-          <Route path="finance/split" element={<PlaceholderPage title="分账审批" />} />
+          <Route path="finance/invoice" element={<ModuleBrowsePage routeKey="finance/invoice" />} />
+          <Route path="finance/tax" element={<ModuleBrowsePage routeKey="finance/tax" />} />
+          <Route path="finance/cashflow" element={<ModuleBrowsePage routeKey="finance/cashflow" />} />
+          <Route path="finance/split" element={<ModuleBrowsePage routeKey="finance/split" />} />
 
           {/* 平台 */}
-          <Route path="platform/ai-audit" element={<PlaceholderPage title="AI审计" />} />
-          <Route path="platform/system" element={<PlaceholderPage title="系统管理" />} />
-          <Route path="platform/audit-log" element={<PlaceholderPage title="审计日志" />} />
+          <Route path="platform/ai-audit" element={<ModuleBrowsePage routeKey="platform/ai-audit" />} />
+          <Route path="platform/audit-log" element={<ModuleBrowsePage routeKey="platform/audit-log" />} />
 
-          {/* 兜底：不留 404 空白 */}
-          <Route path="*" element={<PlaceholderPage title="页面建设中" />} />
+          {/* 未知路由回看板，不再展示建设中 */}
+          <Route path="*" element={<PlaceholderPage title="" />} />
         </Route>
       </Routes>
     </BrowserRouter>
