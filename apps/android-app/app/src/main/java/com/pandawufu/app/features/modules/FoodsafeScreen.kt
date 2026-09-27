@@ -74,8 +74,14 @@ fun FoodsafeScreen() {
                     val list = fs?.samples.orEmpty()
                     if (list.isEmpty()) Text("暂无留样 · 点上方登记", color = Sub, fontSize = 12.sp)
                     list.take(12).forEach { s ->
-                        val left = s.hoursLeft?.let { "${it}h" } ?: "-"
-                        KvRow("${s.date ?: "-"} ${s.dish ?: "-"}", "余 $left · ${s.keeper ?: ""}")
+                        // 留样状态：已清样 / 已过期 / 剩余 N 小时 / 时间缺失
+                        val left = when {
+                            s.cleared == true -> "已清样"
+                            s.expired == true -> "已过期"
+                            s.hoursLeft != null -> "余 ${s.hoursLeft}h"
+                            else -> "取样时间缺失"
+                        }
+                        KvRow("${s.date ?: "-"} ${s.dish ?: "-"}", "$left · ${s.keeper ?: ""}")
                     }
                 }
             }

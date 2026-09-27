@@ -30,6 +30,10 @@ data class RestockSuggestItemDto(
     @SerialName("suggestQty") val suggestQty: Double = 0.0,
     val daily: Double? = null,
     @SerialName("daysLeft") val daysLeft: Double? = null,
+    /** 原料移动加权均价（采购单单价预填，无报价时兜底） */
+    val avg: Double? = null,
+    /** 最近一次采购价（无均价时兜底） */
+    val last: Double? = null,
     val reason: String = "",
     val source: String? = null,
     val urgency: String? = null,

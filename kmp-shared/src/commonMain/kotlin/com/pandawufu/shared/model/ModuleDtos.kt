@@ -161,7 +161,11 @@ data class FsSampleDto(
     @SerialName("weight_g") val weightG: Double? = null,
     val keeper: String? = null,
     @SerialName("kept_at") val keptAt: String? = null,
-    @SerialName("hours_left") val hoursLeft: Double? = null
+    @SerialName("hours_left") val hoursLeft: Double? = null,
+    /** 已清样（cleared_at 有值）：不再倒计时 */
+    val cleared: Boolean? = null,
+    /** 已超 48h 留样时限 */
+    val expired: Boolean? = null
 )
 
 @Serializable
@@ -505,7 +509,11 @@ data class FinanceReconDto(
     val takeout: FinanceChannelDto? = null,
     val purchase: FinanceChannelDto? = null,
     val gap: Double? = null,
-    val confirmed: Boolean = false
+    val confirmed: Boolean = false,
+    val ts: String? = null,
+    val note: String? = null,
+    /** 最近一次已结算的勾兑（今日无数据时展示，避免空屏） */
+    val last: FinanceReconDto? = null
 )
 
 @Serializable

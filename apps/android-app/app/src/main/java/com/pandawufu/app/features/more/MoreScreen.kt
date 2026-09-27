@@ -200,12 +200,12 @@ fun MoreScreen(onOpenModule: (String) -> Unit) {
             )
         }
 
-        PandaCard {
-            CardHeader("常用快捷", more = if (favRoutes.isEmpty()) "长按可收藏" else "${favRoutes.size}")
-            val favMods = favRoutes.mapNotNull { byRoute[it] }
-            if (favMods.isEmpty()) {
-                Text("长按下方模块添加常用", fontSize = 12.sp, color = Sub)
-            } else {
+        // 常用快捷：有收藏才占位；为空时隐藏，把空间让给下方完整模块目录，
+        // 避免老板打开「我的」只见空卡片、误以为功能缺失。
+        val favMods = favRoutes.mapNotNull { byRoute[it] }
+        if (favMods.isNotEmpty()) {
+            PandaCard {
+                CardHeader("常用快捷", more = "${favRoutes.size}")
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -262,14 +262,8 @@ fun MoreScreen(onOpenModule: (String) -> Unit) {
                 }
             }
             else -> {
-                if (primary.isNotEmpty()) {
-                    PandaCard {
-                        CardHeader("今日常用", more = "${primary.size}")
-                        Text(BossIa.Mine.PRIMARY_HINT, fontSize = 11.sp, color = Sub)
-                        ModuleGrid(primary, favRoutes, { open(it) }, { toggleFav(it) })
-                    }
-                }
-
+                // 先给完整模块目录（按分组），老板打开「我的」首屏即可看到全部功能；
+                // 「今日常用」为快捷入口，移到分组之后，不遮挡目录。
                 groupOrder.forEach { g ->
                     val mods = filtered.filter { it.group == g }
                     if (mods.isEmpty()) return@forEach
@@ -277,6 +271,14 @@ fun MoreScreen(onOpenModule: (String) -> Unit) {
                         CardHeader(title = g, more = "${mods.size}")
                         Text(groupHint[g] ?: "", fontSize = 11.sp, color = Sub)
                         ModuleGrid(mods, favRoutes, { open(it) }, { toggleFav(it) })
+                    }
+                }
+
+                if (primary.isNotEmpty()) {
+                    PandaCard {
+                        CardHeader("今日常用", more = "${primary.size}")
+                        Text(BossIa.Mine.PRIMARY_HINT, fontSize = 11.sp, color = Sub)
+                        ModuleGrid(primary, favRoutes, { open(it) }, { toggleFav(it) })
                     }
                 }
             }

@@ -51,6 +51,9 @@ function buildSuggestions(snap) {
   const ings = Array.isArray(data.ings) ? data.ings : [];
   const planLines = latestPlanLines(data.plans);
   const byIng = new Map();
+  // 原料档案按 id 索引：补货建议附均价，便于 App 采购单预填单价（无报价时兜底）
+  const ingById = new Map();
+  for (const g of ings) if (g && g.id != null) ingById.set(String(g.id), g);
 
   for (const line of planLines) {
     const id = String(line.ing || line.ing_id || line.id || '');
@@ -59,6 +62,8 @@ function buildSuggestions(snap) {
     if (sug <= 0) continue;
     const cur = num(line.cur, 0);
     const planName = line.name || line.ing_name || id;
+    const planIng = ingById.get(id);
+    const planAnomaly = cur < 0;
     byIng.set(id, {
       ingredientId: id,
       name: planName,
@@ -68,11 +73,16 @@ function buildSuggestions(snap) {
       suggestQty: Math.round(sug * 100) / 100,
       daily: num(line.daily, 0),
       daysLeft: line.daily > 0 ? Math.round((cur / line.daily) * 10) / 10 : null,
-      reason: '店内补货计划 ' + (line._planNo || '') +
+      avg: planIng ? num(planIng.avg, 0) || null : null,
+      last: planIng ? num(planIng.last, 0) || null : null,
+      anomaly: planAnomaly,
+      reason: (planAnomaly ? '⚠ 账面负库存(' + cur + (line.unit || '') + ')，先盘点核实 · ' : '')
+        + '店内补货计划 ' + (line._planNo || '') +
         (line.daily ? (' · 日均 ' + line.daily + ' · 建议补 ' + sug) : (' · 建议补 ' + sug)),
       source: 'plans',
-      urgency: num(line.daily, 0) > 0 && cur / line.daily < 1 ? 'critical'
-        : num(line.daily, 0) > 0 && cur / line.daily < 2 ? 'low' : 'watch',
+      urgency: planAnomaly ? 'critical'
+        : num(line.daily, 0) > 0 && cur / line.daily < 1 ? 'critical'
+          : num(line.daily, 0) > 0 && cur / line.daily < 2 ? 'low' : 'watch',
       spec_req: specReqFor(planName, snap)
     });
   }
@@ -102,6 +112,8 @@ function buildSuggestions(snap) {
     }
     const daysTxt = daily > 0 ? ('约可撑 ' + (Math.round(daysLeft * 10) / 10) + ' 天') : '低于安全线';
     const ingName = ing.name || ing.id;
+    // 负库存=账面异常（多为漏记入库/多记出库），优先提示盘点核实，而非直接按公式补货
+    const anomaly = qty < 0;
     byIng.set(ing.id, {
       ingredientId: ing.id,
       name: ingName,
@@ -111,11 +123,15 @@ function buildSuggestions(snap) {
       suggestQty,
       daily: Math.round(daily * 100) / 100,
       daysLeft: daily > 0 ? Math.round(daysLeft * 10) / 10 : null,
-      reason: daysTxt + ' · 现 ' + qty + (ing.unit || '') +
+      avg: num(ing.avg, 0) || null,
+      last: num(ing.last, 0) || null,
+      anomaly,
+      reason: (anomaly ? '⚠ 账面负库存(' + Math.round(qty * 100) / 100 + (ing.unit || '') + ')，先盘点核实 · ' : '')
+        + daysTxt + ' · 现 ' + qty + (ing.unit || '') +
         (safety ? (' / 安全线 ' + safety) : '') +
         (daily ? (' · 日均 ' + (Math.round(daily * 100) / 100)) : ''),
       source: daily && ing.est ? 'est' : 'safety',
-      urgency,
+      urgency: anomaly ? 'critical' : urgency,
       spec_req: specReqFor(ingName, snap)
     });
   }

@@ -6,6 +6,13 @@
  */
 const { loadSnapshot } = require('./snapshot');
 
+/** 本地日期 YYYY-MM-DD（与店内/日报口径一致） */
+function todayStr() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
 function lowStock(ings) {
   const out = [];
   for (const it of ings || []) {
@@ -102,6 +109,37 @@ function answerFromSnapshot(question, snap) {
   const rev = snap && snap.rev;
   const cards = [];
 
+  // 备货/预测：用经营分析的预测引擎（营收趋势 + 建议备货），而非简单的低库存清单
+  if (/备货|备多少|预测|下周|这周|明天|明日/.test(q)) {
+    let fc = null;
+    try {
+      const byDay = {};
+      for (const r of sales) {
+        const d = String((r && (r.date || r.ts || r.time || r.created_at)) || '').slice(0, 10);
+        if (!d) continue;
+        const v = parseFloat(r && (r.amount != null ? r.amount : r.total != null ? r.total : r.revenue));
+        byDay[d] = (byDay[d] || 0) + (isNaN(v) ? 0 : v);
+      }
+      const trend = Object.keys(byDay).sort().map((d) => ({ date: d, revenue: byDay[d] }));
+      const avg = trend.length ? trend.reduce((s, t) => s + t.revenue, 0) / trend.length : null;
+      fc = require('./modules').buildForecast(snap, trend, avg != null ? { daily_avg_revenue: avg } : null);
+    } catch (e) { fc = null; }
+    if (fc && Array.isArray(fc.days) && fc.days.length) {
+      const total = fc.days.reduce((s, d) => s + (d.pred || 0), 0);
+      const top = (fc.restock || []).slice(0, 6)
+        .map((x) => `${x.name} 约${x.pred}${x.unit || ''}`).join('；');
+      const card = restockCard(low);
+      if (card) cards.push(card);
+      return {
+        answer: `快照 rev=${rev}：未来 7 日营收预测合计约 ¥${total.toFixed(0)}（含周末上浮）。`
+          + (top ? `建议备货：${top}。` : '建议备货见「进销·缺货」。')
+          + '预测≠下单，转采购须确认台。',
+        cards
+      };
+    }
+    // 预测不可用时回落到低库存清单
+  }
+
   if (/补货|断料|告急|库存|原料|备货|下周/.test(q)) {
     const card = restockCard(low);
     if (card) cards.push(card);
@@ -119,14 +157,46 @@ function answerFromSnapshot(question, snap) {
   }
 
   if (/营收|销售|订单|生意/.test(q)) {
-    const revenue = sales.reduce((s, r) => {
+    const dayOf = (r) => String((r && (r.date || r.ts || r.time || r.created_at)) || '').slice(0, 10);
+    const amountOf = (r) => {
       const v = parseFloat(r && (r.amount != null ? r.amount : r.total != null ? r.total : r.revenue));
-      return s + (isNaN(v) ? 0 : v);
-    }, 0);
+      return isNaN(v) ? 0 : v;
+    };
+    const byDay = {};
+    for (const r of sales) {
+      const d = dayOf(r);
+      if (!d) continue;
+      byDay[d] = (byDay[d] || 0) + amountOf(r);
+    }
+    const days = Object.keys(byDay).sort();
+    const latestDay = days[days.length - 1] || null;
+    const today = todayStr();
+    const asksToday = /今天|今日|当天|现在/.test(q);
+    const todayRows = sales.filter((r) => dayOf(r) === today);
+    const todayRev = todayRows.reduce((s, r) => s + amountOf(r), 0);
+    if (asksToday) {
+      if (todayRows.length) {
+        const avg = todayRev / todayRows.length;
+        return {
+          answer: `快照 rev=${rev}：今日（${today}）营收约 ¥${todayRev.toFixed(0)} · ${todayRows.length} 单 · 客单价约 ¥${avg.toFixed(1)}。`
+            + (latestDay && latestDay !== today ? `最近营业日 ${latestDay} 为 ¥${byDay[latestDay].toFixed(0)}。` : ''),
+          cards
+        };
+      }
+      if (latestDay) {
+        return {
+          answer: `快照 rev=${rev}：今日（${today}）暂无销售记录（营业后自动更新）。最近营业日 ${latestDay} 营收 ¥${byDay[latestDay].toFixed(0)}。`,
+          cards
+        };
+      }
+      return { answer: `快照 rev=${rev}：暂无销售流水（店内未推送）。`, cards };
+    }
+    const total = sales.reduce((s, r) => s + amountOf(r), 0);
     if (/打烊|日清|收工/.test(q)) cards.push(dayCloseCard(sales));
     return {
-      answer: `快照 rev=${rev}：销售流水 ${sales.length} 笔，累计金额约 ¥${revenue.toFixed(0)}` +
-        (sales.length === 0 ? '（店内暂无销售流水推送，日报可能为 mock/空）。' : '。详细分时可看简报热力。'),
+      answer: `快照 rev=${rev}：快照内销售流水共 ${sales.length} 笔、累计约 ¥${total.toFixed(0)}`
+        + (latestDay ? `；最近营业日 ${latestDay} 约 ¥${byDay[latestDay].toFixed(0)}。` : '。')
+        + '（如需「今天」，可问“今天营收怎么样”。）',
       cards
     };
   }
@@ -135,6 +205,53 @@ function answerFromSnapshot(question, snap) {
     cards.push(dayCloseCard(sales));
     return {
       answer: `快照 rev=${rev}：可登记打烊日清。流水 ${sales.length} 笔。点下方提案进确认台（AI 不自动打烊）。`,
+      cards
+    };
+  }
+
+  // 毛利：用真实成本卡（recipe_cost）按菜/色算毛利率，直接回答「哪个最低/最高」
+  if (/毛利|成本|利润|赚/.test(q) && !/工单|做|份|备料|菜单|怎么做/.test(q)) {
+    const rows = [];
+    try {
+      const costLib = require('../lib/recipe_cost');
+      const recipes = Array.isArray(snap.ext && snap.ext.recipes) ? snap.ext.recipes : [];
+      for (const r of recipes) {
+        try {
+          const card = costLib.buildCostCard(r, data);
+          if (card && card.gross_margin != null) {
+            rows.push({
+              name: r.name || r.sku_id, color: r.color || '',
+              margin: card.gross_margin, price: card.price, cost: card.portion_cost
+            });
+          }
+        } catch (e) { /* 单菜成本卡失败跳过 */ }
+      }
+    } catch (e) { /* 无成本卡库 */ }
+    if (rows.length) {
+      rows.sort((a, b) => a.margin - b.margin);
+      const low3 = rows.slice(0, 3)
+        .map((x) => `${x.name}（毛利${x.margin}%·成本¥${x.cost}/售¥${x.price}）`).join('；');
+      const best = rows[rows.length - 1];
+      return {
+        answer: `快照 rev=${rev}：按真实成本卡测算 ${rows.length} 道。毛利率最低：${low3}。`
+          + `最高：${best.name} ${best.margin}%。提价/换料可去「菜品厨房」调价（须确认台）。`,
+        cards
+      };
+    }
+    try {
+      const { computeBaobenSummary } = require('../lib/menu_baoben');
+      const s = computeBaobenSummary();
+      if (s && Array.isArray(s.types) && s.types.length) {
+        const t = s.types.slice().sort((a, b) => b.cost_rate - a.cost_rate)[0];
+        return {
+          answer: `快照 rev=${rev}：按保本价盘，成本率最高（毛利最低）的是「${t.name}」——`
+            + `成本率 ${t.cost_rate}%、毛利率约 ${(100 - t.cost_rate).toFixed(1)}%（${t.n} 道）。`,
+          cards
+        };
+      }
+    } catch (e) { /* ignore */ }
+    return {
+      answer: `快照 rev=${rev}：暂无可用成本卡（配方或原料采购价未齐），无法估算毛利。补齐菜谱与采购价后可再问。`,
       cards
     };
   }

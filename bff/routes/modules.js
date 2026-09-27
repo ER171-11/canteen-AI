@@ -40,8 +40,18 @@ function recordDay(r) {
 }
 
 /* 留样 48h 倒计时（小时，1 位小数；无 ts 返回 null） */
+/**
+ * 留样 48h 倒计时（小时，1 位小数）。
+ * 取样时间字段兼容 kept_at / keptAt / ts / time / created_at（店内表用 kept_at）。
+ * - 已清样（cleared_at 有值）：不再倒计时，返回 null（App 显示「已清样」）
+ * - 无有效取样时间：null（App 显示「—」，不误导为已到期）
+ * - 超 48h：返回负数（App 显示「已过期」）
+ */
 function hoursLeft(sample, nowMs) {
-  const ts = new Date(sample && (sample.ts || sample.time || sample.created_at)).getTime();
+  if (!sample) return null;
+  if (sample.cleared_at || sample.clearedAt) return null;
+  const raw = sample.kept_at || sample.keptAt || sample.ts || sample.time || sample.created_at;
+  const ts = new Date(raw).getTime();
   if (isNaN(ts)) return null;
   return +((48 * 3600000 - (nowMs - ts)) / 3600000).toFixed(1);
 }
@@ -355,7 +365,8 @@ function equipmentTemps(ext) {
       const hist = byDev[d];
       const last = hist[hist.length - 1] || {};
       const kind = last.kind || (/冻/.test(d) ? '冷冻' : (/蔬/.test(d) ? '蔬菜' : '冷藏'));
-      const maxDef = kind === '蔬菜' ? 8 : 5;
+      // 阈值按品类：冷冻需 ≤ -15℃（不是 5℃），蔬菜 ≤8℃，其余冷藏 ≤5℃
+      const maxDef = kind === '冷冻' ? -15 : (kind === '蔬菜' ? 8 : 5);
       const max = num(last.max != null ? last.max : last.limit, maxDef);
       return {
         device: d,
@@ -394,9 +405,9 @@ function equipmentTemps(ext) {
   }
   if (raw.length) return raw.map(withHistory);
   return [
-    withHistory({ device: '冷柜 A', kind: '冷藏', temp: 4.2, max: 5, status: 'ok' }),
-    withHistory({ device: '冷柜 B', kind: '冷冻', temp: 7.2, max: 5, status: 'over', minutes: 18 }),
-    withHistory({ device: '冷柜 C', kind: '蔬菜', temp: 3.8, max: 8, status: 'ok' })
+      withHistory({ device: '冷柜 A', kind: '冷藏', temp: 4.2, max: 5, status: 'ok' }),
+      withHistory({ device: '冷柜 B', kind: '冷冻', temp: -10.5, max: -15, status: 'over', minutes: 18 }),
+      withHistory({ device: '冷柜 C', kind: '蔬菜', temp: 3.8, max: 8, status: 'ok' })
   ];
 }
 
@@ -567,7 +578,14 @@ async function handle(req, res, ctx, pathname) {
   if (pathname === '/api/modules/foodsafe') {
     const now = Date.now();
     const samples = arr(ext.fs_samples).map((s) =>
-      Object.assign({}, s, { hours_left: hoursLeft(s, now) }));
+      Object.assign({}, s, {
+        hours_left: hoursLeft(s, now),
+        cleared: !!(s && (s.cleared_at || s.clearedAt)),
+        expired: (() => {
+          const h = hoursLeft(s, now);
+          return h != null && h <= 0;
+        })()
+      }));
     const trace = arr(ext.fs_trace).map((t) => Object.assign({}, t, {
       name: t.name || t.ing_name || t.ingName || null,
       batch: t.batch || t.batch_no || null
@@ -717,6 +735,21 @@ async function handle(req, res, ctx, pathname) {
     const cash = arr(ext.fin_cash);
     const cfg = (data.config && typeof data.config === 'object') ? data.config : {};
     const lastRecon = cfg.last_finance_recon || null;
+    // 归一化：last_finance_recon 存的是扁平金额（dine_in:6890），
+    // 统一成 {amount,count} 通道对象，与今日 recon 同形，App DTO 才能解析（否则 last 被强制 null）
+    const normChannel = (v, cntV) => (v && typeof v === 'object')
+      ? { amount: num(v.amount, 0), count: num(v.count, 0) }
+      : { amount: num(v, 0), count: num(cntV, 0) };
+    const lastNorm = lastRecon ? {
+      date: lastRecon.date || null,
+      dine_in: normChannel(lastRecon.dine_in, lastRecon.dine_in_count),
+      takeout: normChannel(lastRecon.takeout, lastRecon.takeout_count),
+      purchase: normChannel(lastRecon.purchase, lastRecon.purchase_count),
+      gap: num(lastRecon.gap, 0),
+      ts: lastRecon.ts || null,
+      note: lastRecon.note || null,
+      confirmed: true
+    } : null;
     const confirmed = !!(lastRecon && String(lastRecon.date || '') === day) ||
       cash.some((c) => {
         const kind = String((c && c.kind) || '');
@@ -736,7 +769,7 @@ async function handle(req, res, ctx, pathname) {
         purchase: { amount: +purchaseAmt.toFixed(2), count: purchaseN },
         gap,
         confirmed,
-        last: lastRecon
+        last: lastNorm
       }
     }));
     return true;

@@ -278,6 +278,12 @@ fun FrontHallScreen(onOpen: (String) -> Unit) {
         // —— 实时盘面 ——
         PandaCard {
             CardHeader("实时盘面", more = "占用 $occPct%")
+            Text(
+                "占用 =（就餐 + 预订）/ 总桌 ${tables.size} 桌 · 点击数字可去对应盘点",
+                fontSize = 11.sp,
+                color = Sub
+            )
+            Spacer(Modifier.height(6.dp))
             LinearProgressIndicator(
                 progress = { occPct / 100f },
                 modifier = Modifier

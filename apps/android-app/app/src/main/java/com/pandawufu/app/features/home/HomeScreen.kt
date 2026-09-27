@@ -279,7 +279,10 @@ fun HomeScreen(
                     ?: report?.kpi?.firstOrNull()?.value
                     ?: "—"
                 val orders = report?.kpi?.firstOrNull { it.label.contains("订单") || it.label.contains("单") }?.value
+                // 今日无销售：营收为 0（真数据）时给出友好提示，避免老板误以为系统故障
+                val noSalesToday = report?.mock != true && (parseMoneyYuan(revenue) ?: 0.0) <= 0.0
                 val bannerLab = when {
+                    noSalesToday -> "今日营收 · ${report?.date.orEmpty()} · 暂无销售".trim()
                     !report?.date.isNullOrBlank() -> "今日营收 · ${report!!.date}"
                     else -> "今日营收"
                 }
@@ -289,8 +292,76 @@ fun HomeScreen(
                     label = bannerLab + if (report?.mock == true) " · 演示" else "",
                     value = if (revenue.startsWith("¥") || revenue.startsWith("￥")) revenue else "¥ $revenue",
                     valueSuffix = orders?.let { "· $it 单" },
-                    delta = if (report?.mock == true) "演示数据 · 推送快照会切换成真数" else delta
+                    delta = when {
+                        report?.mock == true -> "演示数据 · 推送快照会切换成真数"
+                        !report?.summary.isNullOrBlank() -> report?.summary.orEmpty()
+                        noSalesToday -> "今日还没有销售记录 · 营业后自动更新，点此刷新"
+                        else -> delta
+                    }
                 )
+
+                // P0 置顶：老板开屏第一眼要看到「今天要我办的事」——待办 + 预警 + 告急补货
+                run {
+                    val pendingTodos = report?.todos.orEmpty().filter { it.done != true }
+                    val alertN = report?.alerts.orEmpty().size
+                    val urgentN = invState.restock.count {
+                        it.urgency.equals("critical", true) || it.urgency?.contains("急") == true
+                    }
+                    if (pendingTodos.isNotEmpty() || alertN > 0 || urgentN > 0) {
+                        PandaCard {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "今天先办这几件",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Ink
+                                )
+                                if (AppModule.canWrite()) {
+                                    Text(
+                                        "去确认台 ›",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AiPink,
+                                        modifier = Modifier.clickable { openModule(Routes.M_ACTIONS) }
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            pendingTodos.take(3).forEach { t ->
+                                Text(
+                                    "· " + t.displayText(),
+                                    fontSize = 12.sp,
+                                    color = Ink,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                )
+                            }
+                            if (urgentN > 0) {
+                                Text(
+                                    "· 告急补货 $urgentN 项",
+                                    fontSize = 12.sp,
+                                    color = FiveRed,
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .clickable { openModule("inventory/restock") }
+                                )
+                            }
+                            if (alertN > 0) {
+                                Text(
+                                    "另有 $alertN 条预警 · 点此查看",
+                                    fontSize = 11.sp,
+                                    color = Sub,
+                                    modifier = Modifier
+                                        .padding(top = 4.dp)
+                                        .clickable { openModule(Routes.M_ACTIONS) }
+                                )
+                            }
+                        }
+                    }
+                }
                 val actualKpiSpecs = listOf(
                     Triple("订单", listOf("订单", "单量"), "单"),
                     Triple("实收", listOf("实收", "净营收"), ""),
@@ -320,7 +391,17 @@ fun HomeScreen(
                         }
                         if (actualTrend.isNotEmpty()) {
                             Spacer(Modifier.height(12.dp))
-                            Text("近${actualTrend.size}日营收", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("近${actualTrend.size}日营收", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
+                                val revs = actualTrend.mapNotNull { it.revenue }
+                                if (revs.isNotEmpty()) {
+                                    Text(
+                                        "峰值 ¥${"%,.0f".format(Locale.CHINA, revs.max())} · 日均 ¥${"%,.0f".format(Locale.CHINA, revs.sum() / revs.size)}",
+                                        fontSize = 11.sp,
+                                        color = Sub
+                                    )
+                                }
+                            }
                             Spacer(Modifier.height(4.dp))
                             Canvas(Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 3.dp, vertical = 5.dp)) {
                                 val values = actualTrend.mapNotNull { it.revenue }.map { it.toFloat() }

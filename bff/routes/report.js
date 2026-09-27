@@ -309,13 +309,31 @@ function deriveReport(snap, date) {
     }
   } catch (e) { breakeven = null; }
 
+  // 一句话晨报：今日营收/保本达成 + 最大风险 + 待办数（老板开屏即读）
+  const bannerParts = [];
+  if (revenue <= 0 && orders === 0) bannerParts.push('今日暂无销售');
+  else bannerParts.push('今日营收 ¥' + revenue.toFixed(0) + '·' + orders + '单');
+  if (breakeven && breakeven.be_day) {
+    const gap = revenue - breakeven.be_day;
+    bannerParts.push(gap >= 0
+      ? '已超保本 ¥' + gap.toFixed(0)
+      : '距保本差 ¥' + (-gap).toFixed(0));
+  }
+  const criticalAlerts = alerts.filter((a) => a && a.level === 'critical');
+  if (criticalAlerts.length) bannerParts.push('风险：' + String(criticalAlerts[0].text || '').slice(0, 24));
+  else if (alerts.length) bannerParts.push(alerts.length + ' 条预警');
+  if (todos.length) bannerParts.push(todos.length + ' 件待办');
+  const smartSummary = bannerParts.join(' · ');
+  const smartBanner = '熊猫功夫餐厅 · ' + smartSummary + '（快照 rev=' + snap.rev + '）';
+
   const report = {
     ok: true,
     mock: false,
     date,
     rev: snap.rev,
     generated_at: snap.generated_at,
-    banner: '熊猫功夫餐厅 | ' + date + ' 经营日报（快照 rev=' + snap.rev + '）',
+    banner: smartBanner,
+    summary: smartSummary,
     kpi: [
       { label: '营收', value: '¥' + revenue.toFixed(2), delta: null },
       { label: '订单数', value: String(orders), delta: null },

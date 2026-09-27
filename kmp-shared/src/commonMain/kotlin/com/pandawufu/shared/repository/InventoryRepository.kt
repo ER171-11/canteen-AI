@@ -33,6 +33,10 @@ data class RestockSuggestion(
     val daysLeft: Double? = null,
     val urgency: String? = null,
     val source: String? = null,
+    /** 原料移动加权均价（采购单单价预填，无报价时兜底） */
+    val avg: Double? = null,
+    /** 最近一次采购价（无均价时兜底） */
+    val last: Double? = null,
     /** 验收标准规格：采购员照着买 */
     val specReq: String? = null
 )
@@ -99,6 +103,8 @@ object StockPolicy {
             daysLeft = item.daysLeft,
             urgency = item.urgency,
             source = item.source,
+            avg = item.avg,
+            last = item.last,
             specReq = item.specReq
         )
 }

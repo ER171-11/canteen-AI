@@ -57,7 +57,9 @@ private data class DraftLine(
     val name: String,
     val unit: String,
     val qtyText: String,
-    val priceText: String
+    val priceText: String,
+    /** 无报价时的兜底单价：原料均价 → 最近采购价 */
+    val basePrice: Double = 0.0
 )
 
 /** 全局补货草稿：先改量/价/供应商，再进确认台。 */
@@ -296,13 +298,18 @@ private fun RestockEditDialog(
     var lines by remember(items, quotes, supplier) {
         mutableStateOf(
             items.map { s ->
-                val price = quotePrice(quotes, s.name, supplier)
+                val quoted = quotePrice(quotes, s.name, supplier)
+                // 兜底单价：无报价 → 原料均价 → 最近采购价（避免采购单默认 ¥0）
+                val base = (s.avg ?: 0.0).takeIf { it > 0 }
+                    ?: (s.last ?: 0.0).takeIf { it > 0 } ?: 0.0
+                val price = if (quoted > 0) quoted else base
                 DraftLine(
                     ingredientId = s.ingredientId,
                     name = s.name,
                     unit = s.unit,
                     qtyText = fmtQty(s.suggestQty),
-                    priceText = if (price > 0) trimNum(price) else "0"
+                    priceText = if (price > 0) trimNum(price) else "0",
+                    basePrice = base
                 )
             }
         )
@@ -336,7 +343,9 @@ private fun RestockEditDialog(
                                     supplier = s
                                     lines = lines.map { line ->
                                         val p = quotePrice(quotes, line.name, s)
-                                        if (p > 0) line.copy(priceText = trimNum(p)) else line
+                                        // 新供应商无报价时，回落到兜底单价而非清零
+                                        val target = if (p > 0) p else line.basePrice
+                                        line.copy(priceText = if (target > 0) trimNum(target) else line.priceText)
                                     }
                                 }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)

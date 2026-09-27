@@ -37,6 +37,7 @@ import com.pandawufu.app.ui.designsystem.Sub
 import com.pandawufu.app.ui.designsystem.Txt
 import com.pandawufu.shared.model.ActionListItemDto
 import com.pandawufu.shared.redline.ConfirmGateway
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -118,6 +119,16 @@ fun ActionsScreen() {
     LaunchedEffect(filter) { reload(filter) }
     LaunchedEffect(OpsSignal.refreshHomeTick) {
         if (OpsSignal.refreshHomeTick > 0) reload(filter)
+    }
+    // 有在途动作（待执行）时持续轮询：店内执行器落地后自动从「执行中」翻到「已完成」，
+    // 老板无需手动切筛选。key 为「是否存在待执行」，一旦全部落地即停止，避免无谓请求。
+    val hasInflight = items.any { it.status == "待执行" }
+    LaunchedEffect(hasInflight) {
+        if (!hasInflight) return@LaunchedEffect
+        while (true) {
+            delay(5000)
+            reload(filter)
+        }
     }
 
     ModuleScaffold(

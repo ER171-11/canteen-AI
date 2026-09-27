@@ -508,6 +508,22 @@ fun FinanceScreen() {
                         "¥${"%.2f".format(gap)}" + if (recon?.confirmed == true) " · 已确认" else " · 待确认"
                     )
                 }
+                // 今日无数据时，展示最近一次已结算，避免空屏、让老板有参照
+                val last = recon?.last
+                val todayEmpty = (recon?.dineIn?.amount ?: 0.0) == 0.0 &&
+                    (recon?.takeout?.amount ?: 0.0) == 0.0 &&
+                    (recon?.purchase?.amount ?: 0.0) == 0.0
+                if (last != null && todayEmpty) {
+                    ModuleCard("最近一次结算 · ${last.date ?: "-"}") {
+                        KvRow("堂食收银", "¥${"%.2f".format(last.dineIn?.amount ?: 0.0)} · ${last.dineIn?.count ?: 0} 笔")
+                        KvRow("外卖收银", "¥${"%.2f".format(last.takeout?.amount ?: 0.0)} · ${last.takeout?.count ?: 0} 笔")
+                        KvRow("采购入库", "¥${"%.2f".format(last.purchase?.amount ?: 0.0)} · ${last.purchase?.count ?: 0} 单")
+                        KvRow("收银−采购", "¥${"%.2f".format(last.gap ?: 0.0)}")
+                        if (!last.note.isNullOrBlank()) {
+                            Text("备注：${last.note}", fontSize = 11.sp, color = Sub)
+                        }
+                    }
+                }
                 DraftWriteButton(
                     label = if (recon?.confirmed == true) "再次确认勾兑" else "确认三方勾兑落账",
                     type = "finance.recon",
@@ -658,8 +674,9 @@ fun LossScreen() {
         when (tab) {
             0 -> {
                 ModuleCard("损耗分析 · 按原因汇总") {
-                    if (reasonGroups.isEmpty()) Text("暂无报损记录可分析", color = Sub, fontSize = 12.sp)
-                    else reasonGroups.take(12).forEach { (reason, qty) ->
+                    val nonZero = reasonGroups.filter { it.second > 0.0 }
+                    if (nonZero.isEmpty()) Text("暂无报损记录可分析", color = Sub, fontSize = 12.sp)
+                    else nonZero.take(12).forEach { (reason, qty) ->
                         KvRow(reason, "合计 ${"%.1f".format(qty)}")
                     }
                 }

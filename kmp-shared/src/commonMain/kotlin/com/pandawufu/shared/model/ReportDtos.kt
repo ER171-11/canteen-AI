@@ -22,6 +22,8 @@ data class ReportDailyDto(
     val rev: JsonElement? = null,
     @SerialName("generated_at") val generatedAt: String? = null,
     val banner: String? = null,
+    /** 精简一句话晨报（营收/保本差/风险/待办），首页可直接展示 */
+    val summary: String? = null,
     val kpi: List<KpiDto> = emptyList(),
     @SerialName("heat_mini") val heatMini: List<HeatMiniDto> = emptyList(),
     val todos: List<TodoDto> = emptyList(),
