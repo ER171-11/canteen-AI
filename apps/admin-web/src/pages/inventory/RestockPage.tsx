@@ -15,6 +15,8 @@ interface RestockRow extends IngItem {
   safety: number
   reason?: string
   urgency?: string
+  /** 验收标准规格要求（服务端 restock-suggest.spec_req） */
+  spec_req?: string
 }
 
 const URGENCY_TAG: Record<string, { color: string; text: string }> = {
@@ -62,6 +64,7 @@ export default function RestockPage() {
                 suggestQty: it.suggestQty ?? 0,
                 reason: it.reason,
                 urgency: it.urgency,
+                spec_req: it.spec_req,
               }))
               .filter((r) => r.suggestQty > 0),
           )
@@ -127,6 +130,13 @@ export default function RestockPage() {
       width: 120,
       align: 'right',
       render: (v, r) => `${v} ${r.unit ?? ''}`,
+    },
+    {
+      title: '验收规格',
+      dataIndex: 'spec_req',
+      width: 180,
+      ellipsis: true,
+      render: (v) => v || '-',
     },
     {
       title: '依据',

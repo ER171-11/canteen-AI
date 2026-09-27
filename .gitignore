@@ -10,20 +10,35 @@ node_modules/
 # BFF 运行时数据（审计/队列/快照，不入库）
 bff/data/
 
+# 店内节点(Node) 运行时状态（pusher_state 等，不入库）
+bff/store-node/data/
+
 # 构建产物
 dist/
 build/
 *.apk
 *.ipa
+*.tsbuildinfo
 apps/android-app/.gradle/
 apps/android-app/**/build/
+apps/android-app/local.properties
 kmp-shared/build/
 kmp-shared/.gradle/
 .local/
 
+# 本地/离线运行状态（脚本产物，不入库）
+scripts/.last_*.json
+scripts/__pycache__/
+
 # Python
 __pycache__/
 *.pyc
+
+# 浏览器缓存 / 抓取工具临时 profile（纯垃圾，不入库）
+**/chrome_profile/
+**/_p1prof/
+*.db-journal
+*.db-wal
 
 # 店内系统运行时（备份/临时文件）
 store-inventory/data/backups/

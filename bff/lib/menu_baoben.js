@@ -8,7 +8,7 @@ const path = require('path');
 
 const PATHS = [
   path.join(__dirname, '../data/menu-baoben.json'),
-  path.join(__dirname, '../../apps/boss-app/public/menu-baoben.json')
+  path.join(__dirname, '../../old/apps/boss-app/public/menu-baoben.json')
 ];
 
 let _cache = null;

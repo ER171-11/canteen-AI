@@ -45,6 +45,17 @@ class BffClient(
     suspend fun restockSuggest(): RestockSuggestResponse =
         http.get("$baseUrl/api/inventory/restock-suggest") { auth() }.body()
 
+    /** 食材验收标准库 */
+    suspend fun acceptStandards(): AcceptStandardsResponse =
+        http.get("$baseUrl/api/inventory/accept-standards") { auth() }.body()
+
+    /** 逐项验收记录 */
+    suspend fun recvAccept(date: String? = null): RecvAcceptResponse =
+        http.get("$baseUrl/api/inventory/recv-accept") {
+            auth()
+            if (!date.isNullOrBlank()) parameter("date", date)
+        }.body()
+
     /** 唯一写入口的下层传输。调用方必须是 ConfirmGateway。 */
     suspend fun postAction(action: ActionDto): ActionEnqueueResponse =
         http.post("$baseUrl/api/actions") {

@@ -1,0 +1,454 @@
+'use strict';
+/*
+ * store-node/consumer.js — 云端动作队列消费者（逐行移植 store-inventory/queue_consumer.py 的 IO 外壳）
+ *
+ * 业务算法已迁至 bff/lib/algorithms/，本文件只负责调度与 IO：
+ *   1. GET BFF /api/actions?status=待执行（含 429/5xx 重试）
+ *   2. 逐条：GET 店内 /api/db 取 baseRev 与 data → algorithms.run(type, ctx, data, payload)
+ *      - ctx.store 为 node:sqlite 适配器（写 ext 新表），对齐 Python 各 insert_*
+ *      - 未登记 type → 驳回（need-manual，不静默丢动作）
+ *   3. POST 店内 /api/sync {baseRev, data, machine:"QUEUE"} 三向合并写回
+ *   4. 回调 BFF /api/actions/{id}/execute（429/5xx 重试）
+ *   5. 成功后立即推快照（老板刷新即见变化）
+ *
+ * 红线：只读/调用店内 server 公开 API，本地 sqlite 只写新增表（actions_queue 等），不触碰 docs/snapshots。
+ *
+ * 命令行：--store-url --bff-url --interval --once --token --db
+ * 仅 Node 内置模块（node:sqlite / http / fs ...）。
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { parseArgs } = require('node:util');
+const { DatabaseSync } = require('node:sqlite');
+const { nowIso, sleep, httpJson, withRetry } = require('./common');
+
+/* 触发全部算法登记 */
+require('../lib/algorithms/registry');
+const algorithms = require('../lib/algorithms/index');
+const pusher = require('./pusher');
+
+const DEFAULT_STORE_URL = 'http://127.0.0.1:8765';
+const DEFAULT_BFF_URL = 'http://127.0.0.1:8787';
+const DEFAULT_INTERVAL = 30;
+const DEFAULT_DB_PATH = process.env.STORE_DB
+  || path.join(__dirname, '..', '..', 'store-inventory', 'data', '餐厅系统.db');
+const MIGRATIONS_DIR = path.join(__dirname, '..', '..', 'store-inventory', 'migrations');
+
+function makeLog(name) {
+  const prefix = '[' + name + ']';
+  const fmt = (level, args) => [prefix, '[' + level + ']']
+    .concat(Array.prototype.slice.call(args)).join(' ');
+  return {
+    info: (...a) => console.log(fmt('INFO', a)),
+    warn: (...a) => console.warn(fmt('WARN', a)),
+    warning: (...a) => console.warn(fmt('WARN', a)),
+    error: (...a) => console.error(fmt('ERROR', a))
+  };
+}
+const log = makeLog('queue_consumer');
+
+/* ------------------------------------------------------------------ */
+/* SQLite 适配器（供算法 ctx.store 使用）                                */
+/* ------------------------------------------------------------------ */
+
+/** 值序列化：对象/数组 → JSON 文本（对齐 Python 的 json.dumps 列）；标量原样 */
+function ser(v) {
+  if (v === undefined || v === null) return null;
+  if (typeof v === 'object') return JSON.stringify(v);
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  return v;
+}
+
+/** 判断 query 首个参数是原始 SQL 还是表名 */
+function looksLikeSql(s) {
+  return /[\s(]/.test(s) || /^(select|pragma|with|insert|update|delete)\b/i.test(String(s).trim());
+}
+
+/**
+ * 打开 sqlite 并返回 ctx.store 适配器。
+ * 契约（与算法层一致）：
+ *   query(tableOrSql, params) → 行数组
+ *   get(table, id) → 行或 null
+ *   insert(table, row) → rowid 或 null（失败返回 null，供算法回落）
+ *   upsert(table, row, keys) → {rowid, matched}
+ *   update(table, sets, where) → {rowcount}
+ */
+function makeSqliteStore(dbPath) {
+  const db = new DatabaseSync(dbPath, { timeout: 15000 });
+
+  function safeRun(sql, params) {
+    try { return db.prepare(sql).run(...(params || [])); }
+    catch (e) { return null; }
+  }
+
+  return {
+    _db: db,
+    close() { try { db.close(); } catch (e) { /* ignore */ } },
+
+    query(tableOrSql, params) {
+      const sql = looksLikeSql(tableOrSql)
+        ? tableOrSql
+        : 'SELECT * FROM "' + tableOrSql + '"';
+      try { return db.prepare(sql).all(...(params || [])); }
+      catch (e) { return []; }
+    },
+
+    get(table, id) {
+      try {
+        const rows = db.prepare('SELECT * FROM "' + table + '" WHERE id=? LIMIT 1').all(id);
+        return rows[0] || null;
+      } catch (e) { return null; }
+    },
+
+    insert(table, row) {
+      const cols = Object.keys(row || {});
+      if (!cols.length) return null;
+      const sql = 'INSERT INTO "' + table + '" ('
+        + cols.map((c) => '"' + c + '"').join(',') + ') VALUES ('
+        + cols.map(() => '?').join(',') + ')';
+      const info = safeRun(sql, cols.map((c) => ser(row[c])));
+      if (!info) return null;
+      return Number(info.lastInsertRowid);
+    },
+
+    upsert(table, row, keys) {
+      const ks = (Array.isArray(keys) && keys.length) ? keys : ['id'];
+      const whereKeys = ks.filter((k) => row && row[k] !== undefined && row[k] !== null);
+      let existing = null;
+      if (whereKeys.length) {
+        const whereSql = whereKeys.map((k) => '"' + k + '"=?').join(' AND ');
+        try {
+          existing = db.prepare('SELECT rowid AS _rid FROM "' + table + '" WHERE ' + whereSql + ' LIMIT 1')
+            .all(whereKeys.map((k) => ser(row[k])))[0] || null;
+        } catch (e) { existing = null; }
+      }
+      if (existing) {
+        const setCols = Object.keys(row).filter((c) => whereKeys.indexOf(c) < 0);
+        if (setCols.length) {
+          const sql = 'UPDATE "' + table + '" SET '
+            + setCols.map((c) => '"' + c + '"=?').join(',')
+            + ' WHERE ' + whereKeys.map((k) => '"' + k + '"=?').join(' AND ');
+          safeRun(sql, setCols.map((c) => ser(row[c])).concat(whereKeys.map((k) => ser(row[k]))));
+        }
+        return { rowid: Number(existing._rid), matched: true };
+      }
+      const rid = this.insert(table, row);
+      return { rowid: rid, matched: false };
+    },
+
+    update(table, sets, where) {
+      const cols = Object.keys(sets || {});
+      if (!cols.length) return { rowcount: 0 };
+      const w = Object.assign({}, where || {});
+      const op = w._op === 'OR' ? ' OR ' : ' AND ';
+      delete w._op;
+      // { id: x, queue_no: x } 这类「多列任一匹配」用 OR
+      const wKeys = Object.keys(w);
+      const whereSql = wKeys.length
+        ? ' WHERE ' + wKeys.map((k) => '"' + k + '"=?').join(op)
+        : '';
+      const sql = 'UPDATE "' + table + '" SET '
+        + cols.map((c) => '"' + c + '"=?').join(',') + whereSql;
+      const params = cols.map((c) => ser(sets[c])).concat(wKeys.map((k) => ser(w[k])));
+      const info = safeRun(sql, params);
+      return { rowcount: info ? Number(info.changes) : 0 };
+    }
+  };
+}
+
+/** 建表：执行 migrations/*.sql（幂等），确保 ext 新表存在；失败不致命 */
+function ensureTables(dbPath) {
+  try {
+    const db = new DatabaseSync(dbPath, { timeout: 15000 });
+    let files = [];
+    try { files = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort(); }
+    catch (e) { files = []; }
+    for (const f of files) {
+      try { db.exec(fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8')); }
+      catch (e) { log.warn('迁移 ' + f + ' 执行失败（忽略）: ' + e.message); }
+    }
+    db.close();
+    return true;
+  } catch (e) {
+    log.warn('建表检查失败（不影响主流程）: ' + e.message);
+    return false;
+  }
+}
+
+/** 登记动作处理结果到本地 actions_queue（供审计与人工确认） */
+function recordAction(dbPath, action, status, rev, traceId) {
+  try {
+    const db = new DatabaseSync(dbPath, { timeout: 15000 });
+    const payload = typeof action.payload === 'string'
+      ? action.payload : JSON.stringify(action.payload || {});
+    db.prepare(
+      'INSERT INTO actions_queue(id,type,payload,status,rev,created_at,executed_at,operator,trace_id)'
+      + ' VALUES(?,?,?,?,?,?,?,?,?)'
+      + ' ON CONFLICT(id) DO UPDATE SET status=excluded.status, rev=excluded.rev,'
+      + ' executed_at=excluded.executed_at'
+    ).run(
+      String(action.id), String(action.type || ''), payload, String(status),
+      rev === undefined || rev === null ? null : Number(rev),
+      action.created_at || nowIso(), nowIso(),
+      action.operator || null, traceId || action.trace_id || null
+    );
+    db.close();
+  } catch (e) {
+    log.warn('recordAction 失败: ' + e.message);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 动作处理                                                            */
+/* ------------------------------------------------------------------ */
+
+function descOf(result) {
+  if (result === null || result === undefined) return '';
+  if (typeof result === 'string') return result;
+  if (typeof result === 'object' && result.message) return String(result.message);
+  return JSON.stringify(result);
+}
+
+/**
+ * 处理一条动作，返回 {outcome, detail}。
+ * outcome ∈ executed/failed/rejected/conflict（对齐 Python）。
+ */
+async function processAction(action, storeUrl, bffUrl, token, dbPath, opts) {
+  const o = opts || {};
+  const store = o.store || makeSqliteStore(dbPath);
+  const closeStore = !o.store;
+  const aid = action.id;
+  const atype = action.type;
+  let payload = action.payload || {};
+  if (typeof payload === 'string') {
+    try { payload = JSON.parse(payload); } catch (e) { payload = {}; }
+  }
+  const traceId = action.trace_id || require('crypto').randomBytes(8).toString('hex');
+
+  const callback = async (result, error) => {
+    const body = {};
+    if (error !== undefined && error !== null) {
+      body.result = { ok: false, error: String(error) };
+      body.error = String(error);
+    } else if (result !== undefined && result !== null) {
+      let r = result;
+      if (typeof r === 'object' && r.ok === undefined) r = Object.assign({}, r, { ok: true });
+      body.result = r;
+    }
+    body.trace_id = traceId;
+    let status = 0; let resp = {};
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        const out = await httpJson('POST',
+          bffUrl.replace(/\/+$/, '') + '/api/actions/' + aid + '/execute', body, token);
+        status = out.status; resp = out.body;
+      } catch (e) {
+        status = 0; resp = { error: e.message };
+      }
+      if (status !== 429 && !(status >= 500)) break;
+      await sleep(1000 * attempt);
+    }
+    return { status, resp };
+  };
+
+  try {
+    /* 未登记 type → 驳回 */
+    if (!algorithms.has(atype)) {
+      log.warn('未知动作类型，驳回 id=' + aid + ' type=' + atype + ' trace=' + traceId);
+      await callback(undefined, '未知动作类型: ' + atype + '（未在 BFF 算法层登记）');
+      recordAction(dbPath, action, 'rejected', undefined, traceId);
+      return { outcome: 'rejected', detail: atype };
+    }
+
+    /* 1) 取 baseRev 与当前 data */
+    let got;
+    try {
+      got = await httpJson('GET', storeUrl.replace(/\/+$/, '') + '/api/db');
+    } catch (e) {
+      const err = '店内 /api/db 不可达: ' + e.message;
+      await callback(undefined, err);
+      recordAction(dbPath, action, 'failed', undefined, traceId);
+      return { outcome: 'failed', detail: err };
+    }
+    const doc = (got && got.body) || {};
+    if (got.status !== 200 || !doc.ok) {
+      const err = '店内 /api/db 异常: http=' + got.status + ' ' + JSON.stringify(doc);
+      await callback(undefined, err);
+      recordAction(dbPath, action, 'failed', undefined, traceId);
+      return { outcome: 'failed', detail: err };
+    }
+    const baseRev = doc.rev;
+    let data = doc.data;
+    if (!data || typeof data !== 'object') data = {};
+
+    /* 2) 应用算法 */
+    let result;
+    try {
+      const ctx = { store: store, rev: baseRev, traceId: traceId, now: nowIso() };
+      result = algorithms.run(atype, ctx, data, payload).result;
+    } catch (e) {
+      const err = '应用 payload 失败: ' + (e && e.message ? e.message : e);
+      await callback(undefined, err);
+      recordAction(dbPath, action, 'failed', undefined, traceId);
+      return { outcome: 'failed', detail: err };
+    }
+    const desc = descOf(result);
+    log.info('已应用: ' + desc + ' trace=' + traceId);
+
+    /* 3) 三向合并写回 */
+    let syncOut;
+    try {
+      syncOut = await httpJson('POST', storeUrl.replace(/\/+$/, '') + '/api/sync',
+        { baseRev: baseRev, data: data, machine: 'QUEUE' });
+    } catch (e) {
+      syncOut = { status: 0, body: { error: e.message } };
+    }
+    const sbody = (syncOut && syncOut.body) || {};
+    const ok = syncOut.status === 200 && sbody.ok && sbody.action !== 'need-manual';
+    if (!ok) {
+      const err = 'sync 冲突/异常: http=' + syncOut.status;
+      log.warn('标记「需人工确认」id=' + aid + ' ' + err + ' trace=' + traceId);
+      await callback(undefined, '需人工确认: ' + err);
+      recordAction(dbPath, action, '需人工确认', baseRev, traceId);
+      return { outcome: 'conflict', detail: err };
+    }
+
+    /* 4) 回调成功 */
+    const newRev = sbody.rev;
+    await callback({ new_rev: newRev, desc: desc }, undefined);
+    recordAction(dbPath, action, 'done', newRev, traceId);
+    log.info('执行成功 id=' + aid + ' new_rev=' + newRev + ' action=' + sbody.action + ' trace=' + traceId);
+
+    /* 5) 立即推快照（老板刷新即见变化） */
+    try {
+      await pusher.pushOnce(storeUrl, bffUrl, pusher.DEFAULT_MAX_BYTES, token, dbPath);
+    } catch (e) { /* 推送失败不影响本动作 */ }
+
+    return { outcome: 'executed', detail: newRev };
+  } finally {
+    if (closeStore && store && typeof store.close === 'function') store.close();
+  }
+}
+
+/** 从 BFF 拉取待执行动作（对齐 Python fetch_pending） */
+async function fetchPending(bffUrl, token) {
+  const url = bffUrl.replace(/\/+$/, '') + '/api/actions?status=' + encodeURIComponent('待执行');
+  let out = { status: 0, body: {} };
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    out = await httpJson('GET', url, undefined, token);
+    if (out.status !== 429 && !(out.status >= 500)) break;
+    await sleep(1000 * attempt);
+  }
+  if (out.status !== 200) {
+    throw new Error('拉取动作失败: http=' + out.status + ' ' + JSON.stringify(out.body));
+  }
+  const b = out.body;
+  if (Array.isArray(b)) return b;
+  if (b && typeof b === 'object') {
+    for (const k of ['items', 'actions', 'data']) {
+      if (Array.isArray(b[k])) return b[k];
+    }
+  }
+  return [];
+}
+
+/** 一轮消费；返回 bool（BFF 是否可达） */
+async function runOnce(storeUrl, bffUrl, token, dbPath, opts) {
+  const o = opts || {};
+  let actions;
+  try {
+    actions = await fetchPending(bffUrl, token);
+  } catch (e) {
+    log.error('BFF 不可达，本轮跳过: ' + e.message);
+    return false;
+  }
+  log.info('拉到待执行动作 ' + actions.length + ' 条');
+  const store = o.store || makeSqliteStore(dbPath);
+  try {
+    for (const action of actions) {
+      try {
+        const r = await processAction(action, storeUrl, bffUrl, token, dbPath,
+          { store: store, now: o.now });
+        log.info('动作 id=' + action.id + ' 结果=' + r.outcome + ' detail=' + r.detail);
+      } catch (e) {
+        log.error('动作 id=' + action.id + ' 处理出现未捕获异常: ' + (e && e.stack ? e.stack : e));
+      }
+    }
+  } finally {
+    if (!o.store && store && typeof store.close === 'function') store.close();
+  }
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* 命令行                                                              */
+/* ------------------------------------------------------------------ */
+
+function buildArgOptions() {
+  return {
+    'store-url': { type: 'string' },
+    'bff-url': { type: 'string' },
+    interval: { type: 'string' },
+    once: { type: 'boolean' },
+    token: { type: 'string' },
+    db: { type: 'string' },
+    help: { type: 'boolean' }
+  };
+}
+
+async function main(argv) {
+  let values;
+  try {
+    values = parseArgs({ args: argv || process.argv.slice(2), options: buildArgOptions(), allowPositionals: true }).values;
+  } catch (e) {
+    console.error('参数解析失败: ' + e.message);
+    return 2;
+  }
+  if (values.help) {
+    console.log('用法: node consumer.js [--store-url URL] [--bff-url URL] [--interval 秒]'
+      + ' [--once] [--token TOKEN] [--db PATH]');
+    return 0;
+  }
+  const storeUrl = values['store-url'] || DEFAULT_STORE_URL;
+  const bffUrl = values['bff-url'] || DEFAULT_BFF_URL;
+  const interval = values.interval !== undefined ? Number(values.interval) : DEFAULT_INTERVAL;
+  const once = Boolean(values.once);
+  const token = values.token || process.env.BFF_TOKEN || '';
+  const dbPath = values.db || DEFAULT_DB_PATH;
+
+  log.info('启动 store=' + storeUrl + ' bff=' + bffUrl + ' interval=' + interval
+    + 's once=' + once + ' db=' + dbPath);
+  if (!token) log.warn('未提供 BFF token（--token 或 BFF_TOKEN），请求将不带鉴权头');
+
+  ensureTables(dbPath);
+
+  if (once) {
+    const ok = await runOnce(storeUrl, bffUrl, token, dbPath);
+    return ok ? 0 : 1;
+  }
+  for (;;) {
+    try { await runOnce(storeUrl, bffUrl, token, dbPath); }
+    catch (e) { log.error('本轮消费出现未捕获异常，继续循环: ' + (e && e.stack ? e.stack : e)); }
+    await sleep(interval * 1000);
+  }
+}
+
+module.exports = {
+  DEFAULT_STORE_URL,
+  DEFAULT_BFF_URL,
+  DEFAULT_INTERVAL,
+  DEFAULT_DB_PATH,
+  makeSqliteStore,
+  ensureTables,
+  recordAction,
+  descOf,
+  processAction,
+  fetchPending,
+  runOnce,
+  main
+};
+
+if (require.main === module) {
+  Promise.resolve(main()).then((code) => { process.exitCode = code || 0; });
+}

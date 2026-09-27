@@ -1,9 +1,11 @@
 package com.pandawufu.shared.viewmodel
 
 import com.pandawufu.shared.AppDispatchers
+import com.pandawufu.shared.model.AcceptStandardDto
 import com.pandawufu.shared.model.DishDto
 import com.pandawufu.shared.model.PosTableDto
 import com.pandawufu.shared.model.QuoteDto
+import com.pandawufu.shared.model.RecvAcceptRecordDto
 import com.pandawufu.shared.model.RecvRecordDto
 import com.pandawufu.shared.repository.InventoryRepository
 import com.pandawufu.shared.repository.RestockSuggestion
@@ -46,6 +48,10 @@ class InventoryViewModel(
         val orders: List<RecvRecordDto> = emptyList(),
         /** 进货入库（data.recv） */
         val recv: List<RecvRecordDto> = emptyList(),
+        /** 验收标准库 */
+        val acceptStandards: List<AcceptStandardDto> = emptyList(),
+        /** 今日逐项验收记录 */
+        val recvAccept: List<RecvAcceptRecordDto> = emptyList(),
         /** POS 桌台（模块页 p-m-pos 复用本快照数据） */
         val posTables: List<PosTableDto> = emptyList(),
         /** 堂食菜单（data.dishes）· 收银点菜 */
@@ -100,6 +106,8 @@ class InventoryViewModel(
                         com.pandawufu.shared.model.VendorDto(id = n, name = n, status = "合作中", period = "月结30天")
                     }
                 }
+                val standards = runCatching { inventoryRepository.acceptStandards() }.getOrDefault(emptyList())
+                val accepts = runCatching { inventoryRepository.recvAccept(null) }.getOrDefault(emptyList())
                 _state.update {
                     it.copy(
                         loading = false,
@@ -110,6 +118,8 @@ class InventoryViewModel(
                         restock = restock,
                         orders = snapshot.data?.orders.orEmpty(),
                         recv = snapshot.data?.recv.orEmpty(),
+                        acceptStandards = standards,
+                        recvAccept = accepts,
                         posTables = snapshot.data?.pos.orEmpty(),
                         dishes = snapshot.data?.dishes.orEmpty().filter { it.on },
                         quotes = snapshot.data?.quotes.orEmpty(),

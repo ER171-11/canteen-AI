@@ -17,13 +17,21 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +43,7 @@ import com.pandawufu.app.confirm.ConfirmBus
 import com.pandawufu.app.confirm.ConfirmRequest
 import com.pandawufu.app.ui.designsystem.CardBg
 import com.pandawufu.app.ui.designsystem.Ink
+import com.pandawufu.shared.model.SopStepDto
 import com.pandawufu.shared.model.WorkorderDto
 import com.pandawufu.shared.viewmodel.KitchenViewModel
 import java.time.LocalTime
@@ -204,8 +213,53 @@ private fun WorkorderCard(
     onAdvanced: () -> Unit
 ) {
     val context = LocalContext.current
-    val timeline = buildSopTimeline(wo.steps, mealClock = mealClock)
+    val timeline = resolveWorkorderTimeline(wo, mealClock)
     val next = nextWorkorderStatus(wo.status)
+    val clockable = isWorkorderClockable(wo.status)
+    var yieldDialog by remember(wo.id) { mutableStateOf(false) }
+    var yieldText by remember(wo.id) { mutableStateOf(wo.actualYield?.toString().orEmpty()) }
+
+    if (yieldDialog) {
+        AlertDialog(
+            onDismissRequest = { yieldDialog = false },
+            title = { Text("推进到已完成") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "${wo.name.ifBlank { wo.skuId }} · ${wo.qty} 个\n可填实际出成（可选，不填也可收口）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SubC
+                    )
+                    OutlinedTextField(
+                        value = yieldText,
+                        onValueChange = { yieldText = it },
+                        label = { Text("实际出成（个）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        yieldDialog = false
+                        askAdvance(
+                            wo = wo,
+                            next = "已完成",
+                            rev = rev,
+                            actualYield = yieldText.trim().toDoubleOrNull(),
+                            context = context,
+                            onAdvanced = onAdvanced
+                        )
+                    }
+                ) { Text("确认推进") }
+            },
+            dismissButton = {
+                TextButton(onClick = { yieldDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
@@ -229,6 +283,7 @@ private fun WorkorderCard(
                     Text(
                         buildString {
                             append("计划 ${wo.qty} 个")
+                            wo.actualYield?.let { append(" · 出成 $it") }
                             wo.tableLabel()?.let { append(" · 桌 $it") }
                             append(" · 点标题看菜谱标准（须遵照）")
                         },
@@ -241,36 +296,19 @@ private fun WorkorderCard(
             if (next != null && canWrite) {
                 Button(
                     onClick = {
-                        ConfirmBus.ask(
-                            ConfirmRequest(
-                                title = "推进工单 → $next",
-                                summary = buildString {
-                                    append("${wo.name.ifBlank { wo.skuId }} · ${wo.qty} 个\n${wo.status} → $next")
-                                    if (next == "制作中") append("\n将按菜谱标准 BOM 备料扣一次；结账同桌同菜不再叠扣")
-                                    if (next == "待传") append("\n标齐：出品完成，等候前厅传菜上桌")
-                                    if (next == "已完成" || next == "完成") append("\n已传上桌 / 本工单收口")
-                                },
-                                type = "workorder.advance",
-                                payload = buildJsonObject {
-                                    put("id", wo.id)
-                                    put("status", next)
-                                    // 推进到制作中时消费器按菜谱 BOM 扣料
-                                    put("deduct", next == "制作中")
-                                },
-                                baseRev = rev,
-                                onResult = { r ->
-                                    r.fold(
-                                        onSuccess = {
-                                            Toast.makeText(context, "已推进至 $next", Toast.LENGTH_SHORT).show()
-                                            onAdvanced()
-                                        },
-                                        onFailure = {
-                                            Toast.makeText(context, it.message ?: "失败", Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
-                                }
+                        if (next == "已完成" || next == "完成") {
+                            yieldText = wo.actualYield?.toString().orEmpty()
+                            yieldDialog = true
+                        } else {
+                            askAdvance(
+                                wo = wo,
+                                next = next,
+                                rev = rev,
+                                actualYield = null,
+                                context = context,
+                                onAdvanced = onAdvanced
                             )
-                        )
+                        }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp)
@@ -312,16 +350,37 @@ private fun WorkorderCard(
                                     tl.step.keyPoints.firstOrNull()?.let {
                                         Text(it, style = MaterialTheme.typography.bodySmall, color = SubC)
                                     }
+                                    if (tl.state == "done") {
+                                        val st = wo.stepsState[tl.step.stepNo.toString()]
+                                        st?.operator?.takeIf { it.isNotBlank() }?.let { op ->
+                                            Text("打卡人 $op", style = MaterialTheme.typography.labelSmall, color = SubC)
+                                        }
+                                    }
                                 }
-                                Text(
-                                    when (tl.state) {
-                                        "done" -> "✓ 已完成"
-                                        "now" -> "● 进行中"
-                                        else -> ""
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (tl.state == "now") FiveRedC else FiveGreenC
-                                )
+                                when {
+                                    tl.state == "done" -> Text(
+                                        "✓ 已打卡",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = FiveGreenC
+                                    )
+                                    tl.state == "now" && clockable && canWrite -> OutlinedButton(
+                                        onClick = {
+                                            askStepClock(
+                                                wo = wo,
+                                                step = tl.step,
+                                                rev = rev,
+                                                context = context,
+                                                onDone = onAdvanced
+                                            )
+                                        },
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) { Text("打卡") }
+                                    tl.state == "now" -> Text(
+                                        "● 进行中",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = FiveRedC
+                                    )
+                                }
                             }
                         }
                     }
@@ -329,6 +388,115 @@ private fun WorkorderCard(
             }
         }
     }
+}
+
+private fun askAdvance(
+    wo: WorkorderDto,
+    next: String,
+    rev: String?,
+    actualYield: Double?,
+    context: android.content.Context,
+    onAdvanced: () -> Unit
+) {
+    ConfirmBus.ask(
+        ConfirmRequest(
+            title = "推进工单 → $next",
+            summary = buildString {
+                append("${wo.name.ifBlank { wo.skuId }} · ${wo.qty} 个\n${wo.status} → $next")
+                if (next == "制作中") append("\n将按菜谱标准 BOM 备料扣一次；结账同桌同菜不再叠扣")
+                if (next == "待传") append("\n标齐：出品完成，等候前厅传菜上桌")
+                if (next == "已完成" || next == "完成") {
+                    append("\n已传上桌 / 本工单收口")
+                    if (actualYield != null) append("\n实际出成 $actualYield")
+                }
+            },
+            type = "workorder.advance",
+            payload = buildJsonObject {
+                put("id", wo.id)
+                put("status", next)
+                put("deduct", next == "制作中")
+                if (actualYield != null) put("actual_yield", actualYield)
+            },
+            baseRev = rev,
+            onResult = { r ->
+                r.fold(
+                    onSuccess = {
+                        Toast.makeText(context, "已推进至 $next", Toast.LENGTH_SHORT).show()
+                        onAdvanced()
+                    },
+                    onFailure = {
+                        Toast.makeText(context, it.message ?: "失败", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        )
+    )
+}
+
+private fun askStepClock(
+    wo: WorkorderDto,
+    step: SopStepDto,
+    rev: String?,
+    context: android.content.Context,
+    onDone: () -> Unit
+) {
+    ConfirmBus.ask(
+        ConfirmRequest(
+            title = "SOP 步骤打卡",
+            summary = "${wo.name.ifBlank { wo.skuId }}\n第 ${step.stepNo} 步 · ${step.stage}",
+            type = "workorder.step_clock",
+            payload = buildJsonObject {
+                put("id", wo.id)
+                put("step_no", step.stepNo)
+            },
+            baseRev = rev,
+            onResult = { r ->
+                r.fold(
+                    onSuccess = {
+                        Toast.makeText(context, "已打卡 · 步骤 ${step.stepNo}", Toast.LENGTH_SHORT).show()
+                        onDone()
+                    },
+                    onFailure = {
+                        Toast.makeText(context, it.message ?: "失败", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        )
+    )
+}
+
+/**
+ * 优先用 stepsState / stepDone 驱动时间线；空则回退 buildSopTimeline 启发式。
+ */
+internal fun resolveWorkorderTimeline(wo: WorkorderDto, mealClock: LocalTime): List<SopTimelineStep> {
+    if (wo.steps.isEmpty()) return emptyList()
+    if (wo.stepsState.isEmpty()) return buildSopTimeline(wo.steps, mealClock = mealClock)
+    val ordered = wo.steps.sortedBy { it.stepNo }
+    var nowAssigned = false
+    return ordered.map { step ->
+        val st = when {
+            wo.stepDone(step.stepNo) -> "done"
+            !nowAssigned -> {
+                nowAssigned = true
+                "now"
+            }
+            else -> "pending"
+        }
+        val doneAt = wo.stepsState[step.stepNo.toString()]?.doneAt
+        val timeLabel = when {
+            !doneAt.isNullOrBlank() -> doneAt.substringAfter('T', doneAt).take(5).ifBlank { "已打卡" }
+            st == "now" -> "当前"
+            else -> "待做"
+        }
+        SopTimelineStep(step = step, timeLabel = timeLabel, state = st)
+    }
+}
+
+internal fun isWorkorderClockable(status: String): Boolean {
+    val s = status.trim()
+    return s.contains("制作") || s.contains("进行") ||
+        s.equals("doing", ignoreCase = true) ||
+        s.equals("in_progress", ignoreCase = true)
 }
 
 internal fun nextWorkorderStatus(status: String): String? = when (status.trim()) {

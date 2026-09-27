@@ -124,6 +124,69 @@ function buildDemand(ext, rmap, date) {
   };
 }
 
+function parseStepsState(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const o = JSON.parse(raw);
+      return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+    } catch (e) {
+      return {};
+    }
+  }
+  return {};
+}
+
+function enrichWorkorder(w, rmap, ext) {
+  const r = rmap[String(w.sku_id)] || null;
+  const steps = stepsFor(ext, w.sku_id);
+  const stepsState = parseStepsState(w.steps_state);
+  const actualYield = w.actual_yield != null ? Number(w.actual_yield) : null;
+  return {
+    id: String(w.id),
+    sku_id: w.sku_id,
+    name: (r && (r.name || r.sku_id)) || String(w.sku_id || ''),
+    color: r ? r.color || null : null,
+    qty: w.qty,
+    planned_start: w.planned_start,
+    status: w.status || '待开始',
+    table_id: w.table_id || null,
+    table_no: w.table_no || null,
+    steps,
+    steps_state: stepsState,
+    actual_yield: Number.isFinite(actualYield) ? actualYield : null,
+    sop_total: steps.length
+  };
+}
+
+/** 出成偏差告警：已完成且 |actual - qty| / qty > 8% */
+function buildYieldAlerts(ext, rmap, date) {
+  const alerts = [];
+  for (const w of arr(ext.sop_workorders)) {
+    if (!w || String(w.date || '') !== date) continue;
+    if (!isDoneWo(w.status)) continue;
+    const expected = Number(w.qty) || 0;
+    const actual = w.actual_yield != null ? Number(w.actual_yield) : null;
+    if (!Number.isFinite(actual) || expected <= 0) continue;
+    const deviation = (actual - expected) / expected;
+    if (Math.abs(deviation) < 0.08) continue;
+    const r = rmap[String(w.sku_id)] || null;
+    alerts.push({
+      workorder_id: String(w.id),
+      id: String(w.id),
+      sku_id: w.sku_id,
+      name: (r && (r.name || r.sku_id)) || String(w.sku_id || ''),
+      color: r ? r.color || null : null,
+      expected_yield: expected,
+      actual_yield: actual,
+      deviation_pct: Math.round(deviation * 1000) / 10,
+      note: deviation > 0 ? '出成偏高' : '出成偏低'
+    });
+  }
+  return alerts;
+}
+
 async function handle(req, res, ctx, pathname) {
   // 只读路由：非 GET 一律交外层 404（不暴露任何写路径）
   if (req.method !== 'GET') return false;
@@ -149,21 +212,7 @@ async function handle(req, res, ctx, pathname) {
   if (isWorkorder) {
     const workorders = arr(ext.sop_workorders)
       .filter((w) => w && String(w.date || '') === date)
-      .map((w) => {
-        const r = rmap[String(w.sku_id)] || null;
-        return {
-          id: String(w.id),
-          sku_id: w.sku_id,
-          name: (r && (r.name || r.sku_id)) || String(w.sku_id || ''),
-          color: r ? r.color || null : null,
-          qty: w.qty,
-          planned_start: w.planned_start,
-          status: w.status || '待开始',
-          table_id: w.table_id || null,
-          table_no: w.table_no || null,
-          steps: stepsFor(ext, w.sku_id)
-        };
-      });
+      .map((w) => enrichWorkorder(w, rmap, ext));
     ctx.sendJSON(res, 200, {
       ok: true,
       date,
@@ -353,6 +402,7 @@ async function handle(req, res, ctx, pathname) {
       };
     });
     const demand = buildDemand(ext, rmap, date);
+    const yieldAlerts = buildYieldAlerts(ext, rmap, date);
     ctx.sendJSON(res, 200, {
       ok: true,
       date,
@@ -362,6 +412,7 @@ async function handle(req, res, ctx, pathname) {
       tables,
       demand,
       takeout_open: demand.takeout_orders,
+      yield_alerts: yieldAlerts,
       ...soft
     });
     return true;
@@ -377,4 +428,4 @@ async function handle(req, res, ctx, pathname) {
   return false;
 }
 
-module.exports = { handle, buildDemand };
+module.exports = { handle, buildDemand, buildYieldAlerts, enrichWorkorder };

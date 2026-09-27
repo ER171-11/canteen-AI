@@ -1,12 +1,16 @@
 'use strict';
 /*
- * routes/inventory.js — 进销存只读建议
+ * routes/inventory.js — 进销存只读建议 + 食材按标准验收
  *   GET /api/inventory/restock-suggest
  *     优先用原料 est（日耗）估算「还能撑几天」，按断货紧迫排序；
  *     有 data.plans 最新建议行时并入；无 est 时回退安全线补差。
  *     自动生成 ≠ 自动下单：本接口只读，写仍走 restock.create → 确认台。
+ *     附带 spec_req（验收标准规格，采购员照着买）。
+ *   GET /api/inventory/accept-standards  验收标准库
+ *   GET /api/inventory/recv-accept?date= 逐项验收记录
  */
 const { loadSnapshot } = require('./snapshot');
+const { listStandards, specReqFor } = require('../lib/accept_standards');
 
 function num(v, d) {
   const n = parseFloat(v);
@@ -54,9 +58,10 @@ function buildSuggestions(snap) {
     const sug = num(line.sug != null ? line.sug : line.qty != null ? line.qty : line.need, 0);
     if (sug <= 0) continue;
     const cur = num(line.cur, 0);
+    const planName = line.name || line.ing_name || id;
     byIng.set(id, {
       ingredientId: id,
-      name: line.name || line.ing_name || id,
+      name: planName,
       unit: line.unit || '',
       qty: cur,
       safe: num(line.safe != null ? line.safe : line.safety, 0) || null,
@@ -67,7 +72,8 @@ function buildSuggestions(snap) {
         (line.daily ? (' · 日均 ' + line.daily + ' · 建议补 ' + sug) : (' · 建议补 ' + sug)),
       source: 'plans',
       urgency: num(line.daily, 0) > 0 && cur / line.daily < 1 ? 'critical'
-        : num(line.daily, 0) > 0 && cur / line.daily < 2 ? 'low' : 'watch'
+        : num(line.daily, 0) > 0 && cur / line.daily < 2 ? 'low' : 'watch',
+      spec_req: specReqFor(planName, snap)
     });
   }
 
@@ -95,9 +101,10 @@ function buildSuggestions(snap) {
       else if (ratio < 0.75 && urgency === 'watch') urgency = 'low';
     }
     const daysTxt = daily > 0 ? ('约可撑 ' + (Math.round(daysLeft * 10) / 10) + ' 天') : '低于安全线';
+    const ingName = ing.name || ing.id;
     byIng.set(ing.id, {
       ingredientId: ing.id,
-      name: ing.name || ing.id,
+      name: ingName,
       unit: ing.unit || '',
       qty: Math.round(qty * 100) / 100,
       safe: safety > 0 ? Math.round(safety * 100) / 100 : null,
@@ -108,7 +115,8 @@ function buildSuggestions(snap) {
         (safety ? (' / 安全线 ' + safety) : '') +
         (daily ? (' · 日均 ' + (Math.round(daily * 100) / 100)) : ''),
       source: daily && ing.est ? 'est' : 'safety',
-      urgency
+      urgency,
+      spec_req: specReqFor(ingName, snap)
     });
   }
 
@@ -137,8 +145,60 @@ function buildSuggestions(snap) {
   };
 }
 
+function todayStr() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function pickDate(ctx) {
+  const q = (ctx.query.get('date') || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(q) ? q : todayStr();
+}
+
+function buildRecvAccept(snap, date) {
+  const ext = (snap && snap.ext && typeof snap.ext === 'object') ? snap.ext : {};
+  const fromExt = Array.isArray(ext.recv_accept) ? ext.recv_accept : [];
+  const items = fromExt.filter((r) => {
+    if (!r) return false;
+    if (!date) return true;
+    const ts = String(r.ts || r.date || '');
+    return !ts || ts.indexOf(date) === 0;
+  });
+  // 无专用表时：从 data.recv 行上的 kimi/验收字段合成只读视图
+  if (!items.length && snap && snap.data && Array.isArray(snap.data.recv)) {
+    for (const doc of snap.data.recv) {
+      if (!doc) continue;
+      const d = String(doc.date || doc.ts || '');
+      if (date && d && d.indexOf(date) !== 0) continue;
+      const lines = Array.isArray(doc.lines) ? doc.lines : [];
+      for (const ln of lines) {
+        if (!ln) continue;
+        const verdict = ln.verdict || ln.accept || ln.qc || doc.verdict;
+        if (!verdict && ln.qty_rejected == null && !ln.kimi) continue;
+        items.push({
+          recv_id: doc.id || doc.no,
+          ing_name: ln.name || ln.ing_name || ln.ing,
+          qty_ordered: ln.qty != null ? ln.qty : ln.ordered,
+          qty_received: ln.recvQty != null ? ln.recvQty : ln.received,
+          qty_rejected: ln.qty_rejected != null ? ln.qty_rejected : 0,
+          verdict: verdict || 'pass',
+          detail: ln.kimi || ln.detail || null,
+          batch_no: ln.batch_no || ln.batch,
+          cert_no: ln.cert_no || ln.cert,
+          ts: doc.ts || doc.date,
+          source: ln.source || doc.source || 'recv'
+        });
+      }
+    }
+  }
+  return items;
+}
+
 async function handle(req, res, ctx, pathname) {
-  if (req.method === 'GET' && pathname === '/api/inventory/restock-suggest') {
+  if (req.method !== 'GET') return false;
+
+  if (pathname === '/api/inventory/restock-suggest') {
     const snap = loadSnapshot();
     const hasData = !!(snap && snap.data && Array.isArray(snap.data.ings) && snap.data.ings.length);
     if (!hasData) {
@@ -155,7 +215,35 @@ async function handle(req, res, ctx, pathname) {
     ctx.sendJSON(res, 200, buildSuggestions(snap));
     return true;
   }
+
+  if (pathname === '/api/inventory/accept-standards') {
+    const snap = loadSnapshot();
+    const standards = listStandards(snap);
+    ctx.sendJSON(res, 200, {
+      ok: true,
+      count: standards.length,
+      standards,
+      source: (snap && snap.ext && Array.isArray(snap.ext.accept_standards) &&
+        snap.ext.accept_standards.length) ? 'ext' : 'seed'
+    });
+    return true;
+  }
+
+  if (pathname === '/api/inventory/recv-accept') {
+    const snap = loadSnapshot();
+    const date = pickDate(ctx);
+    const items = buildRecvAccept(snap, date);
+    ctx.sendJSON(res, 200, {
+      ok: true,
+      date,
+      count: items.length,
+      items,
+      records: items
+    });
+    return true;
+  }
+
   return false;
 }
 
-module.exports = { handle, buildSuggestions };
+module.exports = { handle, buildSuggestions, buildRecvAccept };

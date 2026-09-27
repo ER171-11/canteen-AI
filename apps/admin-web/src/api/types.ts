@@ -296,6 +296,27 @@ export interface WorkOrder {
   /** 待开始/进行中/已完成 */
   status: string
   steps?: SopStep[]
+  /** 逐步打卡状态（代理A新增）：key 为 step_no，未上线时页面回退旧高亮逻辑 */
+  steps_state?: Record<string, { done_at?: string; operator?: string }>
+  /** 实际出成（份），workorder.advance 到已完成时录入 */
+  actual_yield?: number | null
+  /** SOP 总步数（代理A下发，缺失时取 steps.length） */
+  sop_total?: number
+}
+
+/** GET /api/kitchen/board?date= → yield_alerts 元素（代理A新增，形状前向兼容） */
+export interface YieldAlert {
+  workorder_id?: string
+  id?: string
+  sku_id?: string
+  name?: string
+  color?: string
+  /** 理论出成（份） */
+  expected_yield?: number
+  actual_yield?: number
+  deviation_pct?: number
+  note?: string
+  [k: string]: unknown
 }
 
 /** GET /api/kitchen/qc?date= → items 元素 */
@@ -315,6 +336,11 @@ export interface KitchenBoardItem {
   planned: number
   done: number
   qc_pass_rate?: number
+}
+
+/** GET /api/kitchen/board?date= 完整响应（代理A新增 yield_alerts，未上线时缺省） */
+export interface KitchenBoardResp extends ListResp<KitchenBoardItem> {
+  yield_alerts?: YieldAlert[]
 }
 
 /** 通用列表响应包装 */
@@ -415,6 +441,56 @@ export interface InventoryDoc {
 
 /** data.recv 历史别名：动态字段兼容 Kimi 验货态 */
 export type RecvRecord = InventoryDoc | Record<string, unknown>
+
+/* ---------------- 食材按标准验收（代理A契约，未上线时页面回落） ---------------- */
+
+/** GET /api/inventory/accept-standards → standards 元素 */
+export interface AcceptStandard {
+  ing_name: string
+  brand?: string
+  /** 规格要求 */
+  spec_req?: string
+  /** 感官要求 */
+  sensory?: string
+  /** 重量容差 % */
+  weight_tol_pct?: number
+  /** 温度要求 */
+  temp_req?: string
+  /** 保质期要求 */
+  shelf_life_req?: string
+  /** 索证要求 */
+  cert_req?: string
+}
+
+export interface AcceptStandardsResp {
+  ok: boolean
+  standards: AcceptStandard[]
+}
+
+/** GET /api/inventory/recv-accept?date= → 逐项验收记录 */
+export interface RecvAcceptRecord {
+  recv_id?: string
+  ing_name?: string
+  qty_ordered?: number
+  qty_received?: number
+  qty_rejected?: number
+  /** pass / warn / fail（或中文 合格/让步/拒收） */
+  verdict?: string
+  /** JSON 字符串或对象，可能含 Kimi 验货 rows 明细 */
+  detail?: string | Record<string, unknown> | null
+  batch_no?: string
+  cert_no?: string
+  ts?: string
+  source?: string
+  [k: string]: unknown
+}
+
+export interface RecvAcceptResp {
+  ok: boolean
+  date?: string
+  items?: RecvAcceptRecord[]
+  records?: RecvAcceptRecord[]
+}
 
 /* ---------------- 经营分析（/api/modules/analysis） ---------------- */
 

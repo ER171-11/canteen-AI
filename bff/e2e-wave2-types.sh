@@ -32,7 +32,7 @@ run_one() {
   jcurl -X POST "$BFF/api/actions/$aid/confirm" -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' \
     -d "{\"operator\":\"boss\",\"rev\":\"$REV\"}" >/dev/null
-  BFF_TOKEN=$TOKEN python3 "$ROOT/store-inventory/queue_consumer.py" --once --token "$TOKEN" >/tmp/qc_$aid.log 2>&1 || true
+  BFF_TOKEN=$TOKEN node "$ROOT/bff/store-node/consumer.js" --once --token "$TOKEN" >/tmp/qc_$aid.log 2>&1 || true
   local st
   st=$(jcurl "$BFF/api/actions/$aid/status" -H "Authorization: Bearer $TOKEN" \
     | python3 -c "import sys,json;print(json.load(sys.stdin).get('status'))")
@@ -58,5 +58,25 @@ run_one "dish.price" '{"id":"SKU-WF-HONG","price":39,"reason":"e2e调价"}'
 run_one "dish.price" '{"id":"SKU-WF-HONG","price":38,"reason":"e2e还原"}'
 run_one "dish.set_active" '{"id":"SKU-WF-BAI-SHANYAO","on":false}'
 run_one "dish.set_active" '{"id":"SKU-WF-BAI-SHANYAO","on":true}'
+# 第 13–17 类：食安/验收/工单逐步打卡/出成/补货意向
+run_one "fs.disinfect" '{"area":"洗碗间","method":"紫外","operator":"e2e"}'
+run_one "recv.accept" '{"recv_id":"E2E-RECV","items":[{"ing_name":"高筋面粉","qty_ordered":25,"qty_received":25,"qty_rejected":0,"verdict":"pass","batch_no":"E2E-B1"}]}'
+# 工单：取今日首单做逐步打卡 + 出成推进（无工单则 create）
+WO_ID=$(jcurl "$BFF/api/sop/workorder" -H "Authorization: Bearer $TOKEN" \
+  | python3 -c "import sys,json; w=json.load(sys.stdin).get('workorders') or []; print(w[0]['id'] if w else '')")
+if [ -z "$WO_ID" ]; then
+  run_one "workorder.create" '{"sku_id":"SKU-WF-HONG","qty":20,"status":"待开始","note":"e2e"}'
+  WO_ID=$(jcurl "$BFF/api/sop/workorder" -H "Authorization: Bearer $TOKEN" \
+    | python3 -c "import sys,json; w=json.load(sys.stdin).get('workorders') or []; print(w[0]['id'] if w else '')")
+  BFF_TOKEN=$TOKEN node "$ROOT/bff/store-node/pusher.js" --once --token "$TOKEN" >/dev/null 2>&1 || true
+  REV=$(jcurl "$BFF/api/snapshot/latest" -H "Authorization: Bearer $TOKEN" \
+    | python3 -c "import sys,json;print(json.load(sys.stdin).get('rev'))")
+  WO_ID=$(jcurl "$BFF/api/sop/workorder" -H "Authorization: Bearer $TOKEN" \
+    | python3 -c "import sys,json; w=json.load(sys.stdin).get('workorders') or []; print(w[0]['id'] if w else '')")
+fi
+echo "WO_ID=$WO_ID"
+run_one "workorder.step_clock" "{\"id\":\"$WO_ID\",\"step_no\":1,\"operator\":\"e2e\"}"
+run_one "workorder.advance" "{\"id\":\"$WO_ID\",\"status\":\"已完成\",\"actual_yield\":18}"
+run_one "restock.create" '{"items":[{"ing_id":"I251","name":"香菇","qty":1,"unit":"kg"}],"note":"e2e补货意向"}'
 
-echo "ALL_OK"
+echo "ALL_OK · 17 类写回冒烟通过"

@@ -1,8 +1,8 @@
 # canteenAI BFF
 
-熊猫五福 · **产品三件套**的统一 API 层：原生 App（老板主用）+ SaaS 管理后台（admin-web）+ 本 BFF。
+熊猫五福 · **产品三件套**的统一 API 层：手机原生 App（android/ios，老板主用）+ SaaS 管理后台（admin-web）+ 本 BFF。
 
-HTML 原型仅为功能清单；`boss-app` 仅为同契约预览，不入产品三件套。
+产品三件套 = 手机原生 App + 管理后台 + API（BFF）。旧 HTML 原型与网页版 boss-app 已归档至 `old/`。店内数据节点亦为 Node（`bff/store-node/`），**无 Python 运行时**；业务算法统一在 `bff/lib/algorithms/`（原生 App 与后台同源）。
 
 ## 门店 / 岗位 / 账号
 
@@ -50,7 +50,22 @@ HTML 原型仅为功能清单；`boss-app` 仅为同契约预览，不入产品�
 
 写操作需 `actions.write`。开发可用 `ALLOW_DEMO_LOGIN=1`（默认）在无密码时兼容旧登录。
 
-主数据灌数：`python3 store-inventory/seed_master_data.py`。
+主数据灌数：`python3 store-inventory/seed_master_data.py`（仅数据种子工具，非运行时）。
+
+## 店内节点（bff/store-node，Node）
+
+原 Python 店内服务（server/app.py + snapshot_pusher.py + queue_consumer.py）已整体移植为 Node，复用 `bff/lib/algorithms/`，无 Python 运行时：
+
+| 文件 | 职责 |
+|---|---|
+| `store-node/server.js` | 店内数据库服务（SQLite：docs/snapshots + ext 新表；/api/db、/api/sync、/api/health 等） |
+| `store-node/db.js` / `merge.js` | 存储层与三向合并（受保护核心，平价测试对齐原 Python） |
+| `store-node/pusher.js` | 整库快照推送（店内 → BFF） |
+| `store-node/consumer.js` | 动作队列消费（BFF → 调 `lib/algorithms` → 写回店内 → 回调） |
+| `store-node/seed/*.js` | 数据种子/导入/迁移工具（原 Python `seed_*.py`/`import_orders_excel.py`/`migrate_from_zip.py` 的 Node 移植，含纯 Node docx/xlsx/zip 解析） |
+| `store-node/run-tests.js` · `seed/run-tests.js` | 平价/集成测试总入口 |
+
+一键联调（Node，无 Python）：`bash scripts/dev-up-native.sh`
 
 ## 特性
 

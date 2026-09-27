@@ -215,6 +215,12 @@ data class RecipeDetailResponse(
 
 /** GET /api/sop/workorder?date= */
 @Serializable
+data class WorkorderStepStateDto(
+    @SerialName("done_at") val doneAt: String? = null,
+    val operator: String? = null
+)
+
+@Serializable
 data class WorkorderDto(
     val id: String,
     @SerialName("sku_id") val skuId: String,
@@ -226,10 +232,17 @@ data class WorkorderDto(
     /** 挂桌：前厅传菜对桌 */
     @SerialName("table_id") val tableId: String? = null,
     @SerialName("table_no") val tableNo: String? = null,
-    val steps: List<SopStepDto> = emptyList()
+    val steps: List<SopStepDto> = emptyList(),
+    /** 逐步打卡：key = step_no 字符串 */
+    @SerialName("steps_state")
+    val stepsState: Map<String, WorkorderStepStateDto> = emptyMap(),
+    @SerialName("actual_yield") val actualYield: Double? = null,
+    @SerialName("sop_total") val sopTotal: Int? = null
 ) {
     fun tableLabel(): String? =
         tableNo?.takeIf { it.isNotBlank() } ?: tableId?.takeIf { it.isNotBlank() }
+
+    fun stepDone(stepNo: Int): Boolean = stepsState.containsKey(stepNo.toString())
 }
 
 @Serializable

@@ -230,6 +230,13 @@ fun RestockTab(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Sub
                             )
+                            s.specReq?.takeIf { it.isNotBlank() }?.let { spec ->
+                                Text(
+                                    "规格 $spec",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Sub
+                                )
+                            }
                         }
                         val enabled = AppModule.canWrite()
                         Box(

@@ -68,8 +68,8 @@ REV=$(curl -sf "$BFF/api/snapshot/latest" "${HDR[@]}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin).get('rev'))")
 curl -sf -X POST "$BFF/api/actions/$AID/confirm" "${HDR[@]}" -H 'Content-Type: application/json' \
   -d "{\"operator\":\"admin\",\"rev\":\"$REV\"}" >/dev/null
-if [[ -f "$ROOT/store-inventory/queue_consumer.py" ]]; then
-  BFF_TOKEN=$TOKEN python3 "$ROOT/store-inventory/queue_consumer.py" --once --token "$TOKEN" >/tmp/cross_qc.log 2>&1 || true
+if [[ -f "$ROOT/bff/store-node/consumer.js" ]]; then
+  BFF_TOKEN=$TOKEN node "$ROOT/bff/store-node/consumer.js" --once --token "$TOKEN" >/tmp/cross_qc.log 2>&1 || true
 fi
 ST=$(curl -sf "$BFF/api/actions/$AID/status" "${HDR[@]}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin).get('status'))")

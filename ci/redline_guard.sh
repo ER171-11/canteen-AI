@@ -9,7 +9,7 @@ echo "== R3/R4 受保护文件哈希基线 =="
 if sha256sum -c ci/redline_baseline.sha256; then
   echo "OK: 受保护文件零改动"
 else
-  echo "FAIL: 受保护文件被修改（rebuildStock/dishRecipeCost/seedDB/app.py/db.py/merge.py）"
+  echo "FAIL: 受保护文件被修改（bff/store-node/db.js|merge.js 为店内存储核心，零改动）"
   FAIL=1
 fi
 

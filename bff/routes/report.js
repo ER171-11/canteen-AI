@@ -148,7 +148,7 @@ function deriveReport(snap, date) {
     todos.push({
       kind: 'restock',
       route: 'inventory/restock',
-      text: '断货风险 · ' + lowStock.length + ' 项待补（' + names + '）',
+      text: '库存告急：' + names + ' · ' + lowStock.length + ' 项待补',
       desc: '按日耗/安全线估算，确认后生成采购草稿（不下单入库）',
       done: false
     });
@@ -159,7 +159,7 @@ function deriveReport(snap, date) {
     todos.push({
       kind: 'prep',
       route: 'kitchen',
-      text: '建议备料 · 今日 ' + wosOpen.length + ' 单工单未完成',
+      text: '建议备料 · 今日工单 ' + wosToday.length + ' 单（未完成 ' + wosOpen.length + ' 单）',
       desc: '已完成 ' + wosDone.length + '/' + wosToday.length + ' · 去厨房推进',
       done: false
     });
@@ -195,7 +195,7 @@ function deriveReport(snap, date) {
     todos.push({
       kind: 'channel_booking',
       route: 'm/booking',
-      text: '渠道 · 预订待确认 ' + bookingPending.length + ' 桌',
+      text: '渠道 · 今日预订 ' + bookingPending.length + ' 桌待确认',
       desc: '确认后进入今日备餐',
       done: false
     });

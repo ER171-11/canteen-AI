@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
+  Alert,
   Card,
   Col,
   DatePicker,
+  Empty,
   Progress,
   Row,
   Space,
@@ -14,7 +16,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { Dayjs } from 'dayjs'
 import { fetchKitchenBoard, fetchKitchenQc } from '../../api'
-import type { KitchenBoardItem, QcRecord } from '../../api/types'
+import type { KitchenBoardItem, QcRecord, YieldAlert } from '../../api/types'
 import MockAlert from './components/MockAlert'
 import { colorMeta, colorOrderKey, FIVE_COLOR_ORDER } from './colorMeta'
 import { MOCK_BOARD, MOCK_QC_RECORDS } from './mock'
@@ -23,6 +25,7 @@ import { COLORS } from '../../theme'
 export default function QcPage() {
   const [date, setDate] = useState<Dayjs>(dayjs())
   const [board, setBoard] = useState<KitchenBoardItem[]>([])
+  const [yieldAlerts, setYieldAlerts] = useState<YieldAlert[]>([])
   const [records, setRecords] = useState<QcRecord[]>([])
   const [boardMock, setBoardMock] = useState(false)
   const [qcMock, setQcMock] = useState(false)
@@ -35,10 +38,12 @@ export default function QcPage() {
       fetchKitchenBoard(ds)
         .then((r) => {
           setBoard(r.items ?? [])
+          setYieldAlerts(Array.isArray(r.yield_alerts) ? r.yield_alerts : [])
           setBoardMock(false)
         })
         .catch(() => {
           setBoard(MOCK_BOARD)
+          setYieldAlerts([])
           setBoardMock(true)
         }),
       fetchKitchenQc(ds)
@@ -88,6 +93,45 @@ export default function QcPage() {
       render: (v) => (v ? new Date(v).toLocaleString('zh-CN') : '-'),
     },
     { title: '来源', dataIndex: 'source', render: (v) => v ?? '-' },
+  ]
+
+  const yieldColumns: ColumnsType<YieldAlert> = [
+    {
+      title: '菜品',
+      dataIndex: 'name',
+      render: (v, r) => v ?? r.sku_id ?? r.workorder_id ?? '-',
+    },
+    {
+      title: '理论出成',
+      dataIndex: 'expected_yield',
+      width: 100,
+      align: 'right',
+      render: (v) => (v == null ? '-' : v),
+    },
+    {
+      title: '实际出成',
+      dataIndex: 'actual_yield',
+      width: 100,
+      align: 'right',
+      render: (v) => (v == null ? '-' : v),
+    },
+    {
+      title: '偏差',
+      dataIndex: 'deviation_pct',
+      width: 100,
+      align: 'right',
+      render: (v: number | undefined) => {
+        if (v == null) return '-'
+        const color = Math.abs(v) >= 8 ? COLORS.red : COLORS.yellow
+        return <span style={{ color }}>{v > 0 ? `+${v}%` : `${v}%`}</span>
+      },
+    },
+    {
+      title: '说明',
+      dataIndex: 'note',
+      ellipsis: true,
+      render: (v) => v ?? '-',
+    },
   ]
 
   return (
@@ -141,6 +185,31 @@ export default function QcPage() {
             })}
           </Row>
         </Spin>
+      </Card>
+
+      <Card title="出成偏差告警" size="small" style={{ marginBottom: 16 }}>
+        {yieldAlerts.length === 0 && !loading ? (
+          <Empty description="当日无出成偏差告警" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        ) : (
+          <>
+            {yieldAlerts.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message={`共 ${yieldAlerts.length} 条出成偏差（|偏差|≥8%）`}
+              />
+            )}
+            <Table<YieldAlert>
+              rowKey={(r, i) => String(r.workorder_id ?? r.id ?? r.sku_id ?? i)}
+              columns={yieldColumns}
+              dataSource={yieldAlerts}
+              loading={loading}
+              pagination={false}
+              size="small"
+            />
+          </>
+        )}
       </Card>
 
       <Card title="品控记录" size="small">

@@ -5,7 +5,11 @@
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:algo": "node lib/algorithms/run-tests.js",
+    "test:store": "node store-node/run-tests.js",
+    "test:seed": "node store-node/seed/run-tests.js",
+    "test": "node lib/algorithms/run-tests.js && node store-node/run-tests.js && node store-node/seed/run-tests.js"
   },
   "private": true,
   "license": "UNLICENSED"

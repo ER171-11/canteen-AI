@@ -143,6 +143,67 @@ async function handle(req, res, ctx, pathname) {
   }
 
   // /api/actions/{id}/confirm|status|execute|reject
+  // POST /api/actions/{id}/apply —— BFF 侧执行已迁移算法（作用于云端快照副本）
+  const am = pathname.match(/^\/api\/actions\/([^/]+)\/apply$/);
+  if (am && req.method === 'POST') {
+    if (!ctx.auth || !mayWriteActions(ctx.auth)) {
+      ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: actions.write required' });
+      return true;
+    }
+    const id = am[1];
+    const q = loadQueue();
+    if (sweep(q)) saveQueue(q);
+    const a = q.find((x) => x.id === id);
+    if (!a) {
+      ctx.sendJSON(res, 404, { ok: false, error: 'action not found', id });
+      return true;
+    }
+    if (OPEN_STATES.indexOf(a.status) < 0) {
+      ctx.sendJSON(res, 409, { ok: false, error: 'invalid state: ' + a.status, id, status: a.status });
+      return true;
+    }
+    const { executeAction } = require('../lib/algorithms/execute');
+    const snap = loadSnapshot();
+    if (!snap) {
+      ctx.sendJSON(res, 409, { ok: false, error: 'no snapshot', id });
+      return true;
+    }
+    const out = executeAction(snap, a);
+    if (!out.handled) {
+      // 未登记的算法：交回店内消费者（need-manual），不静默丢弃
+      ctx.sendJSON(res, 422, { ok: false, error: out.error, id, status: a.status, route: 'store-consumer' });
+      return true;
+    }
+    if (!out.ok) {
+      a.status = '已驳回';
+      a.error = out.error;
+      a.executed_at = new Date().toISOString();
+      a.updated_at = a.executed_at;
+      saveQueue(q);
+      ctx.sendJSON(res, 200, { ok: false, id, status: a.status, error: a.error });
+      return true;
+    }
+    // 落库新快照：rev 自增，保证 confirm 的 rev 校验语义
+    const store = require('../lib/store');
+    const newRev = typeof snap.rev === 'number' ? snap.rev + 1 : 1;
+    const next = Object.assign({}, out.snapshot, {
+      rev: newRev,
+      generated_at: new Date().toISOString()
+    });
+    store.writeJSON('snapshot.json', next);
+    a.status = '已执行';
+    a.result = out.result == null ? null : out.result;
+    a.error = null;
+    a.executed_at = next.generated_at;
+    a.updated_at = a.executed_at;
+    saveQueue(q);
+    ctx.sendJSON(res, 200, {
+      ok: true, id, status: a.status, rev: newRev,
+      executed_at: a.executed_at, result: a.result
+    });
+    return true;
+  }
+
   const m = pathname.match(/^\/api\/actions\/([^/]+)\/(confirm|status|execute|reject)$/);
   if (m) {
     const id = m[1];

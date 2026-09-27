@@ -29,6 +29,22 @@ jobs:
           sleep 1
           bash test_contract.sh
 
+  algorithms-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 算法层平价测试（Node 新实现 vs Python 原实现）
+        run: |
+          cd bff
+          node lib/algorithms/run-tests.js
+
+
   admin-web-build:
     runs-on: ubuntu-latest
     steps:
@@ -44,17 +60,21 @@ jobs:
           npm ci
           npm run build
 
-  store-inventory-check:
+  store-node:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Python 语法检查 + DDL 幂等验证
+      - name: 店内节点(Node) + seed 测试 + DDL 幂等
         run: |
-          python3 -m py_compile store-inventory/snapshot_pusher.py store-inventory/queue_consumer.py
-          cp store-inventory/data/餐厅系统.db /tmp/test_ci.db
+          node bff/store-node/run-tests.js
+          node bff/store-node/seed/run-tests.js
+          rm -f /tmp/test_ci.db
           sqlite3 /tmp/test_ci.db < store-inventory/migrations/001_new_tables.sql
           sqlite3 /tmp/test_ci.db < store-inventory/migrations/001_new_tables.sql
           sqlite3 /tmp/test_ci.db "SELECT count(*) FROM sqlite_master WHERE type='table';"

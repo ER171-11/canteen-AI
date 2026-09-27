@@ -227,7 +227,7 @@ object BossIa {
         )
         /** 本席写出的确认 type */
         val actionTypes = listOf(
-            "restock.create", "order.mark", "recv.inbound",
+            "restock.create", "order.mark", "recv.inbound", "recv.accept",
             "ing.upsert", "vendor.upsert", "stock.count"
         )
     }
@@ -250,7 +250,7 @@ object BossIa {
             "菜谱" to listOf("出品标准 SOP", "标准 BOM 分量", "份量换算", "替代料（须确认）", "转工单 / 转采购", "改标准须确认台")
         )
         val actionTypes = listOf(
-            "workorder.create", "workorder.advance",
+            "workorder.create", "workorder.advance", "workorder.step_clock",
             "recipe.upsert", "recipe.substitute", "restock.create"
         )
     }

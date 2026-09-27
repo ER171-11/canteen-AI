@@ -3,6 +3,7 @@ package com.pandawufu.app.features.home
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -288,6 +291,60 @@ fun HomeScreen(
                     valueSuffix = orders?.let { "· $it 单" },
                     delta = if (report?.mock == true) "演示数据 · 推送快照会切换成真数" else delta
                 )
+                val actualKpiSpecs = listOf(
+                    Triple("订单", listOf("订单", "单量"), "单"),
+                    Triple("实收", listOf("实收", "净营收"), ""),
+                    Triple("毛利率", listOf("毛利率", "毛利"), "%"),
+                    Triple("客单价", listOf("客单价", "客单"), "")
+                )
+                val actualKpis = actualKpiSpecs.mapNotNull { (title, labels, unit) ->
+                    val metric = report?.kpi?.firstOrNull { k -> labels.any { k.label.contains(it) } }
+                    metric?.let { Triple(title, withMetricUnit(it.value, unit), it.delta) }
+                }
+                val actualTrend = modulesState.analysis?.trend.orEmpty()
+                    .filter { it.revenue != null }
+                    .takeLast(7)
+                if (actualKpis.isNotEmpty() || actualTrend.isNotEmpty()) {
+                    PandaCard {
+                        CardHeader("经营实绩", more = "完整经营分析 ›") {
+                            openModule(Routes.M_ANALYSIS)
+                        }
+                        Text(
+                            if (report?.mock == true) "演示数据 · 仅作界面参考" else "来自门店日报与经营记录 · 不含预测",
+                            fontSize = 10.sp,
+                            color = Sub
+                        )
+                        if (actualKpis.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            KpiGrid(actualKpis, columns = 2)
+                        }
+                        if (actualTrend.isNotEmpty()) {
+                            Spacer(Modifier.height(12.dp))
+                            Text("近${actualTrend.size}日营收", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
+                            Spacer(Modifier.height(4.dp))
+                            Canvas(Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 3.dp, vertical = 5.dp)) {
+                                val values = actualTrend.mapNotNull { it.revenue }.map { it.toFloat() }
+                                if (values.size > 1) {
+                                    val low = values.minOrNull() ?: 0f
+                                    val high = values.maxOrNull() ?: 1f
+                                    val span = (high - low).coerceAtLeast(1f)
+                                    val path = Path()
+                                    values.forEachIndexed { index, value ->
+                                        val x = size.width * index / (values.size - 1)
+                                        val y = size.height - ((value - low) / span) * (size.height * .78f) - size.height * .1f
+                                        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                                    }
+                                    drawPath(path, color = AiPink, style = Stroke(width = 4f))
+                                }
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                actualTrend.forEach { item ->
+                                    Text(item.date?.takeLast(5) ?: item.week ?: "", fontSize = 9.sp, color = Sub)
+                                }
+                            }
+                        }
+                    }
+                }
                 // 新店/无快照：给老板明确下一步，避免空进销死磕
                 if (report?.mock == true || state.rev.isNullOrBlank()) {
                     PandaCard {
@@ -830,7 +887,7 @@ fun HomeScreen(
                 forecast?.days?.any { it.pred != null } == true
             if (hasGlance) {
                 PandaCard {
-                    CardHeader("老板一眼 · AI", more = "经营分析 ›") {
+                    CardHeader("经营提示 · AI", more = "经营分析 ›") {
                         openModule(Routes.M_ANALYSIS)
                     }
                     Text(
@@ -838,13 +895,6 @@ fun HomeScreen(
                         fontSize = 11.sp,
                         color = Sub
                     )
-                    if (kpis.isNotEmpty()) {
-                        Spacer(Modifier.height(8.dp))
-                        KpiGrid(
-                            items = kpis.take(4).map { Triple(it.label, it.value, it.delta) },
-                            columns = 2
-                        )
-                    }
                     if (heat.isNotEmpty()) {
                         Spacer(Modifier.height(10.dp))
                         Text("时段热力", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -1000,4 +1050,9 @@ private fun parseMoneyYuan(raw: String?): Double? {
         else -> 1.0
     }
     return s.toDoubleOrNull()?.times(mult)
+}
+
+private fun withMetricUnit(value: String, unit: String): String {
+    if (value.isBlank() || value == "—" || unit.isBlank()) return value
+    return if (value.endsWith(unit)) value else "$value$unit"
 }

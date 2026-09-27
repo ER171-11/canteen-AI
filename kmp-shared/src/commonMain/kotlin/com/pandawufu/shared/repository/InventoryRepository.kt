@@ -1,7 +1,9 @@
 package com.pandawufu.shared.repository
 
+import com.pandawufu.shared.model.AcceptStandardDto
 import com.pandawufu.shared.model.IngredientDto
 import com.pandawufu.shared.model.PosTableDto
+import com.pandawufu.shared.model.RecvAcceptRecordDto
 import com.pandawufu.shared.model.RecvRecordDto
 import com.pandawufu.shared.model.RestockSuggestItemDto
 import com.pandawufu.shared.model.SnapshotDataDto
@@ -30,7 +32,9 @@ data class RestockSuggestion(
     val safe: Double? = null,
     val daysLeft: Double? = null,
     val urgency: String? = null,
-    val source: String? = null
+    val source: String? = null,
+    /** 验收标准规格：采购员照着买 */
+    val specReq: String? = null
 )
 
 /**
@@ -94,7 +98,8 @@ object StockPolicy {
             safe = item.safe,
             daysLeft = item.daysLeft,
             urgency = item.urgency,
-            source = item.source
+            source = item.source,
+            specReq = item.specReq
         )
 }
 
@@ -106,6 +111,10 @@ interface InventoryRepository {
     suspend fun purchaseOrders(): List<RecvRecordDto>
     suspend fun recvRecords(): List<RecvRecordDto>
     suspend fun posTables(): List<PosTableDto>
+    /** 食材验收标准库（GET /api/inventory/accept-standards） */
+    suspend fun acceptStandards(): List<AcceptStandardDto>
+    /** 逐项验收记录（GET /api/inventory/recv-accept） */
+    suspend fun recvAccept(date: String? = null): List<RecvAcceptRecordDto>
 }
 
 class InventoryRepositoryImpl(private val bff: BffClient) : InventoryRepository {
@@ -157,4 +166,14 @@ class InventoryRepositoryImpl(private val bff: BffClient) : InventoryRepository 
 
     override suspend fun posTables(): List<PosTableDto> =
         snapshot().data?.pos.orEmpty()
+
+    override suspend fun acceptStandards(): List<AcceptStandardDto> {
+        val r = runCatching { bff.acceptStandards() }.getOrNull() ?: return emptyList()
+        return if (r.ok) r.standards else emptyList()
+    }
+
+    override suspend fun recvAccept(date: String?): List<RecvAcceptRecordDto> {
+        val r = runCatching { bff.recvAccept(date) }.getOrNull() ?: return emptyList()
+        return if (r.ok) r.all() else emptyList()
+    }
 }

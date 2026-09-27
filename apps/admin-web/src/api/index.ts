@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { client } from './client'
 import type {
+  AcceptStandardsResp,
   ActionItem,
   ActionStatus,
   AnalysisResp,
@@ -8,13 +9,15 @@ import type {
   Dish,
   FoodsafeResp,
   Health,
-  KitchenBoardItem,
+  KitchenBoardResp,
   ListResp,
   LoginRequest,
   LoginResponse,
   QcRecord,
   RecipeDetailResp,
   RecipesResp,
+  RecvAcceptRecord,
+  RecvAcceptResp,
   ReportDaily,
   Snapshot,
   StaffModuleResp,
@@ -160,6 +163,8 @@ export interface RestockSuggestItem {
   reason?: string
   source?: string
   urgency?: 'critical' | 'low' | 'watch'
+  /** 验收标准规格要求（代理A新增）：采购员照着买 */
+  spec_req?: string
 }
 
 /** GET /api/inventory/restock-suggest — 服务端补货建议（est/plans 口径） */
@@ -273,13 +278,27 @@ export async function fetchKitchenQc(date: string): Promise<ListResp<QcRecord>> 
 }
 
 /** GET /api/kitchen/board?date= */
-export async function fetchKitchenBoard(
-  date: string,
-): Promise<ListResp<KitchenBoardItem>> {
-  const { data } = await client.get<ListResp<KitchenBoardItem>>('/kitchen/board', {
+export async function fetchKitchenBoard(date: string): Promise<KitchenBoardResp> {
+  const { data } = await client.get<KitchenBoardResp>('/kitchen/board', {
     params: { date },
   })
   return data
+}
+
+/* ---------------- 食材按标准验收（代理A契约） ---------------- */
+
+/** GET /api/inventory/accept-standards */
+export async function fetchAcceptStandards(): Promise<AcceptStandardsResp> {
+  const { data } = await client.get<AcceptStandardsResp>('/inventory/accept-standards')
+  return data
+}
+
+/** GET /api/inventory/recv-accept?date= — items/records 两种包装兼容 */
+export async function fetchRecvAccept(date?: string): Promise<RecvAcceptRecord[]> {
+  const { data } = await client.get<RecvAcceptResp>('/inventory/recv-accept', {
+    params: date ? { date } : undefined,
+  })
+  return data.items ?? data.records ?? []
 }
 
 /* ---------------- Sprint 2：modules 只读端点 + 审计 ---------------- */

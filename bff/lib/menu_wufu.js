@@ -1,6 +1,6 @@
 'use strict';
 /*
- * 金丰御字牌五福饺子菜单真源（与 boss-app/public/menu-wufu.json 同源）
+ * 金丰御字牌五福饺子菜单真源（与 old/apps/boss-app/public/menu-wufu.json 同源）
  * 供厨房菜谱列表合并：补全白饺/煎饺/蒸饺 + face_detail 面主料文案
  */
 const fs = require('fs');
@@ -8,7 +8,7 @@ const path = require('path');
 
 const MENU_PATHS = [
   path.join(__dirname, '../data/menu-wufu.json'),
-  path.join(__dirname, '../../apps/boss-app/public/menu-wufu.json')
+  path.join(__dirname, '../../old/apps/boss-app/public/menu-wufu.json')
 ];
 
 let _cache = null;

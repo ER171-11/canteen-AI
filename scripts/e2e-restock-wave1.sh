@@ -31,7 +31,7 @@ curl -sf -X POST "$BFF/api/actions/$AID/confirm" \
   | python3 -c "import sys,json;d=json.load(sys.stdin);assert d.get('ok') and d.get('status')=='待执行', d"
 
 echo "== consume once =="
-python3 "$ROOT/store-inventory/queue_consumer.py" --once --token "$TOKEN" --bff-url "$BFF" --store-url "$STORE" 2>&1 | tail -5
+node "$ROOT/bff/store-node/consumer.js" --once --token "$TOKEN" --bff-url "$BFF" --store-url "$STORE" 2>&1 | tail -5
 
 echo "== status =="
 curl -sf "$BFF/api/actions/$AID/status" -H "Authorization: Bearer $TOKEN" \

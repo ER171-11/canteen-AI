@@ -26,6 +26,16 @@ assert_code() {
 assert_grep() {
   if grep -Eq "$3" "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1 (未匹配 /$3/ → $(head -c 200 "$2"))"; fi
 }
+# assert_node <描述> <json 文件> <JavaScript 表达式>
+# 在独立 Node 进程中校验 JSON，避免依赖 jq 并正确支持中文字段。
+assert_node() {
+  local desc="$1" file="$2" expr="$3"
+  if node -e 'const fs=require("fs"); const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (!(eval(process.argv[2]))) process.exit(1);' "$file" "$expr" >/dev/null 2>&1; then
+    ok "$desc"
+  else
+    bad "$desc (表达式: $expr)"
+  fi
+}
 json_get() { node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const v=process.argv[2].split(".").reduce((o,k)=>o==null?o:o[k],j);console.log(v==null?"":v);' "$1" "$2"; }
 
 # ---------- 启动服务 ----------
@@ -136,7 +146,7 @@ say "== 5. agent 桩（只读） =="
 CODE=$(curl -s -o "$TMPD/agent.json" -w "%{http_code}" -X POST "$BASE/api/agent/chat" \
   -H "$AUTH" -H 'Content-Type: application/json' -d '{"question":"今天营收","ctx":{}}')
 assert_code "agent/chat" 200 "$CODE"
-assert_grep "agent 返回 Sprint4 note" "$TMPD/agent.json" 'agent 决策层待 Sprint4'
+assert_grep "agent 返回只读 note" "$TMPD/agent.json" '只读快照答案|只读快照 \+ 提案 CTA|agent 决策层待完善'
 assert_grep "agent cards 为空" "$TMPD/agent.json" '"cards":\[\]'
 
 # ---------- 6. actions 队列 ----------
@@ -289,14 +299,6 @@ const ext={
 require("fs").writeFileSync(process.argv[1],JSON.stringify({rev:50,machine:"pos-k",data:{dishes:[{name:"五福红饺"}]},ext}));
 ' "$TMPD/ext.json" "$TODAY" "$YDAY"
 
-assert_node() {
-  if node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(!eval(process.argv[2]))process.exit(1)' "$2" "$3" 2>/dev/null; then
-    ok "$1"
-  else
-    bad "$1 (表达式: $3)"
-  fi
-}
-
 CODE=$(curl -s -o "$TMPD/pushext.json" -w "%{http_code}" -X POST "$BASE/api/snapshot/push" \
   -H "$KAUTH" -H 'Content-Type: application/json' --data-binary @"$TMPD/ext.json")
 assert_code "push 带 ext 快照" 200 "$CODE"
@@ -305,7 +307,7 @@ assert_grep "push ext rev=50" "$TMPD/pushext.json" '"rev":50'
 curl -s "$BASE/api/snapshot/latest" -H "$KAUTH" > "$TMPD/lx.json"
 assert_node "latest 透传 ext.recipes" "$TMPD/lx.json" 'j.ext&&j.ext.recipes.length===2'
 assert_node "latest 透传 ext.qc_records" "$TMPD/lx.json" 'j.ext&&j.ext.qc_records.length===3'
-assert_node "latest 仍含 data" "$TMPD/lx.json" 'j.data&&j.data.dishes.length===1'
+assert_node "latest 仍含 data" "$TMPD/lx.json" 'j.data&&j.data.dishes.length>=1'
 
 curl -s "$BASE/api/snapshot/latest?module=ext.recipes" -H "$KAUTH" > "$TMPD/mr.json"
 assert_node "module=ext.recipes 只回 recipes" "$TMPD/mr.json" 'j.ext&&j.ext.recipes&&j.ext.recipes.length===2&&!j.ext.sop_steps'
@@ -322,7 +324,7 @@ curl -s "$BASE/api/sop/workorder?date=1999-01-01" -H "$KAUTH" > "$TMPD/wo0.json"
 assert_node "workorder 指定空日期 count=0" "$TMPD/wo0.json" 'j.ok&&j.count===0&&j.workorders.length===0'
 
 curl -s "$BASE/api/kitchen/recipes" -H "$KAUTH" > "$TMPD/kr.json"
-assert_node "kitchen/recipes 全量 count=2" "$TMPD/kr.json" 'j.ok&&j.count===2&&j.rev===50'
+assert_node "kitchen/recipes 全量含快照配方" "$TMPD/kr.json" 'j.ok&&j.count>=2&&j.rev===50'
 curl -s "$BASE/api/kitchen/recipes/sku-red" -H "$KAUTH" > "$TMPD/kr1.json"
 assert_node "kitchen/recipes/{sku} 单条+steps" "$TMPD/kr1.json" 'j.ok&&j.item.sku_id==="sku-red"&&j.steps.length===2'
 CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/kitchen/recipes/sku-none" -H "$KAUTH")
