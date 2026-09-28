@@ -15,6 +15,7 @@ interface ModulesRepository {
     suspend fun finance(): FinanceModuleDto
     suspend fun loss(): LossModuleDto
     suspend fun supply(): SupplyModuleDto
+    suspend fun pos(): PosModuleDto
 }
 
 class ModulesRepositoryImpl(private val bff: BffClient) : ModulesRepository {
@@ -29,12 +30,23 @@ class ModulesRepositoryImpl(private val bff: BffClient) : ModulesRepository {
     override suspend fun finance(): FinanceModuleDto = bff.modulesFinance()
     override suspend fun loss(): LossModuleDto = bff.modulesLoss()
     override suspend fun supply(): SupplyModuleDto = bff.modulesSupply()
+    override suspend fun pos(): PosModuleDto = bff.modulesPos()
 }
 
 interface AgentRepository {
     suspend fun chat(question: String): AgentChatResponse
+    /** 流式问店（SSE）：stage/delta/done/error；失败时调用方回退 [chat] */
+    fun chatStream(question: String): kotlinx.coroutines.flow.Flow<com.pandawufu.shared.network.AgentSseEvent>
 }
 
-class AgentRepositoryImpl(private val bff: BffClient) : AgentRepository {
+class AgentRepositoryImpl(
+    private val bff: BffClient,
+    private val sse: com.pandawufu.shared.network.SseClient? = null
+) : AgentRepository {
     override suspend fun chat(question: String): AgentChatResponse = bff.agentChat(question)
+
+    override fun chatStream(question: String): kotlinx.coroutines.flow.Flow<com.pandawufu.shared.network.AgentSseEvent> {
+        val client = sse ?: throw IllegalStateException("SSE client not configured")
+        return client.agentStream(question)
+    }
 }

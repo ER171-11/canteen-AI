@@ -2,6 +2,7 @@ package com.pandawufu.shared.network
 
 import com.pandawufu.shared.model.KimiResultDto
 import com.pandawufu.shared.model.KimiVisionRequest
+import com.pandawufu.shared.model.AgentActionCard
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -9,6 +10,9 @@ import io.ktor.utils.io.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -18,6 +22,22 @@ sealed class SseEvent {
     data class Delta(val delta: String) : SseEvent()
     data class Done(val result: KimiResultDto, val model: String?, val traceId: String?) : SseEvent()
     data class Error(val message: String, val traceId: String?) : SseEvent()
+}
+
+/** SI 指挥台流式事件：对齐 BFF /api/agent/stream。 */
+sealed class AgentSseEvent {
+    /** 工具进度：stage=thinking 或 tool:<name> */
+    data class Stage(val stage: String, val tool: String?) : AgentSseEvent()
+    data class Delta(val delta: String) : AgentSseEvent()
+    data class Done(
+        val answer: String,
+        val cards: List<AgentActionCard>,
+        val engine: String?,
+        val suggestions: List<String>,
+        val rev: String?,
+        val traceId: String?
+    ) : AgentSseEvent()
+    data class Error(val message: String, val traceId: String?) : AgentSseEvent()
 }
 
 /**
@@ -74,6 +94,71 @@ class SseClient(private val bff: BffClient) {
             "error" -> SseEvent.Error(
                 message = obj["error"]?.jsonPrimitive?.content ?: "unknown",
                 traceId = obj["traceId"]?.jsonPrimitive?.content
+            )
+            else -> null
+        }
+    }.getOrNull()
+
+    /**
+     * SSE 流式问店：POST /api/agent/stream {question}。
+     * 事件：stage(thinking/tool) → delta(逐字) → done({answer,cards,engine,suggestions,rev}) / error。
+     */
+    fun agentStream(question: String): Flow<AgentSseEvent> = flow {
+        bff.http.preparePost("${bff.baseUrl}/api/agent/stream") {
+            contentType(ContentType.Application.Json)
+            accept(ContentType.Text.EventStream)
+            setBody(mapOf("question" to question))
+        }.execute { response ->
+            val channel: ByteReadChannel = response.bodyAsChannel()
+            var eventName = ""
+            val dataLines = StringBuilder()
+            while (!channel.isClosedForRead) {
+                val line = channel.readUTF8Line() ?: break
+                when {
+                    line.startsWith("event:") -> eventName = line.removePrefix("event:").trim()
+                    line.startsWith("data:") -> dataLines.append(line.removePrefix("data:").trim())
+                    line.isBlank() -> {
+                        if (dataLines.isNotEmpty()) {
+                            parseAgentEvent(eventName, dataLines.toString())?.let { emit(it) }
+                        }
+                        eventName = ""
+                        dataLines.clear()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun parseAgentEvent(name: String, data: String): AgentSseEvent? = runCatching {
+        val obj = Json.parseToJsonElement(data).jsonObject
+        when (name) {
+            "stage" -> AgentSseEvent.Stage(
+                stage = obj["stage"]?.jsonPrimitive?.contentOrNull ?: "",
+                tool = obj["tool"]?.jsonPrimitive?.contentOrNull
+            )
+            "delta" -> AgentSseEvent.Delta(obj["delta"]?.jsonPrimitive?.contentOrNull ?: "")
+            "done" -> {
+                val json = Json { ignoreUnknownKeys = true }
+                val cards = (obj["cards"] as? JsonElement)?.jsonArray
+                    ?.mapNotNull { el ->
+                        runCatching {
+                            json.decodeFromJsonElement(AgentActionCard.serializer(), el)
+                        }.getOrNull()
+                    } ?: emptyList()
+                val suggestions = obj["suggestions"]?.jsonArray
+                    ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                AgentSseEvent.Done(
+                    answer = obj["answer"]?.jsonPrimitive?.contentOrNull ?: "",
+                    cards = cards,
+                    engine = obj["engine"]?.jsonPrimitive?.contentOrNull,
+                    suggestions = suggestions,
+                    rev = obj["rev"]?.jsonPrimitive?.contentOrNull,
+                    traceId = obj["traceId"]?.jsonPrimitive?.contentOrNull
+                )
+            }
+            "error" -> AgentSseEvent.Error(
+                message = obj["error"]?.jsonPrimitive?.contentOrNull ?: "unknown",
+                traceId = obj["traceId"]?.jsonPrimitive?.contentOrNull
             )
             else -> null
         }

@@ -202,6 +202,9 @@ data class PosTableDto(
     val state: String = "free",
     val seats: Int? = null,
     val zone: String? = null,
+    /** 绑定会员（储值结账联动扣减用） */
+    @SerialName("vip_member_id") val vipMemberId: String? = null,
+    @SerialName("vip_name") val vipName: String? = null,
     /** 挂单金额（开台/绑桌后） */
     val amount: Double? = null,
     @SerialName("bill_summary") val billSummary: String? = null,

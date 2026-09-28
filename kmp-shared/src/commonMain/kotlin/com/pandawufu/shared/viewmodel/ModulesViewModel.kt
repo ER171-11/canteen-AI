@@ -33,7 +33,8 @@ class ModulesViewModel(
         val equipment: EquipmentModuleDto? = null,
         val finance: FinanceModuleDto? = null,
         val loss: LossModuleDto? = null,
-        val supply: SupplyModuleDto? = null
+        val supply: SupplyModuleDto? = null,
+        val pos: PosModuleDto? = null
     )
 
     sealed interface Intent {
@@ -48,6 +49,7 @@ class ModulesViewModel(
         data object LoadFinance : Intent
         data object LoadLoss : Intent
         data object LoadSupply : Intent
+        data object LoadPos : Intent
     }
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
@@ -67,6 +69,7 @@ class ModulesViewModel(
             Intent.LoadFinance -> load({ repo.finance() }) { s, d -> s.copy(finance = d) }
             Intent.LoadLoss -> load({ repo.loss() }) { s, d -> s.copy(loss = d) }
             Intent.LoadSupply -> load({ repo.supply() }) { s, d -> s.copy(supply = d) }
+            Intent.LoadPos -> load({ repo.pos() }) { s, d -> s.copy(pos = d) }
         }
     }
 
