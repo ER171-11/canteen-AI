@@ -371,6 +371,22 @@ function applyLossReport(data, payload, ctx) {
   if (qty === 0) throw new Error('loss.report 数量不能为 0');
   const gid = resolveIngId(data, payload);
   const name = payload.name || payload.ing_name || '未命名损耗';
+
+  // 待审批模式：仅登记报损单，不动账面；由 loss.approve 审批后再扣库存
+  if (payload.pending === true) {
+    let dbNote0 = '';
+    if (storeInsert(ctx, 'loss_reports', {
+      date: payload.date || today(),
+      ing_name: payload.ing_name || payload.name || '',
+      qty: payload.qty,
+      reason: payload.reason || '',
+      reporter: payload.reporter || 'QUEUE',
+      status: '待审核',
+      source: 'queue'
+    })) dbNote0 = ' + loss_reports写入';
+    return '报损登记待审批 ' + name + ' × ' + pf(qty) + dbNote0;
+  }
+
   logs.push({
     id: uid('L', 8),
     kind: 'loss',
@@ -805,6 +821,78 @@ function insertSupplyPo(ctx, payload) {
   return wrote ? 'sup_accounts写入' : 'sup_accounts未写库';
 }
 
+/** 报损单定位：兼容 sqlite(get/query) 与 ext.loss_reports */
+function findLossReport(ctx, id) {
+  if (ctx && ctx.store) {
+    if (typeof ctx.store.get === 'function') {
+      try { const r = ctx.store.get('loss_reports', id); if (r) return r; } catch (e) { /* ignore */ }
+    }
+    if (ctx.store.ext && Array.isArray(ctx.store.ext.loss_reports)) {
+      const r = ctx.store.ext.loss_reports.find((x) => String((x && x.id)) === String(id));
+      if (r) return r;
+    }
+    if (typeof ctx.store.query === 'function') {
+      try {
+        const rows = ctx.store.query(
+          'SELECT id, ing_name, qty, amount, reason, status, date FROM loss_reports WHERE id = ?', [id]
+        );
+        if (Array.isArray(rows) && rows.length) return rows[0];
+      } catch (e) { /* ignore */ }
+    }
+  }
+  return null;
+}
+
+/**
+ * loss.approve —— 报损审批：状态 待审核→已审批，并扣库存（盘点调整 + rebuildStock）。
+ * 幂等：已审批直接跳过；已驳回拒绝审批。
+ */
+function approveLossReport(ctx, data, payload) {
+  const id = payload.id;
+  if (id === null || id === undefined || String(id).trim() === '') throw new Error('loss.approve 缺 id');
+  const row = findLossReport(ctx, id);
+  if (!row) throw new Error('报损单不存在: ' + id);
+  const st = String(row.status || '待审核');
+  if (/已审批|已通过/.test(st)) return 'loss_reports#' + id + ' 已审批（跳过）';
+  if (/驳回|作废/.test(st)) throw new Error('报损单已驳回，不能审批: ' + id);
+
+  let qty = 0;
+  try { qty = Math.abs(toFloat(row.qty || 0)); } catch (e) { qty = 0; }
+  if (qty === 0) throw new Error('报损数量为 0，不能审批');
+
+  if (data.logs === undefined || data.logs === null) data.logs = [];
+  const gid = resolveIngId(data, { name: row.ing_name, ing: row.ing });
+  data.logs.push({
+    id: uid('L', 8), kind: 'loss', name: row.ing_name || '报损', qty: qty,
+    amount: pt(row.amount), reason: row.reason || '', ts: nowIso(), source: 'approve', ing: gid
+  });
+  let rbNote = '';
+  if (gid) {
+    data.logs.push({
+      type: '盘点调整', ing: gid, date: row.date || today(), qty: -qty,
+      ref: '报损审批·' + (row.reason || row.ing_name || ''), source: 'approve'
+    });
+    rbNote = rebuildStock(data);
+  }
+  if (ctx && ctx.store && typeof ctx.store.update === 'function') {
+    ctx.store.update('loss_reports', { status: '已审批' }, { id: id });
+  }
+  return '报损审批扣库存 ' + (row.ing_name || '') + ' × ' + qty
+    + (gid ? ('（' + rbNote + '）') : '（未匹配原料，库存未扣）');
+}
+
+/** loss.reject —— 报损驳回：状态 → 已驳回，不扣库存 */
+function rejectLossReport(ctx, data, payload) {
+  const id = payload.id;
+  if (id === null || id === undefined || String(id).trim() === '') throw new Error('loss.reject 缺 id');
+  const row = findLossReport(ctx, id);
+  if (row && /已审批|已通过/.test(String(row.status || ''))) throw new Error('已审批单据不能驳回: ' + id);
+  if (ctx && ctx.store && typeof ctx.store.update === 'function') {
+    ctx.store.update('loss_reports', { status: '已驳回', reason: payload.reason || (row && row.reason) || '' }, { id: id });
+  }
+  return 'loss_reports#' + id + ' → 已驳回';
+}
+
 module.exports = {
   parseLineQty,
   resolveIngId,
@@ -813,6 +901,8 @@ module.exports = {
   applyIngUpsert,
   applyQuoteUpsert,
   applyLossReport,
+  approveLossReport,
+  rejectLossReport,
   applyRecvInbound,
   insertRecvAccept,
   applyStockCount,

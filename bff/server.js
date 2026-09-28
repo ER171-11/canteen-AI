@@ -22,6 +22,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 
 /* ------------------------------------------------------------------ */
 /* .env 加载（简易零依赖：仅读 KIMI_API_KEY，不依赖 dotenv）          */
@@ -62,12 +63,19 @@ const ROUTES = [
   require('./routes/inventory'),
   require('./routes/actions'),
   require('./routes/agent'),
+  require('./routes/inbox'),
+  require('./routes/policies'),
+  require('./routes/si'),
+  require('./routes/workbench'),
   require('./routes/admin'),
   require('./routes/kitchen'),
-  require('./routes/modules')
+  require('./routes/modules'),
+  require('./routes/app_release')
 ];
 
-const HOST = process.env.BFF_HOST || '127.0.0.1';
+// 默认绑 0.0.0.0：允许同一局域网设备访问（App 安装包下载 / 管理后台联调）。
+// 仅回环部署可设 BFF_HOST=127.0.0.1。
+const HOST = process.env.BFF_HOST || '0.0.0.0';
 const PORT = parseInt(process.env.BFF_PORT || '8787', 10);
 
 /* ------------------------------------------------------------------ */
@@ -125,6 +133,8 @@ function isPublic(method, pathname) {
   if (method === 'GET' && (pathname === '/' || pathname === '/health' || pathname === '/api/health')) return true;
   if (method === 'POST' && (pathname === '/api/auth/login' || pathname === '/api/auth/register' || pathname === '/api/admin/login' || pathname === '/api/auth/wechat')) return true;
   if (method === 'GET' && pathname === '/api/auth/wechat/config') return true;
+  // App 安装包：局域网扫码下载必须免登录（只读构建产物，不涉业务数据）
+  if ((method === 'GET' || method === 'HEAD') && (pathname === '/api/app/release' || pathname === '/api/app/download')) return true;
   return false;
 }
 
@@ -254,7 +264,22 @@ server.listen(PORT, HOST, () => {
   console.log(`[BFF] models: ${kimi.MODEL_CANDIDATES.join(' -> ')}`);
   console.log('[BFF] endpoints: GET / /health /api/health | POST /api/kimi/vision(/stream)'
     + ' | /api/auth/login /api/admin/login | /api/snapshot/push /api/snapshot/latest'
-    + ' | /api/report/daily | /api/agent/chat | /api/actions* | /api/admin/*');
+    + ' | /api/report/daily /api/report/briefing | /api/agent/chat(/stream) /api/inbox(/stream)'
+    + ' | /api/actions* | /api/admin/* | /api/app/release /api/app/download');
+  // 局域网可达地址：供手机扫码下载 App 安装包
+  try {
+    const ips = [];
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const info of ifaces[name] || []) {
+        if (info.family === 'IPv4' && !info.internal) ips.push(info.address);
+      }
+    }
+    for (const ip of ips) console.log(`[BFF] LAN        http://${ip}:${PORT}  (App 下载: http://${ip}:${PORT}/api/app/download)`);
+  } catch (e) {}
+  try { require('./lib/scheduler').start(); } catch (e) {
+    console.error('[BFF][scheduler] start failed:', e && e.message);
+  }
 });
 
 // 未捕获异常兜底，避免进程崩溃

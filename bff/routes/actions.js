@@ -18,6 +18,8 @@ const crypto = require('crypto');
 const store = require('../lib/store');
 const { WRITE_ROLES, mayWriteActions } = require('../lib/auth');
 const { loadSnapshot } = require('./snapshot');
+const policy = require('../lib/policy');
+const siAudit = require('../lib/si_audit');
 
 const FILE = 'actions_queue.json';
 const EXPIRE_MS = 24 * 3600 * 1000;
@@ -51,7 +53,7 @@ function hashOf(type, payload, operator) {
 }
 
 // 入队（幂等）：返回 {action, dedup}
-function enqueue(type, payload, operator, traceId) {
+function enqueue(type, payload, operator, traceId, meta) {
   const q = loadQueue();
   sweep(q);
   const hash = hashOf(type, payload, operator);
@@ -62,6 +64,7 @@ function enqueue(type, payload, operator, traceId) {
   }
   const snap = loadSnapshot();
   const now = new Date().toISOString();
+  const m = meta || {};
   const action = {
     id: 'act_' + crypto.randomBytes(8).toString('hex'),
     type: String(type || ''),
@@ -70,6 +73,16 @@ function enqueue(type, payload, operator, traceId) {
     hash,
     status: 'queued',
     rev: snap ? snap.rev : null,
+    /* 分级授权预留：谁是发起方 / 命中政策 / 授权级别 / 回滚引用（P0 仅记录，不自动执行） */
+    origin: (m.origin === 'si') ? 'si' : (m.origin || 'human'),
+    policy_id: m.policy_id || null,
+    tier: m.tier != null ? m.tier : (m.origin === 'si' ? 1 : 3),
+    rollback_ref: m.rollback_ref || null,
+    si_trace: m.si_trace || null,
+    /* 分级授权执行痕迹 */
+    auto_executed: false,
+    executed_rev: null,
+    via: null,
     created_at: now,
     updated_at: now,
     confirmed_by: null,
@@ -92,11 +105,100 @@ function publicView(a) {
     operator: a.operator,
     status: a.status,
     rev: a.rev,
+    origin: a.origin || 'human',
+    policy_id: a.policy_id || null,
+    tier: a.tier == null ? null : a.tier,
+    rollback_ref: a.rollback_ref || null,
+    auto_executed: a.auto_executed === true,
+    executed_rev: a.executed_rev == null ? null : a.executed_rev,
+    via: a.via || null,
+    rollback_available: a.auto_executed === true && a.via === 'bff' && a.status === '已执行',
     created_at: a.created_at,
     confirmed_at: a.confirmed_at,
     executed_at: a.executed_at,
     error: a.error,
     trace_id: a.trace_id
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* 分级授权：政策命中则 queued → 待执行（消费者随后按原路径落库）        */
+/* ------------------------------------------------------------------ */
+const ROLLBACK_FILE = 'si_rollbacks.json';
+const ROLLBACK_KEEP = 5;
+
+function saveRollback(action, snap) {
+  const all = store.readJSON(ROLLBACK_FILE, {});
+  const ids = Object.keys(all);
+  if (ids.length >= ROLLBACK_KEEP) {
+    ids.sort((x, y) => new Date(all[x].saved_at).getTime() - new Date(all[y].saved_at).getTime());
+    delete all[ids[0]];
+  }
+  all[action.id] = {
+    action_id: action.id,
+    type: action.type,
+    saved_at: new Date().toISOString(),
+    rev: snap ? snap.rev : null,
+    data: snap ? snap.data : null,
+    ext: snap && snap.ext !== undefined ? snap.ext : null
+  };
+  store.writeJSON(ROLLBACK_FILE, all);
+}
+
+/** 命中政策→提前置「待执行」并留回滚引用与审计；否则保持 queued */
+function maybeAutoExecute(action) {
+  if (!action || action.origin !== 'si' || action.status !== 'queued') return { auto: false };
+  const ev = policy.evaluate(action);
+  if (!ev.auto) {
+    siAudit.log({
+      trace_id: action.trace_id, action_id: action.id, type: action.type,
+      origin: action.origin, decision: 'hold', policy_id: null,
+      tier: action.tier, rev: action.rev, reason: ev.reason, amount: ev.amount
+    });
+    return { auto: false, reason: ev.reason };
+  }
+  const q = loadQueue();
+  const a = q.find((x) => x.id === action.id);
+  if (!a || a.status !== 'queued') return { auto: false, reason: '状态已变化' };
+  const snap = loadSnapshot();
+  saveRollback(a, snap);
+  const now = new Date().toISOString();
+  a.status = '待执行';
+  a.auto_executed = true;
+  a.tier = 2;
+  a.policy_id = ev.policy_id;
+  a.confirmed_by = 'si-policy:' + ev.policy_id;
+  a.confirmed_at = now;
+  a.updated_at = now;
+  a.rollback_ref = ROLLBACK_FILE + '#' + a.id;
+  saveQueue(q);
+  siAudit.log({
+    trace_id: a.trace_id, action_id: a.id, type: a.type, origin: 'si',
+    decision: 'auto_execute', policy_id: ev.policy_id, tier: 2,
+    rev: a.rev, reason: ev.reason, amount: ev.amount
+  });
+  return { auto: true, policy_id: ev.policy_id, tier: 2, reason: ev.reason };
+}
+
+/** 供 SI 战役/值守调用：入队 + 政策求值（命中则自动进入待执行） */
+function propose(type, payload, meta) {
+  const m = meta || {};
+  const operator = m.operator || 'SI';
+  const { action, dedup } = enqueue(type, payload, operator, m.trace_id || null, {
+    origin: m.origin || 'si',
+    policy_id: m.policy_id,
+    tier: m.tier,
+    rollback_ref: m.rollback_ref,
+    si_trace: m.si_trace
+  });
+  const auto = dedup ? { auto: false } : maybeAutoExecute(action);
+  return {
+    action,
+    id: action.id,
+    dedup,
+    auto: auto.auto === true,
+    policy_id: auto.policy_id || null,
+    reason: auto.reason || null
   };
 }
 
@@ -129,15 +231,25 @@ async function handle(req, res, ctx, pathname) {
       return true;
     }
     const operator = body.operator || ctx.auth.account || ctx.auth.role;
-    const { action, dedup } = enqueue(body.type, body.payload, operator, ctx.traceId);
+    const { action, dedup } = enqueue(body.type, body.payload, operator, ctx.traceId, {
+      origin: body.origin,
+      policy_id: body.policy_id,
+      tier: body.tier,
+      rollback_ref: body.rollback_ref,
+      si_trace: body.si_trace
+    });
+    const auto = dedup ? { auto: false } : maybeAutoExecute(action);
     ctx.sendJSON(res, 200, {
       ok: true,
       id: action.id,
-      status: action.status,
+      status: auto.auto ? '待执行' : action.status,
       rev: action.rev,
       created_at: action.created_at,
       trace_id: action.trace_id,
-      dedup
+      dedup,
+      auto_executed: auto.auto === true,
+      policy_id: auto.policy_id || null,
+      auto_reason: auto.reason || null
     });
     return true;
   }
@@ -192,6 +304,8 @@ async function handle(req, res, ctx, pathname) {
     });
     store.writeJSON('snapshot.json', next);
     a.status = '已执行';
+    a.executed_rev = newRev;
+    a.via = 'bff';
     a.result = out.result == null ? null : out.result;
     a.error = null;
     a.executed_at = next.generated_at;
@@ -204,7 +318,7 @@ async function handle(req, res, ctx, pathname) {
     return true;
   }
 
-  const m = pathname.match(/^\/api\/actions\/([^/]+)\/(confirm|status|execute|reject)$/);
+  const m = pathname.match(/^\/api\/actions\/([^/]+)\/(confirm|status|execute|reject|rollback)$/);
   if (m) {
     const id = m[1];
     const sub = m[2];
@@ -279,6 +393,9 @@ async function handle(req, res, ctx, pathname) {
       a.result = result == null ? null : result;
       a.executed_at = new Date().toISOString();
       a.updated_at = a.executed_at;
+      const newRev = result && (result.new_rev != null ? result.new_rev : result.rev);
+      if (newRev != null) a.executed_rev = newRev;
+      a.via = 'store';
       saveQueue(q);
       ctx.sendJSON(res, 200, { ok: true, id: a.id, status: a.status, executed_at: a.executed_at, error: a.error || undefined });
       return true;
@@ -305,9 +422,60 @@ async function handle(req, res, ctx, pathname) {
       ctx.sendJSON(res, 200, { ok: true, id: a.id, status: a.status, error: a.error });
       return true;
     }
+
+    if (sub === 'rollback') {
+      if (!ctx.auth || !mayWriteActions(ctx.auth)) {
+        ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: actions.write required' });
+        return true;
+      }
+      const deny = (reason) => {
+        siAudit.log({
+          trace_id: ctx.traceId, action_id: a.id, type: a.type, origin: 'human',
+          decision: 'rollback_denied', policy_id: a.policy_id || null,
+          tier: a.tier, rev: a.executed_rev, reason,
+          operator: ctx.auth.account || ctx.auth.role
+        });
+        ctx.sendJSON(res, 409, { ok: false, id: a.id, need_manual: true, reason });
+      };
+      if (a.status !== '已执行') return deny('当前状态不可回滚：' + a.status);
+      if (!a.auto_executed) return deny('仅自动执行的动作支持一键回滚');
+      if (a.via !== 'bff') {
+        return deny('该动作由店内消费者落库，云端无权威副本；请走店内快照回滚或人工处理');
+      }
+      const all = store.readJSON(ROLLBACK_FILE, {});
+      const rb = all[a.id];
+      if (!rb || rb.data == null) return deny('未找到回滚快照');
+      const cur = loadSnapshot();
+      const curRev = cur ? cur.rev : null;
+      if (a.executed_rev != null && String(curRev) !== String(a.executed_rev)) {
+        return deny('执行后已有新变更（rev ' + curRev + ' ≠ ' + a.executed_rev + '），禁止自动回滚');
+      }
+      const now = new Date().toISOString();
+      const nextRev = (typeof curRev === 'number' ? curRev : 0) + 1;
+      store.writeJSON('snapshot.json', {
+        rev: nextRev,
+        generated_at: now,
+        machine: 'SI-ROLLBACK',
+        data: rb.data,
+        ext: rb.ext
+      });
+      a.status = '已回滚';
+      a.error = null;
+      a.updated_at = now;
+      a.result = Object.assign({}, a.result || {}, { rollback_to_rev: nextRev });
+      saveQueue(q);
+      siAudit.log({
+        trace_id: ctx.traceId, action_id: a.id, type: a.type, origin: 'human',
+        decision: 'rollback', policy_id: a.policy_id || null, tier: a.tier,
+        rev: nextRev, reason: 'restored pre-action snapshot',
+        operator: ctx.auth.account || ctx.auth.role
+      });
+      ctx.sendJSON(res, 200, { ok: true, id: a.id, status: a.status, rev: nextRev });
+      return true;
+    }
   }
 
   return false;
 }
 
-module.exports = { handle, enqueue };
+module.exports = { handle, enqueue, propose };

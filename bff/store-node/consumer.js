@@ -143,14 +143,20 @@ function makeSqliteStore(dbPath) {
       const w = Object.assign({}, where || {});
       const op = w._op === 'OR' ? ' OR ' : ' AND ';
       delete w._op;
-      // { id: x, queue_no: x } 这类「多列任一匹配」用 OR
+      // status_not_in: 数组 → "status" NOT IN (...)
+      const notIn = Array.isArray(w.status_not_in) ? w.status_not_in : null;
+      delete w.status_not_in;
       const wKeys = Object.keys(w);
-      const whereSql = wKeys.length
-        ? ' WHERE ' + wKeys.map((k) => '"' + k + '"=?').join(op)
-        : '';
+      const parts = wKeys.map((k) => '"' + k + '"=?');
+      const whereParams = wKeys.map((k) => ser(w[k]));
+      if (notIn && notIn.length) {
+        parts.push('"status" NOT IN (' + notIn.map(() => '?').join(',') + ')');
+        for (const v of notIn) whereParams.push(ser(v));
+      }
+      const whereSql = parts.length ? ' WHERE ' + parts.join(op) : '';
       const sql = 'UPDATE "' + table + '" SET '
         + cols.map((c) => '"' + c + '"=?').join(',') + whereSql;
-      const params = cols.map((c) => ser(sets[c])).concat(wKeys.map((k) => ser(w[k])));
+      const params = cols.map((c) => ser(sets[c])).concat(whereParams);
       const info = safeRun(sql, params);
       return { rowcount: info ? Number(info.changes) : 0 };
     }
@@ -353,14 +359,29 @@ async function fetchPending(bffUrl, token) {
   return [];
 }
 
-/** 一轮消费；返回 bool（BFF 是否可达） */
+/** 登录换取新 token（401 自动续期用） */
+async function loginToken(bffUrl, account, password) {
+  const url = bffUrl.replace(/\/+$/, '') + '/api/auth/login';
+  const out = await httpJson('POST', url, {
+    account: account,
+    password: password,
+    device_fp: 'store-consumer'
+  }, '');
+  const body = out && out.body;
+  if (out.status === 200 && body && body.ok && body.token) return body.token;
+  throw new Error('登录失败: http=' + (out && out.status) + ' ' + JSON.stringify(body));
+}
+
+/** 一轮消费；返回 bool（BFF 是否可达）。401 会抛出以便上层续期 token。 */
 async function runOnce(storeUrl, bffUrl, token, dbPath, opts) {
   const o = opts || {};
   let actions;
   try {
     actions = await fetchPending(bffUrl, token);
   } catch (e) {
-    log.error('BFF 不可达，本轮跳过: ' + e.message);
+    const msg = String(e && e.message || '');
+    if (/http=401/.test(msg)) throw e; // token 失效：交给 main 续期
+    log.error('BFF 不可达，本轮跳过: ' + msg);
     return false;
   }
   log.info('拉到待执行动作 ' + actions.length + ' 条');
@@ -392,6 +413,8 @@ function buildArgOptions() {
     interval: { type: 'string' },
     once: { type: 'boolean' },
     token: { type: 'string' },
+    account: { type: 'string' },
+    password: { type: 'string' },
     db: { type: 'string' },
     help: { type: 'boolean' }
   };
@@ -407,19 +430,25 @@ async function main(argv) {
   }
   if (values.help) {
     console.log('用法: node consumer.js [--store-url URL] [--bff-url URL] [--interval 秒]'
-      + ' [--once] [--token TOKEN] [--db PATH]');
+      + ' [--once] [--token TOKEN] [--account 账号] [--password 密码] [--db PATH]');
     return 0;
   }
   const storeUrl = values['store-url'] || DEFAULT_STORE_URL;
   const bffUrl = values['bff-url'] || DEFAULT_BFF_URL;
   const interval = values.interval !== undefined ? Number(values.interval) : DEFAULT_INTERVAL;
   const once = Boolean(values.once);
-  const token = values.token || process.env.BFF_TOKEN || '';
+  let token = values.token || process.env.BFF_TOKEN || '';
+  const account = values.account || process.env.BFF_ACCOUNT || 'boss';
+  const password = values.password || process.env.BFF_PASSWORD || process.env.BFF_DEFAULT_PASSWORD || 'wufu123';
   const dbPath = values.db || DEFAULT_DB_PATH;
 
   log.info('启动 store=' + storeUrl + ' bff=' + bffUrl + ' interval=' + interval
-    + 's once=' + once + ' db=' + dbPath);
-  if (!token) log.warn('未提供 BFF token（--token 或 BFF_TOKEN），请求将不带鉴权头');
+    + 's once=' + once + ' db=' + dbPath + ' account=' + account);
+  if (!token) {
+    log.warn('未提供 BFF token，尝试用账号登录: ' + account);
+    try { token = await loginToken(bffUrl, account, password); log.info('已登录获取 token'); }
+    catch (e) { log.warn('登录失败（将以无鉴权运行）: ' + e.message); }
+  }
 
   ensureTables(dbPath);
 
@@ -428,8 +457,21 @@ async function main(argv) {
     return ok ? 0 : 1;
   }
   for (;;) {
-    try { await runOnce(storeUrl, bffUrl, token, dbPath); }
-    catch (e) { log.error('本轮消费出现未捕获异常，继续循环: ' + (e && e.stack ? e.stack : e)); }
+    try {
+      await runOnce(storeUrl, bffUrl, token, dbPath);
+    } catch (e) {
+      const msg = String(e && e.message || '');
+      if (/http=401/.test(msg)) {
+        try {
+          token = await loginToken(bffUrl, account, password);
+          log.info('token 已自动续期');
+        } catch (le) {
+          log.error('token 续期失败: ' + le.message);
+        }
+      } else {
+        log.error('本轮消费出现未捕获异常，继续循环: ' + (e && e.stack ? e.stack : e));
+      }
+    }
     await sleep(interval * 1000);
   }
 }
@@ -445,6 +487,7 @@ module.exports = {
   descOf,
   processAction,
   fetchPending,
+  loginToken,
   runOnce,
   main
 };

@@ -5,6 +5,8 @@
  *     → 基于快照只读回答 + 可选 cards（提案 CTA，须 App 确认台，AI 不直写）
  */
 const { loadSnapshot } = require('./snapshot');
+const planner = require('../lib/agent/planner');
+const memory = require('../lib/agent/memory');
 
 /** 本地日期 YYYY-MM-DD（与店内/日报口径一致） */
 function todayStr() {
@@ -286,39 +288,114 @@ function answerFromSnapshot(question, snap) {
   return null;
 }
 
+const SUGGESTIONS = ['哪些原料需要补货？', '今天营收怎么样？', '哪个色毛利最低？', '今天有哪些待办和预警？'];
+
+function fallbackAnswer(question, snap) {
+  const packed = (snap && snap.data) ? answerFromSnapshot(question, snap) : null;
+  const answer = packed && packed.answer
+    ? packed.answer
+    : (snap
+      ? `已读到店内快照 rev=${snap.rev}。可问：补货、营收、毛利、菜品、工单、打烊、比价、品控。`
+      : '云端暂无店内快照。请先启动进销存并推送 snapshot，或先用进销 Tab 查看。');
+  return { answer, cards: (packed && Array.isArray(packed.cards)) ? packed.cards : [], steps: [] };
+}
+
+/** SI 优先（LLM+工具），失败/未配置降级到规则快照问答 */
+async function resolveAnswer(question, snap, storeId, onStep) {
+  if (snap) {
+    try {
+      const si = await planner.runAgent({ question, snap, onStep });
+      if (si && si.answer) {
+        memory.append(storeId, { q: question, a: si.answer });
+        return { answer: si.answer, cards: si.cards, steps: si.steps, engine: 'si' };
+      }
+    } catch (e) {
+      console.error('[BFF][agent] SI planner failed:', e && e.message);
+    }
+  }
+  const fb = fallbackAnswer(question, snap);
+  return { answer: fb.answer, cards: fb.cards, steps: [], engine: 'rules' };
+}
+
+async function readQuestion(req, ctx) {
+  const { buf } = await ctx.readBody(req);
+  let body = null;
+  try { body = JSON.parse(buf.toString('utf8')); } catch (e) {}
+  body = body || {};
+  return typeof body.question === 'string' ? body.question.trim() : '';
+}
+
 async function handle(req, res, ctx, pathname) {
   if (req.method === 'POST' && pathname === '/api/agent/chat') {
-    const { buf } = await ctx.readBody(req);
-    let body = null;
-    try { body = JSON.parse(buf.toString('utf8')); } catch (e) {}
-    body = body || {};
-    const question = typeof body.question === 'string' ? body.question.trim() : '';
+    const question = await readQuestion(req, ctx);
     const snap = loadSnapshot();
-    let packed = null;
-    if (snap && snap.data) packed = answerFromSnapshot(question, snap);
-
-    const suggestions = ['哪些原料需要补货？', '今天营收怎么样？', '建本餐工单', '确认打烊'];
-    const answer = packed && packed.answer
-      ? packed.answer
-      : (snap
-        ? `已读到店内快照 rev=${snap.rev}。可问：补货、营收、菜品、工单、打烊、比价、品控。`
-        : '云端暂无店内快照。请先启动进销存并推送 snapshot，或先用进销 Tab 查看。');
-    const cards = (packed && Array.isArray(packed.cards)) ? packed.cards : [];
-
+    const packed = await resolveAnswer(question, snap, ctx.storeId, null);
     ctx.sendJSON(res, 200, {
       ok: true,
-      answer,
-      cards,
-      suggestions,
+      engine: packed.engine,
+      answer: packed.answer,
+      cards: packed.cards,
+      steps: packed.steps,
+      suggestions: SUGGESTIONS,
       rev: snap ? snap.rev : null,
       trace_id: ctx.traceId,
       echo: question ? question.slice(0, 200) : null,
       note: snap
-        ? (cards.length
-          ? '只读快照 + 提案 CTA · 点卡片进确认台 · AI 不写库'
-          : '只读快照答案 · AI 不写库')
-        : 'agent 决策层待完善 · 无快照'
+        ? (packed.engine === 'si' ? 'SI 已用只读工具取数 · 提案进确认台 · AI 不写库' : '规则快照答案 · AI 不写库')
+        : '无快照 · 请先推送 snapshot'
     });
+    return true;
+  }
+
+  // POST /api/agent/stream —— SSE：stage(工具进度) / delta(答案) / done(卡片) / error
+  if (req.method === 'POST' && pathname === '/api/agent/stream') {
+    const question = await readQuestion(req, ctx);
+    const snap = loadSnapshot();
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Trace-Id',
+      'X-Trace-Id': ctx.traceId,
+      'X-Accel-Buffering': 'no'
+    });
+    const writeEvent = (name, data) => {
+      if (res.writableEnded) return;
+      try { res.write(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`); } catch (e) {}
+    };
+    writeEvent('stage', { stage: 'thinking' });
+
+    let packed;
+    try {
+      packed = await resolveAnswer(question, snap, ctx.storeId, (step) => {
+        writeEvent('stage', { stage: 'tool', tool: step.tool, ok: step.ok });
+      });
+    } catch (e) {
+      writeEvent('error', { ok: false, error: String(e && e.message || e) });
+      try { res.end(); } catch (e2) {}
+      return true;
+    }
+
+    // 逐段吐字，给老板“在说”的观感（答案本身已由后端取全）
+    const answer = String(packed.answer || '');
+    const CHUNK = 8;
+    for (let i = 0; i < answer.length; i += CHUNK) {
+      writeEvent('delta', { delta: answer.slice(i, i + CHUNK) });
+      await new Promise((r) => setTimeout(r, 18));
+      if (res.writableEnded) break;
+    }
+    writeEvent('done', {
+      ok: true,
+      engine: packed.engine,
+      answer,
+      cards: packed.cards,
+      suggestions: SUGGESTIONS,
+      rev: snap ? snap.rev : null,
+      traceId: ctx.traceId
+    });
+    try { res.end(); } catch (e) {}
     return true;
   }
   return false;

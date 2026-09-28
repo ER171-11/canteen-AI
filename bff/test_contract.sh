@@ -40,7 +40,7 @@ json_get() { node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv
 
 # ---------- 启动服务 ----------
 say "== 启动 BFF（port=$PORT, data=$TMPD/data）=="
-BFF_PORT="$PORT" BFF_DATA_DIR="$TMPD/data" node server.js > "$TMPD/server.log" 2>&1 &
+BFF_PORT="$PORT" BFF_DATA_DIR="$TMPD/data" RL_STD_CAP=1000 node server.js > "$TMPD/server.log" 2>&1 &
 SRV_PID=$!
 cleanup() { kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null; rm -rf "$TMPD"; }
 trap cleanup EXIT
@@ -146,8 +146,135 @@ say "== 5. agent 桩（只读） =="
 CODE=$(curl -s -o "$TMPD/agent.json" -w "%{http_code}" -X POST "$BASE/api/agent/chat" \
   -H "$AUTH" -H 'Content-Type: application/json' -d '{"question":"今天营收","ctx":{}}')
 assert_code "agent/chat" 200 "$CODE"
-assert_grep "agent 返回只读 note" "$TMPD/agent.json" '只读快照答案|只读快照 \+ 提案 CTA|agent 决策层待完善'
+assert_grep "agent 返回只读 note" "$TMPD/agent.json" '规则快照答案|SI 已用只读工具取数|只读快照答案|只读快照 \+ 提案 CTA|agent 决策层待完善'
 assert_grep "agent cards 为空" "$TMPD/agent.json" '"cards":\[\]'
+
+# agent 流式（SSE）：无 Key 时也应回 stage + delta + done
+curl -s --max-time 8 -N -X POST "$BASE/api/agent/stream" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"question":"今天营收"}' > "$TMPD/agent_stream.txt" 2>/dev/null || true
+assert_grep "agent/stream 有 stage" "$TMPD/agent_stream.txt" 'event: stage'
+assert_grep "agent/stream 有 delta" "$TMPD/agent_stream.txt" 'event: delta'
+assert_grep "agent/stream 有 done" "$TMPD/agent_stream.txt" 'event: done'
+
+# ---------- 5b. SI 简报 / 收件箱 ----------
+say "== 5b. SI 简报 / 收件箱（只读聚合） =="
+CODE=$(curl -s -o "$TMPD/brief.json" -w "%{http_code}" "$BASE/api/report/briefing" -H "$AUTH")
+assert_code "GET /api/report/briefing" 200 "$CODE"
+assert_grep "briefing 有 headline" "$TMPD/brief.json" '"headline"'
+CODE=$(curl -s -o "$TMPD/inbox.json" -w "%{http_code}" "$BASE/api/inbox" -H "$AUTH")
+assert_code "GET /api/inbox" 200 "$CODE"
+assert_grep "inbox 带 counts" "$TMPD/inbox.json" '"counts"'
+assert_grep "inbox 分组齐" "$TMPD/inbox.json" '"decide".*"doing".*"alerts"'
+
+# ---------- 5c. 分级授权政策 / 自动执行 / 审计 ----------
+say "== 5c. 分级授权政策（默认关闭） =="
+CODE=$(curl -s -o "$TMPD/pol.json" -w "%{http_code}" "$BASE/api/policies" -H "$AUTH")
+assert_code "GET /api/policies" 200 "$CODE"
+assert_grep "默认 auto_enabled=false" "$TMPD/pol.json" '"auto_enabled":false'
+curl -s -X POST "$BASE/api/policies/toggle" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"auto_enabled":true}' > "$TMPD/pol_on.json"
+assert_grep "开启自动执行" "$TMPD/pol_on.json" '"auto_enabled":true'
+curl -s -X POST "$BASE/api/policies" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"name":"小额补货自动执行","enabled":true,"match":{"types":["restock.create"],"max_amount":0}}' > "$TMPD/pol_add.json"
+POLID=$(json_get "$TMPD/pol_add.json" policy.id)
+if [ -n "$POLID" ]; then ok "新增政策 id=$POLID"; else bad "新增政策失败"; fi
+
+curl -s -X POST "$BASE/api/actions" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"type":"restock.create","payload":{"items":[{"name":"面粉","qty":5,"price":4}]},"origin":"si","operator":"SI"}' > "$TMPD/auto.json"
+assert_grep "SI 命中政策 → 自动置待执行" "$TMPD/auto.json" '"status":"待执行"'
+assert_grep "返回 auto_executed=true" "$TMPD/auto.json" '"auto_executed":true'
+AUTOID=$(json_get "$TMPD/auto.json" id)
+
+# 高风险类型永远不自动
+curl -s -X POST "$BASE/api/actions" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"type":"dish.price","payload":{"name":"老虎菜","price":18},"origin":"si","operator":"SI"}' > "$TMPD/noauto.json"
+assert_grep "高风险 dish.price 仍待拍板" "$TMPD/noauto.json" '"status":"queued"'
+assert_grep "auto_reason 非空" "$TMPD/noauto.json" '"auto_reason"'
+
+curl -s "$BASE/api/si/audit?limit=20" -H "$AUTH" > "$TMPD/audit.json"
+assert_grep "审计含 auto_execute" "$TMPD/audit.json" 'auto_execute'
+assert_grep "审计含 hold" "$TMPD/audit.json" '"decision":"hold"'
+
+# 清理：驳回自动动作 + 关自动 + 删政策
+if [ -n "$AUTOID" ]; then curl -s -X POST "$BASE/api/actions/$AUTOID/reject" -H "$AUTH" -H 'Content-Type: application/json' -d '{"reason":"测试清理"}' > /dev/null; fi
+if [ -n "$POLID" ]; then curl -s -X DELETE "$BASE/api/policies/$POLID" -H "$AUTH" > /dev/null; fi
+curl -s -X POST "$BASE/api/policies/toggle" -H "$AUTH" -H 'Content-Type: application/json' -d '{"auto_enabled":false}' > /dev/null
+
+# 回滚：店内消费者落库的动作不提供云端一键回滚
+CODE=$(curl -s -o "$TMPD/rb.json" -w "%{http_code}" -X POST "$BASE/api/actions/act_none/rollback" -H "$AUTH")
+assert_code "rollback 未知动作 404" 404 "$CODE"
+
+# ---------- 5d. SI 目标 / What-if 模拟 ----------
+say "== 5d. SI 目标 / 模拟（只读） =="
+CODE=$(curl -s -o "$TMPD/goals.json" -w "%{http_code}" "$BASE/api/si/goals" -H "$AUTH")
+assert_code "GET /api/si/goals" 200 "$CODE"
+assert_grep "goals 带 items/score" "$TMPD/goals.json" '"items".*"score"'
+# 补一条带配方的快照（rev 不变），供模拟取成本卡
+curl -s -o /dev/null -X POST "$BASE/api/snapshot/push" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"rev":42,"machine":"pos-t","data":{"dishes":[{"name":"五福饺子"}],"sales":[{"date":"2026-09-24T12:30:00","amount":58.5},{"date":"2026-09-24T18:10:00","amount":102}],"members":[{"id":1}],"recipes":[{"id":"r1"}]},"ext":{"recipes":[{"sku_id":"SKU-TEST","name":"测试饺子","face_main":["火龙果汁 220g"],"main":["猪前肩肉 500g"],"aux":[],"seasoning":[],"params":{"一批出成_个":67}}]}}'
+CODE=$(curl -s -o "$TMPD/sim.json" -w "%{http_code}" -X POST "$BASE/api/si/simulate" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"sku":"SKU-TEST","portions":500,"price_delta_pct":5}')
+assert_code "POST /api/si/simulate" 200 "$CODE"
+assert_grep "模拟带 projected.gross_margin" "$TMPD/sim.json" '"projected".*"gross_margin"'
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/si/simulate" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"sku":"不存在的菜","portions":1}')
+assert_code "模拟未知 SKU 422" 422 "$CODE"
+
+# ---------- 5e. SI 专家团 / 战役 / 知识 ----------
+say "== 5e. SI 专家团 / 战役 / 知识 =="
+CODE=$(curl -s -o "$TMPD/team.json" -w "%{http_code}" "$BASE/api/si/team" -H "$AUTH")
+assert_code "GET /api/si/team" 200 "$CODE"
+assert_grep "team 带 specialists" "$TMPD/team.json" '"specialists"'
+assert_grep "team 含出品官(菜谱SI)" "$TMPD/team.json" '"id":"kitchen"'
+CODE=$(curl -s -o "$TMPD/pipe.json" -w "%{http_code}" "$BASE/api/si/pipeline" -H "$AUTH")
+assert_code "GET /api/si/pipeline" 200 "$CODE"
+assert_node "pipeline 六阶段+next_key" "$TMPD/pipe.json" 'j.ok&&Array.isArray(j.stages)&&j.stages.length===6&&typeof j.next_key==="string"&&j.stages[0].key==="watch"&&j.stages.every(function(s){return Array.isArray(s.items)})'
+
+# 全局驾驶舱 + 岗位工作台
+CODE=$(curl -s -o "$TMPD/cockpit.json" -w "%{http_code}" "$BASE/api/si/cockpit" -H "$AUTH")
+assert_code "GET /api/si/cockpit" 200 "$CODE"
+assert_node "cockpit 含 KPI+六域+next" "$TMPD/cockpit.json" 'j.ok&&j.kpis&&j.team&&Array.isArray(j.team.specialists)&&j.next&&typeof j.next.label==="string"'
+assert_node "cockpit 含队列健康" "$TMPD/cockpit.json" 'j.queue&&typeof j.queue.pending_execute==="number"&&typeof j.queue.stalled==="boolean"'
+assert_node "cockpit 含历史趋势" "$TMPD/cockpit.json" 'Array.isArray(j.trend)'
+CODE=$(curl -s -o "$TMPD/qh.json" -w "%{http_code}" "$BASE/api/queue/health" -H "$AUTH")
+assert_code "GET /api/queue/health" 200 "$CODE"
+assert_node "queue/health 形状" "$TMPD/qh.json" 'j.ok&&typeof j.pending_execute==="number"&&typeof j.stalled==="boolean"'
+CODE=$(curl -s -o "$TMPD/wbp.json" -w "%{http_code}" "$BASE/api/workbench/procurement" -H "$AUTH")
+assert_code "GET /api/workbench/procurement" 200 "$CODE"
+assert_node "采购工作台 需求→缺口+验收标准" "$TMPD/wbp.json" 'j.ok&&Array.isArray(j.need_lines)&&j.restock_payload&&typeof j.accept_standards==="number"'
+CODE=$(curl -s -o "$TMPD/wbk.json" -w "%{http_code}" "$BASE/api/workbench/kitchen" -H "$AUTH")
+assert_code "GET /api/workbench/kitchen" 200 "$CODE"
+assert_node "厨师工作台 标准+工单" "$TMPD/wbk.json" 'j.ok&&j.standards&&Array.isArray(j.workorders)'
+CODE=$(curl -s -o "$TMPD/wbr.json" -w "%{http_code}" "$BASE/api/workbench/recv" -H "$AUTH")
+assert_code "GET /api/workbench/recv" 200 "$CODE"
+assert_node "到货验收 待到货+标准" "$TMPD/wbr.json" 'j.ok&&Array.isArray(j.orders)&&typeof j.standards==="number"'
+CODE=$(curl -s -o "$TMPD/kb.json" -w "%{http_code}" "$BASE/api/si/knowledge" -H "$AUTH")
+assert_code "GET /api/si/knowledge" 200 "$CODE"
+assert_grep "knowledge 带 derived" "$TMPD/kb.json" '"derived"'
+CODE=$(curl -s -o "$TMPD/mission.json" -w "%{http_code}" -X POST "$BASE/api/si/missions" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"template":"loss","autonomy":"advise"}')
+assert_code "POST /api/si/missions" 200 "$CODE"
+assert_grep "mission 有 steps" "$TMPD/mission.json" '"steps"'
+MID=$(json_get "$TMPD/mission.json" mission.id)
+CODE=$(curl -s -o "$TMPD/mfrom.json" -w "%{http_code}" -X POST "$BASE/api/si/missions/from-goal" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"goal_id":"breakeven"}')
+assert_code "POST /api/si/missions/from-goal" 200 "$CODE"
+MID2=$(json_get "$TMPD/mfrom.json" mission.id)
+CODE=$(curl -s -o "$TMPD/mtick.json" -w "%{http_code}" -X POST "$BASE/api/si/missions/tick" -H "$AUTH")
+assert_code "POST /api/si/missions/tick" 200 "$CODE"
+CODE=$(curl -s -o "$TMPD/madv.json" -w "%{http_code}" -X POST "$BASE/api/si/missions/$MID/advance" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{}')
+assert_code "POST /api/si/missions/{id}/advance" 200 "$CODE"
+CODE=$(curl -s -o "$TMPD/kbadd.json" -w "%{http_code}" -X POST "$BASE/api/si/knowledge" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"title":"周六晚高峰加排1人","insight":"基于历史峰谷","tags":["排班"]}')
+assert_code "POST /api/si/knowledge" 200 "$CODE"
+KBID=$(json_get "$TMPD/kbadd.json" playbook.id)
+if [ -n "$MID" ]; then curl -s -o /dev/null -X DELETE "$BASE/api/si/missions/$MID" -H "$AUTH"; fi
+if [ -n "$MID2" ]; then curl -s -o /dev/null -X DELETE "$BASE/api/si/missions/$MID2" -H "$AUTH"; fi
+if [ -n "$KBID" ]; then curl -s -o /dev/null -X DELETE "$BASE/api/si/knowledge/$KBID" -H "$AUTH"; fi
+
+
+
 
 # ---------- 6. actions 队列 ----------
 say "== 6. actions 队列状态机 =="
@@ -209,6 +336,47 @@ CODE=$(curl -s -o "$TMPD/rej.json" -w "%{http_code}" -X POST "$BASE/api/actions/
   -H "$AUTH" -H 'Content-Type: application/json' -d '{"reason":"contract reject"}')
 assert_code "POST /actions/{id}/reject" 200 "$CODE"
 assert_grep "reject → 已驳回" "$TMPD/rej.json" '"status":"已驳回"'
+
+# ---------- 6b. 报损审批 → 扣库存 ----------
+say "== 6b. 报损审批 → 扣库存 =="
+curl -s -X POST "$BASE/api/actions" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"type":"loss.report","payload":{"name":"面粉","ing_name":"面粉","qty":1,"pending":true,"reason":"测试审批"},"operator":"店长"}' > "$TMPD/lr.json"
+LRID=$(json_get "$TMPD/lr.json" id)
+REV=$(curl -s "$BASE/api/snapshot/latest" -H "$AUTH" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).rev)}catch(e){console.log(0)}})')
+curl -s -o /dev/null -X POST "$BASE/api/actions/$LRID/confirm" -H "$AUTH" -H 'Content-Type: application/json' -d "{\"operator\":\"店长\",\"rev\":$REV}"
+curl -s -o "$TMPD/lrapply.json" -X POST "$BASE/api/actions/$LRID/apply" -H "$AUTH"
+assert_grep "报损待审批登记（不扣账）" "$TMPD/lrapply.json" '已执行'
+LOSSID=$(curl -s "$BASE/api/snapshot/latest" -H "$AUTH" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);const a=((j.ext||{}).loss_reports)||[];console.log(a.length?a[a.length-1].id:"")}catch(e){console.log("")}})')
+curl -s -X POST "$BASE/api/actions" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d "{\"type\":\"loss.approve\",\"payload\":{\"id\":$LOSSID},\"operator\":\"老板\"}" > "$TMPD/la.json"
+LAID=$(json_get "$TMPD/la.json" id)
+if [ -n "$LOSSID" ] && [ -n "$LAID" ]; then ok "报损单 id=$LOSSID 审批入队"; else bad "报损单 id/审批入队失败"; fi
+REV2=$(curl -s "$BASE/api/snapshot/latest" -H "$AUTH" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.parse(s).rev)})')
+curl -s -o /dev/null -X POST "$BASE/api/actions/$LAID/confirm" -H "$AUTH" -H 'Content-Type: application/json' -d "{\"operator\":\"老板\",\"rev\":$REV2}"
+curl -s -o /dev/null -X POST "$BASE/api/actions/$LAID/apply" -H "$AUTH"
+curl -s "$BASE/api/snapshot/latest" -H "$AUTH" > "$TMPD/lrfin.json"
+assert_node "报损审批 → 已审批扣库存" "$TMPD/lrfin.json" 'j.ext&&Array.isArray(j.ext.loss_reports)&&j.ext.loss_reports.some(function(x){return String(x.id)==="'"$LOSSID"'"&&x.status==="已审批"})'
+
+# ---------- 6c. 前厅传菜 → 工单闭环 ----------
+say "== 6c. 前厅传菜 → 工单闭环 =="
+TODAY3=$(date +%F)
+step_action() {
+  local t="$1" pl="$2"
+  curl -s -X POST "$BASE/api/actions" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d "{\"type\":\"$t\",\"payload\":$pl,\"operator\":\"test\"}" > "$TMPD/st.json"
+  local id=$(json_get "$TMPD/st.json" id)
+  local rev=$(curl -s "$BASE/api/snapshot/latest" -H "$AUTH" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.parse(s).rev)})')
+  curl -s -o /dev/null -X POST "$BASE/api/actions/$id/confirm" -H "$AUTH" -H 'Content-Type: application/json' -d "{\"operator\":\"test\",\"rev\":$rev}"
+  curl -s -o /dev/null -X POST "$BASE/api/actions/$id/apply" -H "$AUTH"
+}
+step_action "workorder.create" '{"sku_id":"SKU-WF-HONG","qty":1,"table_id":"T9","date":"'$TODAY3'","status":"待开始"}'
+step_action "pos.ready" '{"table_id":"T9","note":"齐菜"}'
+curl -s "$BASE/api/snapshot/latest" -H "$AUTH" > "$TMPD/t9a.json"
+assert_node "前厅齐菜 → 工单待传" "$TMPD/t9a.json" '((j.ext||{}).sop_workorders||[]).some(function(w){return String(w.table_id)==="T9"&&String(w.date)==="'"$TODAY3"'"&&w.status==="待传"})'
+step_action "pos.pass" '{"table_id":"T9","note":"已传"}'
+curl -s "$BASE/api/snapshot/latest" -H "$AUTH" > "$TMPD/t9b.json"
+assert_node "前厅传菜 → 工单已完成" "$TMPD/t9b.json" '((j.ext||{}).sop_workorders||[]).some(function(w){return String(w.table_id)==="T9"&&String(w.date)==="'"$TODAY3"'"&&w.status==="已完成"})'
+
 
 # ---------- 7. admin ----------
 say "== 7. admin =="
@@ -403,14 +571,17 @@ assert_code "push 含新 ext 键快照" 200 "$CODE"
 curl -s "$BASE/api/modules/staff" -H "$MAUTH" > "$TMPD/mst.json"
 assert_node "modules/staff 四表形状" "$TMPD/mst.json" 'j.ok&&j.shifts.length===2&&j.clock.length===2&&j.perf.length===1&&j.train.length===1'
 assert_node "modules/staff 带 rev/generated_at" "$TMPD/mst.json" 'j.rev===60&&!!j.generated_at'
+assert_node "modules/staff insight 打卡+禁岗" "$TMPD/mst.json" 'j.insight&&j.insight.today&&j.insight.clock&&Array.isArray(j.insight.certs.blocked_scheduled)&&j.insight.peak'
 
 curl -s "$BASE/api/modules/booking" -H "$MAUTH" > "$TMPD/mbk.json"
 assert_node "modules/booking 默认今日 2 条+queue 5" "$TMPD/mbk.json" 'j.ok&&j.date==="'$TODAY'"&&j.bookings.length===2&&j.queue.length===5'
+assert_node "modules/booking insight 翻台+备料" "$TMPD/mbk.json" 'j.insight&&j.insight.tables&&j.insight.turn&&j.insight.turn.by_capacity&&j.insight.staffing&&typeof j.insight.staffing.suggest_add==="boolean"'
 curl -s "$BASE/api/modules/booking?date=$YDAY" -H "$MAUTH" > "$TMPD/mbk2.json"
 assert_node "modules/booking 指定昨日 1 条" "$TMPD/mbk2.json" 'j.bookings.length===1&&j.bookings[0].id==="b3"'
 
 curl -s "$BASE/api/modules/foodsafe" -H "$MAUTH" > "$TMPD/mfs.json"
 assert_node "modules/foodsafe 四表形状" "$TMPD/mfs.json" 'j.ok&&j.certs.length===2&&j.trace.length===1&&j.samples.length===2&&j.disinfect.length===1'
+assert_node "modules/foodsafe insight 留样+消毒" "$TMPD/mfs.json" 'j.insight&&j.insight.certs&&j.insight.samples&&j.insight.disinfect&&typeof j.insight.samples.pending==="number"'
 assert_node "foodsafe hours_left 46h前≈2h" "$TMPD/mfs.json" 'var s=j.samples.find(function(x){return x.dish==="红饺"});s.hours_left>=0&&s.hours_left<=4'
 assert_node "foodsafe hours_left 10h前≈38h" "$TMPD/mfs.json" 'var s=j.samples.find(function(x){return x.dish==="黄饺"});s.hours_left>=36&&s.hours_left<=39'
 
@@ -428,6 +599,25 @@ assert_node "equipment energy_summary" "$TMPD/meq.json" 'j.energy_summary&&Array
 
 curl -s "$BASE/api/modules/vip" -H "$MAUTH" > "$TMPD/mvip.json"
 assert_node "vip members 数组" "$TMPD/mvip.json" 'j.ok&&Array.isArray(j.members)'
+assert_node "vip insight 资产+券" "$TMPD/mvip.json" 'j.insight&&j.insight.assets&&typeof j.insight.assets.stored_total==="number"&&j.insight.coupons&&typeof j.insight.coupons.liability==="number"'
+
+curl -s "$BASE/api/modules/takeout" -H "$MAUTH" > "$TMPD/mto.json"
+assert_node "takeout insight 概览+对账" "$TMPD/mto.json" 'j.ok&&j.insight&&j.insight.overview&&typeof j.insight.overview.gross==="number"&&j.insight.reconcile&&Array.isArray(j.insight.reconcile.pending)'
+
+curl -s "$BASE/api/modules/finance" -H "$MAUTH" > "$TMPD/mfin.json"
+assert_node "finance insight 发票+税务" "$TMPD/mfin.json" 'j.ok&&j.insight&&j.insight.invoices&&typeof j.insight.invoices.remaining==="number"&&j.insight.tax&&typeof j.insight.tax.payable==="number"&&j.insight.cashflow'
+
+curl -s "$BASE/api/modules/loss" -H "$MAUTH" > "$TMPD/mloss.json"
+assert_node "loss insight 损耗率+归因" "$TMPD/mloss.json" 'j.ok&&j.insight&&typeof j.insight.total_amount==="number"&&j.insight.approvals&&Array.isArray(j.insight.top_ingredients)'
+
+curl -s "$BASE/api/modules/review" -H "$MAUTH" > "$TMPD/mrv.json"
+assert_node "review insight 评分+差评" "$TMPD/mrv.json" 'j.ok&&j.insight&&j.insight.scores&&j.insight.bad&&typeof j.insight.bad.count==="number"&&j.insight.improve'
+
+curl -s "$BASE/api/modules/supply" -H "$MAUTH" > "$TMPD/msup.json"
+assert_node "supply insight 供应商+账龄" "$TMPD/msup.json" 'j.ok&&j.insight&&j.insight.vendors&&typeof j.insight.vendors.count==="number"&&j.insight.compare&&j.insight.accounts'
+
+curl -s "$BASE/api/modules/pos" -H "$MAUTH" > "$TMPD/mpos.json"
+assert_node "pos insight 桌台+实收" "$TMPD/mpos.json" 'j.ok&&j.insight&&j.insight.tables&&typeof j.insight.tables.total==="number"&&j.insight.payments&&Array.isArray(j.insight.advice)'
 
 curl -s "$BASE/api/report/daily?date=$TODAY" -H "$MAUTH" > "$TMPD/mrp.json"
 assert_node "report 带 rev/generated_at" "$TMPD/mrp.json" 'j.rev===60&&!!j.generated_at'

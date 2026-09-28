@@ -54,7 +54,7 @@ function demoIdentity(code) {
   return {
     openid: 'demo_openid_' + digest,
     unionid: 'demo_union_' + digest.slice(0, 16),
-    nickname: '演示微信用户',
+    nickname: '微信用户' + digest.slice(-4),
     avatar: null,
     demo: true
   };

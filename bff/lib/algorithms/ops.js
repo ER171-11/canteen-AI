@@ -854,6 +854,21 @@ function insertVipCampaign(ctx, data, payload) {
 function redeemVipCoupon(ctx, data, payload) {
   const code = strTrim(payload.code);
   if (!code) throw new Error('vip.coupon_redeem 缺 code');
+  // 状态机守卫：已核销/已作废 不可重复核销
+  let curStatus = null;
+  if (ctx && ctx.store && typeof ctx.store.query === 'function') {
+    try {
+      const rows = ctx.store.query('SELECT status FROM vip_coupons WHERE code = ?', [code]) || [];
+      if (rows.length) curStatus = String(rows[0].status || '');
+    } catch (e) { curStatus = null; }
+  }
+  if (curStatus === null) {
+    const row = arr(data && data.vip_coupons).find((c) => String((c && c.code) || '') === code);
+    if (row) curStatus = String(row.status || '');
+  }
+  if (curStatus && /已核销|已作废/.test(curStatus)) {
+    throw new Error('券已核销/作废，禁止重复核销: ' + code);
+  }
   let rowcount;
   if (ctx && ctx.store && typeof ctx.store.update === 'function') {
     const r = ctx.store.update('vip_coupons', { status: '已核销' }, { code: code });
@@ -875,6 +890,49 @@ function redeemVipCoupon(ctx, data, payload) {
     });
   }
   return 'vip_coupons redeem ' + code;
+}
+
+/**
+ * 会员储值扣减（与 POS 结账联动）：
+ *   余额不足直接拒绝（绝不出现负余额）；成功后写 vip_visits 作审计。
+ */
+function deductVipBalance(ctx, data, payload) {
+  const memberId = strTrim(payload.member_id);
+  const amount = num(payload.amount, 0);
+  if (!memberId) throw new Error('vip.balance_deduct 缺 member_id');
+  if (!(amount > 0)) throw new Error('vip.balance_deduct 金额需 > 0');
+
+  let balance = null;
+  if (ctx && ctx.store && typeof ctx.store.query === 'function') {
+    try {
+      const rows = ctx.store.query('SELECT balance FROM vip_balance WHERE member_id = ?', [memberId]) || [];
+      if (rows.length) balance = num(rows[0].balance, 0);
+    } catch (e) { balance = null; }
+  }
+  if (balance === null) {
+    const row = arr(data && data.vip_balance).find((x) => String((x && x.member_id) || '') === memberId);
+    if (!row) throw new Error('未找到会员储值: ' + memberId);
+    balance = num(row.balance, 0);
+  }
+  if (balance < amount) throw new Error('余额不足：现 ' + balance + ' < 扣减 ' + amount);
+
+  const next = Math.round((balance - amount) * 100) / 100;
+  if (ctx && ctx.store && typeof ctx.store.update === 'function') {
+    ctx.store.update('vip_balance', { balance: next, updated_at: nowIso() }, { member_id: memberId });
+  }
+  for (const row of arr(data && data.vip_balance)) {
+    if (String((row && row.member_id) || '') === memberId) row.balance = next;
+  }
+  persist(ctx, data, 'vip_visits', {
+    member_id: memberId,
+    name: pt(payload.name),
+    phone: pt(payload.phone),
+    table_id: pt(payload.table_id),
+    note: '储值扣减 ¥' + amount + '（余额 → ' + next + '）',
+    ts: nowIso(),
+    source: 'si-vip'
+  });
+  return 'vip_balance deduct ' + memberId + ' -' + amount + ' → ' + next;
 }
 
 /* ---------- analysis.export_week ---------- */
@@ -1093,6 +1151,7 @@ module.exports = {
   insertEqMaintain,
   insertVipCampaign,
   redeemVipCoupon,
+  deductVipBalance,
   insertWeekExport,
   insertTakeoutAck,
   insertReviewFollowup,

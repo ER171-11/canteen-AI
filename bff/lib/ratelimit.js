@@ -5,9 +5,11 @@
  *   - std 档：其余 /api/*，60 req/min
  *   - key：已鉴权请求按 token 哈希，未鉴权按远端 IP
  */
+const AI_CAP = parseInt(process.env.RL_AI_CAP || '10', 10) || 10;
+const STD_CAP = parseInt(process.env.RL_STD_CAP || '60', 10) || 60;
 const RATES = {
-  ai: { cap: 10, perMs: 60000 / 10 },
-  std: { cap: 60, perMs: 60000 / 60 }
+  ai: { cap: AI_CAP, perMs: 60000 / AI_CAP },
+  std: { cap: STD_CAP, perMs: 60000 / STD_CAP }
 };
 
 const buckets = new Map();

@@ -34,6 +34,12 @@ function makeExtStore(ext, opts) {
     insert(table, row) {
       const rows = tableRows(table);
       const r = Object.assign({ _inserted_at: stamp }, row || {});
+      // ext 表无自增主键：缺 id 时补一个递增 id，便于按 id 定位（审批/回滚等）
+      if (r.id === undefined || r.id === null) {
+        let max = 0;
+        for (const x of rows) if (x && typeof x.id === 'number' && x.id > max) max = x.id;
+        r.id = max + 1;
+      }
       rows.push(r);
       audit.push({ op: 'insert', table, row: r });
       return { ok: true, table, rowid: rows.length };
@@ -56,11 +62,16 @@ function makeExtStore(ext, opts) {
     },
     update(table, patch, where) {
       const rows = tableRows(table);
+      const w = Object.assign({}, where || {});
+      const notIn = Array.isArray(w.status_not_in) ? w.status_not_in.map(String) : null;
+      delete w.status_not_in;
+      const keys = Object.keys(w);
       let n = 0;
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-        const hit = !where || Object.keys(where).every((k) => String(row[k]) === String(where[k]));
-        if (hit) { rows[i] = Object.assign({}, row, patch || {}); n += 1; }
+        const eqHit = keys.every((k) => String(row[k]) === String(w[k]));
+        const notInHit = !notIn || notIn.indexOf(String(row.status)) < 0;
+        if (eqHit && notInHit) { rows[i] = Object.assign({}, row, patch || {}); n += 1; }
       }
       audit.push({ op: 'update', table, where, count: n });
       return { ok: true, table, count: n };

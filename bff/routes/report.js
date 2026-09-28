@@ -52,7 +52,7 @@ function mockReport(date) {
     date,
     rev: null,
     generated_at: null,
-    banner: '演示数据：云端暂无店内快照，以下为 mock 经营日报',
+    banner: '暂无店内数据：云端未收到门店快照',
     kpi: [
       { label: '营收', value: '¥12,580', delta: '+8.2%' },
       { label: '订单数', value: '286', delta: '+5.1%' },
@@ -68,7 +68,7 @@ function mockReport(date) {
       { kind: 'restock', route: 'inventory/restock', text: '推送店内快照后可生成断货补货待办', done: false },
       { kind: 'prep', route: 'kitchen', text: '有快照后将汇总今日建议备料工单', done: false }
     ],
-    alerts: [{ level: 'info', text: '无快照数据，当前为 mock 报表' }],
+    alerts: [{ level: 'info', text: '云端未收到门店快照' }],
     breakeven,
     day_close: {
       sold: { label: '售出', count: 286, amount: 12580, route: 'm/pos' },
@@ -373,7 +373,71 @@ function deriveReport(snap, date) {
   return report;
 }
 
+function dateStr(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+/** SI 简报：以“昨天经营 + 今天风险/待办”给老板开屏一条人话结论（确定性，不调 LLM） */
+function buildBriefing(snap) {
+  const today = todayStr();
+  const yd = new Date();
+  yd.setDate(yd.getDate() - 1);
+  const y = dateStr(yd);
+  const data = snap.data || {};
+  const sales = Array.isArray(data.sales) ? data.sales : [];
+  const recs = sales.filter((r) => recordDate(r).startsWith(y));
+  const rev = recs.reduce((s, r) => s + recordAmount(r), 0);
+  const orders = recs.length;
+  const rep = deriveReport(snap, today);
+
+  const bullets = [];
+  bullets.push(orders
+    ? '昨天营收 ¥' + rev.toFixed(0) + ' · ' + orders + ' 单 · 客单 ¥' + (rev / orders).toFixed(1)
+    : '昨天暂无销售记录（可能未营业或快照未更新）');
+  if (rep.breakeven && rep.breakeven.be_day) {
+    const gap = rep.breakeven.today_rev - rep.breakeven.be_day;
+    bullets.push('今日保本线 ¥' + Number(rep.breakeven.be_day).toFixed(0)
+      + '，当前' + (gap >= 0 ? '已超 ¥' + gap.toFixed(0) : '距保本差 ¥' + (-gap).toFixed(0)));
+  }
+  const crit = (rep.alerts || []).filter((a) => a && a.level === 'critical');
+  crit.slice(0, 2).forEach((a) => bullets.push('风险：' + a.text));
+  (rep.todos || []).slice(0, 3).forEach((t) => bullets.push('待办：' + t.text));
+
+  const headline = 'SI 早报 · ' + bullets[0] + (crit[0] ? ' · 需警惕：' + crit[0].text : '');
+  return {
+    ok: true,
+    mock: false,
+    date: today,
+    rev: snap.rev,
+    generated_at: snap.generated_at,
+    headline,
+    bullets,
+    summary: rep.summary,
+    todos: rep.todos,
+    alerts: rep.alerts
+  };
+}
+
 async function handle(req, res, ctx, pathname) {
+  if (req.method === 'GET' && pathname === '/api/report/briefing') {
+    const snap = loadSnapshot();
+    const hasData = !!(snap && (
+      (snap.data && Object.keys(snap.data).length > 0) ||
+      (snap.ext && Object.keys(snap.ext).length > 0)
+    ));
+    if (!hasData) {
+      ctx.sendJSON(res, 200, {
+        ok: true, mock: true, date: todayStr(),
+        headline: '暂无店内快照，请先推送 snapshot',
+        bullets: [], todos: [], alerts: [], rev: null, generated_at: null
+      });
+      return true;
+    }
+    ctx.sendJSON(res, 200, buildBriefing(snap));
+    return true;
+  }
+
   if (req.method === 'GET' && pathname === '/api/report/daily') {
     const qdate = (ctx.query.get('date') || '').trim();
     const date = /^\d{4}-\d{2}-\d{2}$/.test(qdate) ? qdate : todayStr();
@@ -389,4 +453,4 @@ async function handle(req, res, ctx, pathname) {
   return false;
 }
 
-module.exports = { handle };
+module.exports = { handle, deriveReport, buildBriefing, todayStr };
