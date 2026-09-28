@@ -404,3 +404,50 @@
 - 回档方案: `git reset --hard 217046d`（丢弃 T1 全部基线提交，文件回到未提交状态需配合 `git checkout`）；
   单批回滚用 `git revert <sha>`
 
+## [2026-09-28] T8 - CI 假绿修复（门禁可信化）
+
+- 背景: 底线是「平价测试全绿 ≠ 功能已迁移，两条门禁分别通过」，但 `kmp-build` **必挂**、seed 平价在 CI 上
+  **整体 SKIP 却判成功**、后端 JS 从未被解析、无 lint/漂移门禁、红线守卫只有 bash（本机 Windows 跑不了）——
+  门禁不可信时做写类改动（T6）等于把风险留到线上，故 T8 必须先于 T6 收口
+- 决策: 7 个假绿点逐个真修，**不调松阈值**（详见 `docs/运行保障层.md` §5.2）:
+  1. `kmp-build`：`cd kmp-shared && ./gradlew` 必挂 → 改经 `apps/android-app` 根工程构建 `:shared`。
+     根因：`kmp-shared` **不是 Gradle 根**——既无 wrapper，也未声明 `kotlin("multiplatform")` /
+     `com.android.library` / `app.cash.sqldelight` 的插件版本（版本在 `apps/android-app/build.gradle.kts`），
+     而 `apps/android-app/settings.gradle.kts` 已把 `:shared` 映射到 `../../kmp-shared`
+  2. seed 平价：去掉「基座库缺失即 `process.exit(0)`」的短路（`copyBaseDb()` 本就有按 migrations 全量重建的回退）；
+     新增 `SEED_BASE_DB` 环境变量以复现 CI 条件；**空套件不再判成功**（`tests.length === 0` 直接 FAIL）
+  3. 前端 ESLint 从未在 CI 执行：`admin-web-build` 增加 `npm run lint`（既有 devDependency，零新增依赖）。
+     **开闸前先实测**，当时 `--max-warnings 0` 下是 1 error + 3 warning。修法是**真修而非调松**：
+     `.eslintrc.cjs` 补 `no-unused-vars` 的 `^_` 忽略约定（`PlaceholderPage` 的 `_title` 是有意保留的路由契约参数）；
+     `SystemConfigPage.tsx` / `BookingPage.tsx` 的 3 处 `exhaustive-deps` 用 `useCallback` 修（未关规则）。
+     改动为**行内等量替换、行数零变化**（277→277、297→297），故基线引用这两个文件的行号无需调整
+  4. 后端从未被解析：新增 `scripts/lint-zero-dep.js`（全量 `node --check` + 3 条卫生规则）+ CI job
+  5. 无漂移校验：新增 `debt-drift` job（`pwsh -File scripts/gen-debt-table.ps1 -Check`）
+  6. 契约测试固定 `sleep 1` 等就绪：改为轮询 `GET /api/health`，20s 未就绪即 FAIL
+  7. 红线守卫仅 bash：新增 `ci/redline_guard.ps1`，与 bash 版逐项等价（R3/R4、R13、R5、R10、R14）
+- 影响范围: `.github/workflows/ci.yml`（+2 job、1 job 改法、2 处真跑）、`bff/store-node/seed/{run-tests,testutil}.js`、
+  `apps/admin-web/.eslintrc.cjs`、`apps/admin-web/src/pages/SystemConfigPage.tsx`、
+  `apps/admin-web/src/pages/dinein/BookingPage.tsx`、新增 `scripts/lint-zero-dep.js`、`ci/redline_guard.ps1`；
+  未触碰 `bff/store-node/{db,merge}.js`（哈希基线受保护文件）
+- 验证: 本机实跑（全绿，见 `docs/运行保障层.md` §8.1 等价命令）——`cd bff && npm test`（算法/store-node/seed 9/9/routes）、
+  `npm run lint`、`npm run build`、`node scripts/lint-zero-dep.js`（101 文件 0 违规）、
+  `powershell -File ci/redline_guard.ps1`、`powershell -File scripts/gen-debt-table.ps1 -Check`（无漂移）
+- **未满足（诚实清单）**:
+  1. **`kmp-build` 只能在 macOS runner 上验证**，本机（Windows，无 JDK 17 + 无依赖网络）**跑不了**。
+     「本机通过」**不等于** CI 通过，首次 CI 结果必须回填 `docs/运行保障层.md` §5.2；
+     若仍失败，应把该 job 显式降级为「源码储备·不编译」并在 §5.2 留痕，**不得让它继续以必挂状态存在**
+  2. **首次 CI 尚未触发**：截至本次提交，仓库**未配置任何 git remote**（`git remote -v` 为空），
+     无法推送 → GitHub Actions 未运行。故 CI 侧一律记「未验证」，不得据本机结果推断 CI 通过
+  3. **仍无覆盖率门禁**：`bff` 坚持运行时零第三方依赖，引入 c8/nyc 需先决策。在此之前覆盖率记为「未覆盖」
+- AI避坑提示:
+  - **未验证 ≠ 通过**：看板与 `docs/运行保障层.md` 对没跑过的门禁一律显示「未验证」，禁止写成「通过」
+  - **SKIP 不是 PASS**：任何「环境不具备就跳过」的短路都是假绿来源，要跳也必须 `exit 1` 或显式标红
+  - 改 `ci.yml` 前先确认 job 的**工作目录假设**（`kmp-shared` 无 wrapper 是这个坑的根源）；
+    改 Gradle 命令时不要在 `kmp-shared` 下执行 `./gradlew`
+  - 开 lint 门禁前先**在本地跑一遍 `--max-warnings 0`**，否则一开闸 CI 立刻红；
+    能真修就真修，**禁止靠放宽规则过关**（规则一松，后续所有违规都被静默）
+  - `.ps1` 脚本含中文时注意编码（`gen-debt-table.ps1` 需 UTF-8 BOM），否则 PowerShell 5.1 按 GBK 解析乱码报错
+- 回档方案: `git revert` 本次提交即可回到原 CI 形态（旧形态本身是必挂/假绿，回档等于恢复缺陷标签，
+  不影响任何业务代码与数据）；KMP 若降级为「源码储备」，只删 `kmp-build` job，不动 `kmp-shared` 源码
+- 后续: 推送后看首次 CI → 回填 §5.2 → 才算 T8 收口；之后才能开 T6（写类功能，门禁不可信时不安全）
+
