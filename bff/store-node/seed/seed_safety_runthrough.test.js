@@ -9,7 +9,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { runPython: execPy } = require('../../lib/_python');
 const { DatabaseSync } = require('node:sqlite');
 const lib = require('./testlib');
 const node = require('./seed_safety_runthrough');
@@ -44,7 +44,7 @@ async function main() {
   const pyDb = lib.copyDb(path.join(tmp, 'py', '餐厅系统.db'));
   const nodeDb = lib.copyDb(path.join(tmp, 'node', '餐厅系统.db'));
 
-  execFileSync('python3', ['-c', PY_CODE, PY_SCRIPT, pyDb], { encoding: 'utf8' });
+  execPy(PY_CODE, { args: [PY_SCRIPT, pyDb] });
   await node.main(['--db', nodeDb, '--store-url', 'http://127.0.0.1:1']);
 
   const n = lib.normalize(lib.loadDocData(nodeDb), NORM);

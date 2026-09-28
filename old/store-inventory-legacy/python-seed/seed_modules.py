@@ -34,8 +34,19 @@ from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DB = os.path.join(BASE_DIR, "data", "餐厅系统.db")
-MIGRATION_001 = os.path.join(BASE_DIR, "migrations", "001_new_tables.sql")
-MIGRATION_002 = os.path.join(BASE_DIR, "migrations", "002_seed_align.sql")
+def _resolve_sql(name):
+    """migrations 在本仓库中是 Git 符号链接（Linux/CI 可正常解析）。
+    Windows 下 core.symlinks=false 时会被 checkout 成纯文本文件，导致 open() 失败；
+    此处回退到唯一真身 store-inventory/migrations（避免复制副本产生漂移）。"""
+    p = os.path.join(BASE_DIR, "migrations", name)
+    if os.path.isfile(p):
+        return p
+    alt = os.path.join(BASE_DIR, "..", "..", "..", "store-inventory", "migrations", name)
+    return alt if os.path.isfile(alt) else p
+
+
+MIGRATION_001 = _resolve_sql("001_new_tables.sql")
+MIGRATION_002 = _resolve_sql("002_seed_align.sql")
 
 SRC = "demo_proto"
 log = logging.getLogger("seed_modules")

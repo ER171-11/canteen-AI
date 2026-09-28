@@ -14,6 +14,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 const { DatabaseSync } = require('node:sqlite');
+const { runPython: execPy, pick: pickPy } = require('../../lib/_python');
 
 const SEED_DIR = __dirname;
 const ROOT = path.resolve(SEED_DIR, '..', '..', '..'); // canteenAI/
@@ -122,17 +123,16 @@ function countWhere(dbPath, table, where) {
 
 /** 执行内联 Python 代码（可直接 importlib 加载原脚本并调用函数）。 */
 function runPython(code, args, input) {
-  return execFileSync('python3', ['-c', code].concat(args || []), {
-    input: input,
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  return execPy(code, { input: input, args: args || [] });
 }
 
 /** 异步执行内联 Python 代码：不阻塞 Node 事件循环（HTTP mock 场景必需）。 */
 function runPythonAsync(code, args) {
   return new Promise((resolve, reject) => {
-    const p = spawn('python3', ['-c', code].concat(args || []));
+    const pyc = pickPy() || { cmd: 'python3', pre: [] };
+    const p = spawn(pyc.cmd, pyc.pre.concat(['-c', code]).concat(args || []), {
+      env: Object.assign({}, process.env, { PYTHONIOENCODING: 'utf-8' })
+    });
     let out = '';
     let err = '';
     p.stdout.on('data', (d) => { out += d; });

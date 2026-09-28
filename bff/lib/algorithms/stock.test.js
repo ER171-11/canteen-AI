@@ -8,8 +8,8 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFileSync } = require('child_process');
 const { rebuildStock } = require('./stock');
+const { runPython: execPy } = require('./_python');
 
 const FIXTURE = {
   ings: [
@@ -42,7 +42,6 @@ function runPython() {
   // 通过 python3 调用 queue_consumer.rebuild_stock，保持同一实现
   const py = `
 import json, sys
-sys.path.insert(0, ${JSON.stringify(path.join(__dirname, '../../../store-inventory'))})
 import importlib.util
 spec = importlib.util.spec_from_file_location("qc", ${JSON.stringify(path.join(__dirname, '../../../old/store-inventory-legacy/python-runtime/queue_consumer.py'))})
 qc = importlib.util.module_from_spec(spec)
@@ -51,7 +50,7 @@ data = json.loads(sys.stdin.read())
 msg = qc.rebuild_stock(data)
 print(json.dumps({"data": data, "msg": msg}))
 `;
-  const out = execFileSync('python3', ['-c', py], { input: JSON.stringify(FIXTURE), encoding: 'utf8' });
+  const out = execPy(py, JSON.stringify(FIXTURE));
   return JSON.parse(out);
 }
 

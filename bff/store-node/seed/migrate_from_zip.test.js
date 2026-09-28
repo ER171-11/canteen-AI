@@ -12,7 +12,7 @@ const assert = require('assert');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { runPython: execPy } = require('../../lib/_python');
 const { DatabaseSync } = require('node:sqlite');
 const lib = require('./testlib');
 const mig = require('./migrate_from_zip');
@@ -67,7 +67,7 @@ function loadRev(dbPath) {
 }
 
 function testZipParity() {
-  const info = JSON.parse(execFileSync('python3', ['-c', PY_ZIP_INFO, lib.SRC_ZIP], { encoding: 'utf8' }));
+  const info = JSON.parse(execPy(PY_ZIP_INFO, { args: [lib.SRC_ZIP] }));
   const list = zipread.listEntries(lib.SRC_ZIP);
   assert.strictEqual(list.length, info.count, 'ZIP 条目数应与 Python 一致');
   const member = list.find((e) => e.name === mig.ZIP_DB_MEMBER);
@@ -142,7 +142,7 @@ function testFullIntegration() {
   const pyRev0 = loadRev(pyDb);
   const nodeRev0 = loadRev(nodeDb);
 
-  execFileSync('python3', ['-c', PY_FULL, LEGACY_DB, PY_SCRIPT, lib.SRC_ZIP, pyDb], { encoding: 'utf8' });
+  execPy(PY_FULL, { args: [LEGACY_DB, PY_SCRIPT, lib.SRC_ZIP, pyDb] });
   mig.main(['--zip', lib.SRC_ZIP, '--db', nodeDb]);
 
   const p = lib.loadDocData(pyDb);

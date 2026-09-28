@@ -9,7 +9,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { runPython: execPy } = require('../lib/_python');
 const { Store } = require('./db');
 
 const PY_DB = path.resolve(__dirname, '..', '..', 'old', 'store-inventory-legacy', 'python-runtime', 'db.py');
@@ -98,10 +98,7 @@ function runPython(dbPath, backupDir) {
     '    results.append(r)',
     'sys.stdout.write(json.dumps(results))',
   ].join('\n');
-  const res = execFileSync('python3', ['-c', py], {
-    input: JSON.stringify({ db: dbPath, backup: backupDir, ops: OPS }),
-    encoding: 'utf8',
-  });
+  const res = execPy(py, JSON.stringify({ db: dbPath, backup: backupDir, ops: OPS }));
   return normalize(JSON.parse(res));
 }
 

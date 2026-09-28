@@ -12,8 +12,8 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
 const pos = require('./pos');
+const { runPython: execPy } = require('./_python');
 
 const PY = path.join(__dirname, '../../../old/store-inventory-legacy/python-runtime/queue_consumer.py');
 
@@ -119,10 +119,7 @@ elif call == "prep_skus": msg = sorted(qc._prep_deducted_skus(db, payload.get("t
 else: raise SystemExit("unknown call " + call)
 print(json.dumps({"data": data, "msg": msg}, ensure_ascii=False))
 `;
-  const out = execFileSync('python3', ['-c', py], {
-    input: JSON.stringify(Object.assign({ __payload__: payload, __dbrows__: dbRows || {} }, data)),
-    encoding: 'utf8'
-  });
+  const out = execPy(py, JSON.stringify(Object.assign({ __payload__: payload, __dbrows__: dbRows || {} }, data)));
   return JSON.parse(out);
 }
 
@@ -323,10 +320,7 @@ try:
 except Exception as e:
     print(json.dumps({"err": str(e)}, ensure_ascii=False))
 `;
-  const out = execFileSync('python3', ['-c', py], {
-    input: JSON.stringify(Object.assign({ __payload__: ec.payload }, ec.data)),
-    encoding: 'utf8'
-  });
+  const out = execPy(py, JSON.stringify(Object.assign({ __payload__: ec.payload }, ec.data)));
   return JSON.parse(out).err;
 }
 

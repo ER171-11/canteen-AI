@@ -8,7 +8,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { runPythonArgv: execPyArgv } = require('../../lib/_python');
 const { DatabaseSync } = require('node:sqlite');
 const lib = require('./testlib');
 const node = require('./seed_today_workorders');
@@ -42,7 +42,7 @@ function main() {
   const pyDb = lib.copyDb(path.join(tmp, 'py', '餐厅系统.db'));
   const nodeDb = lib.copyDb(path.join(tmp, 'node', '餐厅系统.db'));
 
-  execFileSync('python3', [PY_SCRIPT, '--db', pyDb], { encoding: 'utf8' });
+  execPyArgv([PY_SCRIPT, '--db', pyDb]);
   const out = node.run(nodeDb);
 
   const n = allRows(nodeDb);

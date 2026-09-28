@@ -12,8 +12,8 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
 const ops = require('./ops');
+const { runPython: execPy } = require('./_python');
 
 const PY = path.join(__dirname, '../../../old/store-inventory-legacy/python-runtime/queue_consumer.py');
 
@@ -177,7 +177,7 @@ c.close()
 print(json.dumps({"data": data, "msg": msg, "err": err, "tables": tables}, ensure_ascii=False))
 `;
   const input = JSON.stringify(Object.assign({ __payload__: payload, __fixture__: o.fixture || {} }, data));
-  const out = execFileSync('python3', ['-c', py], { input: input, encoding: 'utf8' });
+  const out = execPy(py, input);
   try { fs.unlinkSync(db); } catch (e) { /* ignore */ }
   const parsed = JSON.parse(out);
   if (parsed.msg === null) parsed.msg = parsed.err;

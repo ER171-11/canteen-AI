@@ -44,7 +44,18 @@ DEFAULT_INTERVAL = 30
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DB_PATH = os.path.join(BASE_DIR, "data", "餐厅系统.db")
-MIGRATION_SQL = os.path.join(BASE_DIR, "migrations", "001_new_tables.sql")
+def _resolve_sql(name):
+    """migrations 在本仓库中是 Git 符号链接（Linux/CI 可正常解析）。
+    Windows 下 core.symlinks=false 时会被 checkout 成纯文本文件，导致 open() 失败；
+    此处回退到唯一真身 store-inventory/migrations（避免复制副本产生漂移）。"""
+    p = os.path.join(BASE_DIR, "migrations", name)
+    if os.path.isfile(p):
+        return p
+    alt = os.path.join(BASE_DIR, "..", "..", "..", "store-inventory", "migrations", name)
+    return alt if os.path.isfile(alt) else p
+
+
+MIGRATION_SQL = _resolve_sql("001_new_tables.sql")
 
 log = logging.getLogger("queue_consumer")
 
@@ -148,10 +159,10 @@ def ensure_tables(db_path):
     顺带尝试 002 的 ADD COLUMN（列已存在则忽略）。"""
     paths = [
         MIGRATION_SQL,
-        os.path.join(BASE_DIR, "migrations", "002_seed_align.sql"),
-        os.path.join(BASE_DIR, "migrations", "003_workorder_table.sql"),
-        os.path.join(BASE_DIR, "migrations", "004_workorder_bom.sql"),
-        os.path.join(BASE_DIR, "migrations", "005_accept_and_steps.sql"),
+        _resolve_sql("002_seed_align.sql"),
+        _resolve_sql("003_workorder_table.sql"),
+        _resolve_sql("004_workorder_bom.sql"),
+        _resolve_sql("005_accept_and_steps.sql"),
     ]
     conn = sqlite3.connect(db_path)
     try:

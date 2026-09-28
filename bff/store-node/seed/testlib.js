@@ -15,6 +15,7 @@ const os = require('os');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 const { Store } = require('../db');
+const { runPython: execPy, pick: pickPy } = require('../../lib/_python');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const SRC_DB = path.join(REPO_ROOT, 'store-inventory', 'data', '餐厅系统.db');
@@ -142,19 +143,20 @@ function normalize(v, opts) {
 }
 
 function pyJson(cmd, input, extraArgs) {
-  const { execFileSync } = require('child_process');
-  const res = execFileSync('python3', ['-c', cmd].concat(extraArgs || []), {
-    input: JSON.stringify(input),
-    encoding: 'utf8',
-  });
+  const res = execPy(cmd, { input: JSON.stringify(input), args: extraArgs || [] });
   return JSON.parse(res);
 }
 
 /** 异步跑 python（不阻塞事件循环，供同进程 mock server 用）。 */
 function runPython(args, input) {
   const { execFile } = require('child_process');
+  const c = pickPy() || { cmd: 'python3', pre: [] };
   return new Promise((resolve, reject) => {
-    const child = execFile('python3', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile(c.cmd, c.pre.concat(args), {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      env: Object.assign({}, process.env, { PYTHONIOENCODING: 'utf-8' })
+    }, (err, stdout, stderr) => {
       if (err) {
         err.stdout = stdout;
         err.stderr = stderr;

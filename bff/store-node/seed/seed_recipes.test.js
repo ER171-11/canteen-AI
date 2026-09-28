@@ -13,7 +13,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { runPython: execPy } = require('../../lib/_python');
 const { DatabaseSync } = require('node:sqlite');
 const sr = require('./seed_recipes');
 
@@ -22,7 +22,7 @@ const DOCX = path.resolve(__dirname, '..', '..', '..', 'old', 'root-assets',
   '金丰御字牌五福饺子(2).docx');
 
 function runPython(code, args) {
-  return execFileSync('python3', ['-c', code].concat(args || []), { encoding: 'utf8' });
+  return execPy(code, { args: args || [] });
 }
 
 // ---------------------------------------------------------------------------

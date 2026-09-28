@@ -8,8 +8,8 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
 const inv = require('./inventory');
+const { runPython: execPy } = require('./_python');
 
 const PY = path.join(__dirname, '../../../old/store-inventory-legacy/python-runtime/queue_consumer.py');
 
@@ -51,10 +51,7 @@ elif call == "insert_stock_count": msg = qc.insert_stock_count(db, payload)
 else: raise SystemExit("unknown call " + call)
 print(json.dumps({"data": data, "msg": msg}, ensure_ascii=False))
 `;
-  const out = execFileSync('python3', ['-c', py], {
-    input: JSON.stringify(Object.assign({ __payload__: payload }, data)),
-    encoding: 'utf8'
-  });
+  const out = execPy(py, JSON.stringify(Object.assign({ __payload__: payload }, data)));
   return JSON.parse(out);
 }
 
@@ -255,10 +252,7 @@ try:
 except Exception as e:
     print(json.dumps({"err": str(e)}, ensure_ascii=False))
 `;
-  const out = execFileSync('python3', ['-c', py], {
-    input: JSON.stringify(Object.assign({ __payload__: payload }, data)),
-    encoding: 'utf8'
-  });
+  const out = execPy(py, JSON.stringify(Object.assign({ __payload__: payload }, data)));
   return JSON.parse(out).err;
 }
 

@@ -10,8 +10,8 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
 const dish = require('./dish');
+const { runPython: execPy } = require('./_python');
 
 const PY = path.join(__dirname, '../../../old/store-inventory-legacy/python-runtime/queue_consumer.py');
 
@@ -29,10 +29,7 @@ spec.loader.exec_module(qc)
 /** 跑纯函数：返回 Python 结果（函数自带 json 序列化） */
 function runPython(pyBody, input) {
   const py = qcPrelude() + '\n' + pyBody;
-  const out = execFileSync('python3', ['-c', py], {
-    input: JSON.stringify(input),
-    encoding: 'utf8'
-  });
+  const out = execPy(py, JSON.stringify(input));
   return JSON.parse(out);
 }
 
@@ -435,10 +432,7 @@ c.close()
 os.remove(db_path)
 print(json.dumps({"data": d, "msg": msg, "rows": rows}, ensure_ascii=False))
 `;
-    const pyOut = JSON.parse(execFileSync('python3', ['-c', py], {
-      input: JSON.stringify(Object.assign({ __payload__: fx.payload }, fx.data)),
-      encoding: 'utf8'
-    }));
+    const pyOut = JSON.parse(execPy(py, JSON.stringify(Object.assign({ __payload__: fx.payload }, fx.data))));
 
     assert.strictEqual(normMsg(nodeMsg), normMsg(pyOut.msg), '[' + name + '] msg: '
       + normMsg(nodeMsg) + ' != ' + normMsg(pyOut.msg));

@@ -7,7 +7,7 @@
  */
 const assert = require('assert');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { runPython: execPy } = require('../lib/_python');
 const M = require('./merge');
 
 const PY_MERGE = path.resolve(__dirname, '..', '..', 'old', 'store-inventory-legacy', 'python-runtime', 'merge.py');
@@ -141,10 +141,7 @@ function runPython(cases) {
     '    out.append({"merged": merged, "conflicts": conflicts})',
     'sys.stdout.write(json.dumps(out))',
   ].join('\n');
-  const res = execFileSync('python3', ['-c', py], {
-    input: JSON.stringify(cases),
-    encoding: 'utf8',
-  });
+  const res = execPy(py, JSON.stringify(cases));
   return JSON.parse(res);
 }
 
@@ -176,9 +173,7 @@ function testRecHashParity() {
     'recs = json.loads(sys.stdin.read())',
     'sys.stdout.write(json.dumps([m.rec_hash(r) for r in recs]))',
   ].join('\n');
-  const res = JSON.parse(execFileSync('python3', ['-c', py], {
-    input: JSON.stringify(records), encoding: 'utf8',
-  }));
+  const res = JSON.parse(execPy(py, JSON.stringify(records)));
   const mine = records.map((r) => M.recHash(r));
   assert.deepStrictEqual(mine, res, 'recHash mismatch');
   console.log('[merge.test] recHash 与 Python 一致（' + records.length + ' 条）');

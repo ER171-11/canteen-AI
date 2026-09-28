@@ -14,7 +14,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { runPython: execPy } = require('../../lib/_python');
 const io = require('./import_orders_excel');
 const { Store } = require('../db');
 
@@ -24,9 +24,7 @@ const PY_RUNTIME = path.join(REPO, 'old', 'store-inventory-legacy', 'python-runt
 const ORDERS_DIR = path.join(REPO, 'store-inventory', '订单');
 
 function runPython(code, args) {
-  return execFileSync('python3', ['-c', code].concat(args || []), {
-    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-  });
+  return execPy(code, { args: args || [] });
 }
 
 function pyBootstrap() {
