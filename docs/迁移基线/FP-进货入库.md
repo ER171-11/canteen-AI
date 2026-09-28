@@ -2,10 +2,14 @@
 
 > 源系统：`old/store-inventory-legacy/熊猫五福餐厅进销存系统_真实数据版.html`
 > 源页面：`#tab-buy`「进货入库」（HTML 第 294–330 行区域，脚本区块 1481 起）
-> 目标系统：`apps/admin-web/src/pages/inventory/InboundPage.tsx`（693 行）+ `bff/routes/inventory.js` + `bff/routes/settle.js`
+> 目标系统：`apps/admin-web/src/pages/inventory/InboundPage.tsx`（721 行）+ `bff/routes/inventory.js` + `bff/routes/settle.js`
 > 模式：**替代**（全部 ⬜ 视为回归缺陷，需排期补齐）
 > 建立日期：2026-09-28　更新日期：2026-09-28（T4 只读项 / T5 结算单全家桶）
 > 状态：🟡 进行中　规范依据：`docs/迁移颗粒度规范.md`
+>
+> **行号时效**：表中**旧版**行号指向只读的旧 HTML（永不变）；**新版**行号是**当前源码快照**，
+> 任何改动 `InboundPage.tsx` 的任务都必须复核并同步本表行号（T5 后曾发生整体漂移，
+> 已按 721 行版本全表复核）。行号是证据，漂移的行号等于没有证据。
 
 ---
 
@@ -13,21 +17,21 @@
 
 | FP ID | 功能点 | 旧版证据 | 新版现状 | 状态 | 处置 / 关联 |
 |---|---|---|---|---|---|
-| FP-RECV-01 | 新建进货单（手工录入：供应商/明细/实付/欠款/关联采购单） | HTML:299 `#btnNewRecv`、:1488 → `openRecv()` :1663 | 无。页面空态文案为「货到了请在店内系统或后续审批流新建 JH 进货单」(`InboundPage.tsx`:364) | ⬜ 待补 | 需走"建议动作 + 审批队列"，不得直写库 |
+| FP-RECV-01 | 新建进货单（手工录入：供应商/明细/实付/欠款/关联采购单） | HTML:299 `#btnNewRecv`、:1488 → `openRecv()` :1663 | 无。页面空态文案为「货到了请在店内系统或后续审批流新建 JH 进货单」(`InboundPage.tsx`:540) | ⬜ 待补 | 需走"建议动作 + 审批队列"，不得直写库 |
 | FP-RECV-02 | 进货单批量导入（xlsx / 伪 xls / html / csv） | HTML:318 说明、`previewRecImport` :3709、`commitRecImport` :3754 | 无（后端亦无导入端点） | ⬜ 待补 | 复用既有解析链路 + 唯一写入口 |
 | FP-RECV-03 | 下载导入模板 | HTML:301 `#btnRecvTpl`、`downloadRecTemplate` :3784 | 无 | ⬜ 待补 | 随 FP-RECV-02 |
-| FP-RECV-04 | 行内结算单（打印 / CSV / 电子版 HTML / PDF） | HTML:1528 `data-recvsettle` → `openSettle` :2486、`printSettle` :2229、PDF :2440 | `InboundPage.tsx`:343-345 行内「结算单」按钮、:701-708 弹窗挂载；`settle/SettleModal.tsx`（129 行）四按钮 = 打印 `html.ts` 开窗打印 / 导出 PDF / 电子版 HTML / CSV；`settle/export.ts`、`settle/pdf.ts`（497 行，零依赖 Canvas→JPEG→PDF 字节流）、`settle/data.ts`（`numToCn` 大写金额、CSV 含 BOM） | ⬆️ 已移植 | 只读输出层，**零写库**；验证：点行内「结算单」→ 四种输出均可生成且与旧版版面一致 |
-| FP-RECV-05 | 批量生成结算单（N 张 → 连续 PDF / 合并 CSV） | HTML:302 `#btnSettleBatch` → `openSettleBatch` :2548 | `InboundPage.tsx`:524-527 工具条「批量结算单」、:709-716 弹窗挂载；`settle/SettleBatchModal.tsx`（212 行，勾选/全选/仅选有欠款 + 实时合计） | ⬆️ 已移植 | 验证：批量导出 PDF 为**单一文件**（每张首页，内容超页自动续页），CSV 为合并表 |
+| FP-RECV-04 | 行内结算单（打印 / CSV / 电子版 HTML / PDF） | HTML:1528 `data-recvsettle` → `openSettle` :2486、`printSettle` :2229、PDF :2440 | `InboundPage.tsx`:342-345 行内「结算单」按钮、:700-708 弹窗挂载；`settle/SettleModal.tsx`（142 行）四按钮 = 打印 `html.ts` 开窗打印 / 导出 PDF / 电子版 HTML / CSV；`settle/export.ts`（107 行）、`settle/pdf.ts`（520 行，零依赖 Canvas→JPEG→PDF 字节流）、`settle/data.ts`（131 行，`numToCn` 大写金额、CSV 含 BOM） | ⬆️ 已移植 | 只读输出层，**零写库**；验证：点行内「结算单」→ 四种输出均可生成且与旧版版面一致 |
+| FP-RECV-05 | 批量生成结算单（N 张 → 连续 PDF / 合并 CSV） | HTML:302 `#btnSettleBatch` → `openSettleBatch` :2548 | `InboundPage.tsx`:523-526 工具条「批量结算单」、:709-716 弹窗挂载；`settle/SettleBatchModal.tsx`（230 行，勾选/全选/仅选有欠款 + 实时合计） | ⬆️ 已移植 | 验证：批量导出 PDF 为**单一文件**（每张首页，内容超页自动续页），CSV 为合并表 |
 | FP-RECV-06 | 结算单模板配置（抬头/地址/税号/收款单位/签字栏） | HTML:615 设置区 | `SystemConfigPage.tsx`:63-131 状态与读写、:212-286「结算单模板」卡片；后端 `bff/routes/settle.js` `GET/PUT /api/settle/template`（字段白名单清洗、仅老板/店长可写、审计留痕），存 `bff/data/settle_template.json` | ⬆️ 已移植 | **与 FP-SET-18 为同一功能的重复登记**（旧版同一表单既服务结算单又列在设置页）；存储形态变更见 `ADR-003`；只读输出层，**不写业务库** |
-| FP-RECV-07 | 补付（欠款清收，登记后续付款） | HTML:1529 `data-pay`、:2054「补付/收款通用」 | `PayModal.tsx`（133 行，入队）；`bff/lib/algorithms/inventory.js` `applyRecvPay`；`registry.js` 注册 `recv.pay`（未注册会被消费器判 `need-manual` 驳回）；`recv_pay.test.js` 用例 | ⬆️ 已移植 | **走确认队列**（`/api/actions` + rev），不直写库；服务端强制校验 `0 < amount ≤ 欠款 + 0.01`；验证：确认后欠款归零、状态回写 |
+| FP-RECV-07 | 补付（欠款清收，登记后续付款） | HTML:1529 `data-pay`、:2054「补付/收款通用」 | `InboundPage.tsx`:346-351 行内「补付」（仅欠款单 + 有写权限可见）、:718-724 弹窗挂载；`PayModal.tsx`（145 行，入队）；`bff/lib/algorithms/inventory.js` `applyRecvPay`；`registry.js` 注册 `recv.pay`（未注册会被消费器判 `need-manual` 驳回）；`recv_pay.test.js` 用例 | ⬆️ 已移植 | **走确认队列**（`/api/actions` + rev），不直写库；服务端强制校验 `0 < amount ≤ 欠款 + 0.01`；验证：确认后欠款归零、状态回写 |
 | FP-RECV-08 | 编辑进货单 | HTML:1530 `data-recvedit` | 无 | ⬜ 待补 | 实现方式：改为「编辑建议动作」走审批队列 |
 | FP-RECV-09 | 删除 / 作废进货单 | HTML:1531 `data-recvdel` | 无 | ⬜ 待补 | 同上；作废需留痕，不得物理删除 |
-| FP-RECV-10 | 顶部汇总卡（本月进货应付 / 累计应付 / 累计实付 / 欠供应商） | `renderRecvKpi()` :1502-1511（口径：本月 = `daysAgo(29)` 起**近 30 天**，非自然月） | `InboundPage.tsx`:176-187 `kpi` useMemo 计算 + :419-450 四张 `Statistic` 卡（用**全部 docs**，不随供应商筛选变化，与旧版一致） | ⬆️ 已移植 | 验证：打开 /inventory/inbound，顶部四卡显示数值；欠供应商 = 累计应付 − 累计实付，>0 标红 |
-| FP-RECV-11 | 明细行内展开（逐项 名称/数量/单价/金额） | `renderRecv` :1519-1521（逐项 `名称 数量×单价=金额` 全量渲染） | `InboundPage.tsx`:353-381 `lineCols`、:385-417 `expandedRowRender`、Table `expandable` :494-497（含合计行） | ⬆️ 已移植 | 验证：点行首展开箭头 → 显示逐项 原料/订购量/实收量/单价/金额 + 合计 |
-| FP-RECV-12 | 供应商筛选 | 界面工具条 | `InboundPage.tsx` 有供应商下拉 | ⬆️ 已移植 | 验证：打开入库单页筛选供应商 |
-| FP-RECV-13 | 验收明细（逐项验收结论：pass/warn/fail 聚合） | 旧版无（新版新增能力） | `InboundPage.tsx`:205/215/274 抽屉 | ⬆️ 已移植 | 验证：点「验收明细」查看逐项结论 |
-| FP-RECV-14 | 补录验收（走 `recv.accept` 审批队列） | 旧版无（新版新增能力） | `InboundPage.tsx`:357/432/461 | ⬆️ 已移植 | 验证：补录后到审批中心可见该动作 |
-| FP-RECV-15 | 付款状态展示（已结清 / 有欠款） | `renderRecv` 列表列 | `InboundPage.tsx`:256/261 | ⬆️ 已移植 | 验证：欠款单显示黄色「有欠款」 |
+| FP-RECV-10 | 顶部汇总卡（本月进货应付 / 累计应付 / 累计实付 / 欠供应商） | `renderRecvKpi()` :1502-1511（口径：本月 = `daysAgo(29)` 起**近 30 天**，非自然月） | `InboundPage.tsx`:202-219 `kpi` useMemo 计算 + :471-501 四张 `Statistic` 卡（用**全部 docs**，不随供应商筛选变化，与旧版一致） | ⬆️ 已移植 | 验证：打开 /inventory/inbound，顶部四卡显示数值；欠供应商 = 累计应付 − 累计实付，>0 标红 |
+| FP-RECV-11 | 明细行内展开（逐项 名称/数量/单价/金额） | `renderRecv` :1519-1521（逐项 `名称 数量×单价=金额` 全量渲染） | `InboundPage.tsx`:405-436 `lineCols`、:438-467 `expandedRowRender`、Table `expandable` :550-554（含合计行） | ⬆️ 已移植 | 验证：点行首展开箭头 → 显示逐项 原料/订购量/实收量/单价/金额 + 合计 |
+| FP-RECV-12 | 供应商筛选 | 界面工具条 | `InboundPage.tsx`:515-522 供应商 `Select`（`filtered` 由 `supplier` 派生） | ⬆️ 已移植 | 验证：打开入库单页筛选供应商 |
+| FP-RECV-13 | 验收明细（逐项验收结论：pass/warn/fail 聚合） | 旧版无（新版新增能力） | `InboundPage.tsx`:337-341 行内「验收明细」按钮、:219-231 `drawerAccepts` 聚合、:558-610 `Drawer` | ⬆️ 已移植 | 验证：点「验收明细」查看逐项结论 |
+| FP-RECV-14 | 补录验收（走 `recv.accept` 审批队列） | 旧版无（新版新增能力） | `InboundPage.tsx`:352-356 行内「补录」按钮、:612-698 `Modal`（`:621-628` 构造 `recv.accept` 入队体） | ⬆️ 已移植 | 验证：补录后到审批中心可见该动作 |
+| FP-RECV-15 | 付款状态展示（已结清 / 有欠款） | `renderRecv` 列表列 | `InboundPage.tsx`:325-330 `docDebt` 分支渲染 `Tag` | ⬆️ 已移植 | 验证：欠款单显示黄色「有欠款」 |
 
 ## 汇总
 
