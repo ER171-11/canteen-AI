@@ -8,10 +8,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
 import com.pandawufu.app.AppModule
 import com.pandawufu.app.ui.designsystem.FiveGreen
+import com.pandawufu.app.ui.designsystem.FiveRed
+import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Sub
+import com.pandawufu.shared.model.BookingInsightDto
 import com.pandawufu.shared.viewmodel.ModulesViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -51,16 +58,17 @@ fun BookingScreen() {
     }
     val turnMin = (10 + dining * 2 + queueN).coerceIn(6, 28)
     val waitEta = (8 + waitingQueue.size * 3).coerceIn(5, 45)
+    val ins = booking?.insight
 
     fun reload() = viewModel.dispatch(ModulesViewModel.Intent.LoadBooking())
 
     ModuleScaffold(
         title = "预订排队",
         subtitle = when (tab) {
-            0 -> "今日预订 ${booking?.bookings?.size ?: 0} 桌"
-            1 -> "排队 ${queueN} 组 · 叫号"
-            2 -> "候餐 · 估时 ~${waitEta} 分 · 等位 ${waitingQueue.size}"
-            else -> "翻台预估 ~${turnMin} 分"
+            0 -> "今日预订 ${ins?.summary?.bookings ?: booking?.bookings?.size ?: 0} 桌 · ${ins?.summary?.guests ?: 0} 人"
+            1 -> "排队等位 ${ins?.queue?.waiting ?: waitingQueue.size} 组 · 叫号"
+            2 -> "候餐 · 等位 ${ins?.queue?.waiting ?: waitingQueue.size} 组 / ${ins?.queue?.waitingGuests ?: 0} 人"
+            else -> ins?.tables?.occupancyPct?.let { "翻台预估 · 占用 $it%" } ?: "翻台预估"
         },
         loading = state.loading && booking == null,
         error = state.error,
@@ -70,6 +78,7 @@ fun BookingScreen() {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        BookingInsightCard(ins)
         when (tab) {
             0 -> {
                 DraftWriteButton(
@@ -368,26 +377,91 @@ fun BookingScreen() {
                 }
             }
             else -> {
-                ModuleCard("翻台预估 · 下一时段") {
-                    KvRow("平均翻台时长（预估）", "~$turnMin 分钟")
-                    Text("按「10 + 就餐×2 + 排队组数」公式预估，非实测", color = Sub, fontSize = 12.sp)
-                    Text(
-                        if (turnMin <= 12) "优于基线 · 可加快叫号" else "偏慢 · 建议清台优先",
-                        color = FiveGreen,
-                        fontSize = 12.sp
-                    )
-                    KvRow("就餐中", "$dining 桌")
-                    KvRow("待确认预订", "$pending 桌")
-                    KvRow("排队等待", "$queueN 组")
+                val t = ins?.tables
+                val turn = ins?.turn
+                ModuleCard("翻台预估 · 真实桌位") {
+                    if (t == null || t.total == 0) {
+                        Text("暂无桌位数据 · 推送 pos_tables 后显示", color = Sub, fontSize = 12.sp)
+                    } else {
+                        KvRow("桌位占用", "${t.occupied}/${t.total} 桌 · ${t.occupancyPct ?: "-"}%")
+                        turn?.byCapacity?.entries?.sortedBy { it.key }?.forEach { (cap, c) ->
+                            KvRow("$cap（${c.count} 张）", "翻台约 ${c.turnMin} 分")
+                        }
+                        Text(turn?.note ?: "", color = Sub, fontSize = 11.sp)
+                    }
+                }
+                ModuleCard("后厨备料联动") {
+                    val k = ins?.kitchen
+                    if (k == null || k.expectedPortions == null) {
+                        Text("人均份数未配 · 在「经营分析·保本」补齐店参后显示", color = Sub, fontSize = 12.sp)
+                    } else {
+                        KvRow("今日预订客流", "${k.expectedGuests} 人")
+                        KvRow("建议备料", "${k.expectedPortions} 份")
+                        Text("= 预订人数 × 人均 ${k.dishPerGuest} 份；可据此开工单", color = Sub, fontSize = 11.sp)
+                    }
+                }
+                ModuleCard("加排建议（联动客流）") {
+                    val st = ins?.staffing
+                    if (st == null) Text("暂无建议", color = Sub, fontSize = 12.sp)
+                    else {
+                        Text(
+                            st.text,
+                            color = if (st.suggestAdd) FiveRed else FiveGreen,
+                            fontWeight = FontWeight.Bold
+                        )
+                        KvRow("当前占用", st.occupancyPct?.let { "$it%" } ?: "-")
+                        KvRow("就餐中 / 待确认 / 排队", "$dining / $pending / $queueN")
+                    }
                 }
                 ModuleCard("桌态建议") {
                     Text(
-                        "结账后桌台进入「待清」，翻台率自动联动。高峰前优先清台，缩短排队。晚峰建议加排服务。",
+                        "结账后桌台进入「待清」，翻台率自动联动。高峰前优先清台，缩短排队。",
                         color = Sub,
                         fontSize = 12.sp
                     )
                 }
             }
         }
+    }
+}
+
+/** SI 翻台与联动洞察卡：统一展示预订/排队/桌位/备料/加排 */
+@Composable
+private fun BookingInsightCard(ins: BookingInsightDto?) {
+    if (ins == null) return
+    ModuleCard("SI · 翻台与联动") {
+        ins.summary?.let { s ->
+            KvRow("今日预订", "${s.bookings} 桌 · ${s.guests} 人")
+            if (s.bySlot.isNotEmpty()) {
+                KvRow("时段分布", s.bySlot.entries.joinToString(" · ") { "${it.key} ${it.value}" })
+            }
+            if (s.byStatus.isNotEmpty()) {
+                KvRow("状态", s.byStatus.entries.joinToString(" · ") { "${it.key} ${it.value}" })
+            }
+        }
+        ins.queue?.let { q ->
+            KvRow("排队", "等位 ${q.waiting} 组 / ${q.waitingGuests} 人 · 下一号 ${q.nextNo ?: "-"}")
+        }
+        ins.tables?.let { t ->
+            KvRow("桌位占用", "${t.occupied}/${t.total} 桌 · ${t.occupancyPct ?: "-"}%")
+        }
+        ins.turn?.byCapacity?.takeIf { it.isNotEmpty() }?.let { cap ->
+            KvRow("桌型翻台", cap.entries.sortedBy { it.key }.joinToString(" · ") { "${it.key}~${it.value.turnMin}分" })
+        }
+        ins.kitchen?.let { k ->
+            if (k.expectedPortions != null) {
+                KvRow("后厨备料", "预计 ${k.expectedPortions} 份（${k.expectedGuests} 人 × ${k.dishPerGuest}）")
+            }
+        }
+        ins.staffing?.let { st ->
+            Text(
+                "· ${st.text}",
+                color = if (st.suggestAdd) FiveRed else FiveGreen,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        Text("SI 只读快照推算 · 写操作仍走确认台", color = Sub, fontSize = 10.sp)
     }
 }

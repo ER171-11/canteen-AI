@@ -28,10 +28,10 @@ object BossIa {
     object Brand {
         const val NAME = "熊猫五福"
         /** 实体店名（与 BFF org.stores[0].name 对齐的短称） */
-        const val STORE = "熊猫功夫餐厅"
+        const val STORE = "熊猫五福餐厅"
         /** 老板真名（与 BFF org 用户 boss.display_name 对齐） */
-        const val BOSS_NAME = "David Sun"
-        const val TAGLINE = "老板 AI 助手"
+        const val BOSS_NAME = "宋子刚"
+        const val TAGLINE = "老板 SI 助手"
         /** 主 Tab：品牌为标题，页名为副标题前缀 */
         fun tabSubtitle(page: String, job: String, storeLine: String? = null): String {
             val head = "$page · $job"
@@ -44,18 +44,10 @@ object BossIa {
     }
 
     // ───────────────────────────────────────── Auth / 岗权（进 App 前）
-    /** 登录与演示岗：决定能看什么、能不能点确认台 */
+    /** 登录与岗权：决定能看什么、能不能点确认台 */
     object Auth {
         const val TITLE = "进店"
         const val SUB = "微信 / 账号密码 · 岗权决定可读可写"
-        data class DemoRole(val label: String, val account: String, val hint: String, val see: String)
-        val demoRoles = listOf(
-            DemoRole(Brand.BOSS_NAME, "boss", "全店拍板 · ${Brand.STORE}", "五席全开 · 确认台可写"),
-            DemoRole("店长", "manager", "店务统筹", "五席全开 · 确认台可写"),
-            DemoRole("收银", "cashier", "前厅收银", "偏前厅 · 写权看岗配置"),
-            DemoRole("厨房", "kitchen", "工单出品", "偏后厨/货品读"),
-            DemoRole("财务", "finance", "对账结算", "偏钱事/分析")
-        )
         const val RULE_BOSS_MANAGER = "老板/店长：模块全开，确认台默认可写。"
         const val RULE_OTHER = "其它岗：按 permissions 的 {module}.read|write；无写权只看不批。"
         const val OFFLINE = "曾登录可离线进店看缓存；联网后冲刷离线队列。"
@@ -92,7 +84,7 @@ object BossIa {
         const val TODAY_JOB = "营收一眼 · 待批 · 待办"
         const val GOODS = "货品"
         const val GOODS_JOB = "缺货 → 下单 → 入库 → 账面"
-        const val AI = "AI"
+        const val AI = "SI"
         const val AI_JOB = "问店决策 · 改数走确认台"
         const val KITCHEN = "后厨"
         const val KITCHEN_JOB = "工单 → 出品 → 品控"
@@ -257,11 +249,10 @@ object BossIa {
 
     // ───────────────────────────────────────── L1·AI
     /** L1·AI：问店决策，写操作出确认台 */
-    object Ai {
-        const val TITLE = "问店 AI"
-        const val SUB = "问店决策 · 改账/下单必须过确认台"
+    object Ai {        const val TITLE = "问店 SI"
+        const val SUB = "SI 只读取数与建议 · 改账/下单必须过确认台"
         const val INTRO =
-            "可问销量、毛利、库存、菜谱用量、排班与外卖。需要改数时我会给提案卡片，你在确认台点头才执行。"
+            "我是你的超级经营助理。可问销量、毛利、库存、菜谱用量、排班与外卖；我会用只读工具查真数，需要改数时给提案，你在确认台点头才执行。"
         const val QUICK = "快捷问一句"
         /** L2 场景分组（对齐 ChatScene） */
         val scenes = listOf("进销", "后厨", "经营", "店务")
@@ -271,6 +262,32 @@ object BossIa {
             "经营" to listOf("今日营收概况", "毛利结构分析"),
             "店务" to listOf("待办与预警", "人员与排班")
         )
+    }
+
+    // ───────────────────────────────────────── L1·SI 信息架构
+    /**
+     * 老板体验视角的 SI 信息架构（单一事实源）。
+     *
+     * 心智：老板每天只做三件事——看今日主线、批该批的、问 SI；其余是低频设置。
+     *   今日页 SI 主线（看盘→抓异常→出方案→执行→追踪→沉淀）= 唯一「下一步」
+     *   ① 要我拍板：需老板点头的队列（收件箱·需拍板）
+     *   ② SI 在办：执行中 + 战役 + 目标
+     *   ③ 问一句：自然语言指挥（对话）
+     *   ④ SI 设置与能力（低频）：授权/审计/专家团/知识/目标/模拟
+     */
+    object Si {
+        const val TITLE = "SI 指挥台"
+        const val SUB = "要我拍板 · SI 在办 · 问一句"
+        const val SETTINGS = "SI 设置与能力"
+        const val SETTINGS_SUB = "授权 · 目标 · 战役 · 专家团 · 模拟"
+        /** 高频三件事（指挥台顶栏） */
+        val primary = listOf(
+            Triple("要我拍板", "等你点头的队列", "m/inbox"),
+            Triple("SI 在办", "执行中 · 战役 · 目标", "m/si-missions"),
+            Triple("问一句", "自然语言指挥", "chat")
+        )
+        /** 低频设置页分组 */
+        val settings = listOf("拍板与授权", "SI 在办", "SI 认知与工具")
     }
 
     // ───────────────────────────────────────── L1·我的
@@ -410,7 +427,7 @@ object BossIa {
             bossAsk = "熟客回来了吗？券还能不能在前厅核？",
             keywords = "会员 储值 券 生日 前厅 熟客",
             iconBgArgb = 0xFFFCE4E1,
-            actionTypes = listOf("vip.campaign", "vip.coupon_redeem", "vip.checkin")
+            actionTypes = listOf("vip.campaign", "vip.coupon_redeem", "vip.checkin", "vip.balance_deduct")
         ),
         Module(
             label = "财务",
@@ -446,7 +463,7 @@ object BossIa {
             bossAsk = "钱是不是从损耗里漏走了？",
             keywords = "损耗 报损",
             iconBgArgb = 0xFFFCEDD0,
-            actionTypes = listOf("loss.report")
+            actionTypes = listOf("loss.report", "loss.approve", "loss.reject")
         ),
         Module(
             label = "口碑",
@@ -645,12 +662,12 @@ object BossIa {
             "前厅" to listOf(
                 "pos.table_state", "pos.pay", "pos.rush", "pos.ready", "pos.pass", "pos.pack", "pos.void",
                 "booking.upsert", "queue.join", "queue.call", "queue.serve",
-                "takeout.ack", "vip.campaign", "vip.coupon_redeem", "vip.checkin",
+                "takeout.ack", "vip.campaign", "vip.coupon_redeem", "vip.checkin", "vip.balance_deduct",
                 "review.followup"
             ),
             "钱事" to listOf(
                 "finance.recon", "finance.freeze", "finance.approve",
-                "loss.report", "day.close"
+                "loss.report", "loss.approve", "loss.reject", "day.close"
             ),
             "人与合规" to listOf(
                 "staff.clock", "staff.shift_upsert",

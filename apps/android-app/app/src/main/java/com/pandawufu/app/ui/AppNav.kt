@@ -59,8 +59,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.pandawufu.app.offline.SyncStatusBar
+import com.pandawufu.app.push.SiPushScheduler
+import androidx.compose.ui.platform.LocalContext
 import com.pandawufu.app.ui.designsystem.DefaultProtoTabs
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.AppBgBrush
 import com.pandawufu.app.ui.designsystem.ProtoTab
 import com.pandawufu.app.ui.designsystem.ProtoTabBar
 import com.pandawufu.shared.auth.AuthTokenHolder
@@ -94,6 +97,26 @@ object Routes {
     const val M_REVIEW = "m/review"
     const val M_LOSS = "m/loss"
     const val M_ACTIONS = "m/actions"
+    /** SI 收件箱：需拍板 / 执行中 / 预警 / 通知（原确认台升级） */
+    const val M_INBOX = "m/inbox"
+    /** SI 授权与审计：分级授权政策 + 决策审计 */
+    const val M_SI_POLICY = "m/si-policy"
+    /** SI 目标面板 */
+    const val M_SI_GOALS = "m/si-goals"
+    /** SI What-if 模拟 */
+    const val M_SI_SIM = "m/si-simulate"
+    /** SI 专家团 + 知识 */
+    const val M_SI_TEAM = "m/si-team"
+    /** SI 战役 */
+    const val M_SI_MISSIONS = "m/si-missions"
+    /** SI 设置与能力（低频聚合） */
+    const val M_SI_SETTINGS = "m/si-settings"
+    /** 老板全局 SI 驾驶舱 */
+    const val M_SI_COCKPIT = "m/si-cockpit"
+    /** 采购工作台 */
+    const val M_WB_PROCUREMENT = "m/wb-procurement"
+    /** 厨师工作台 */
+    const val M_WB_KITCHEN = "m/wb-kitchen"
     const val M_ORG = "m/org"
     /** 我的餐厅：门店资料 / 桌台 / 经营偏好聚合配置 */
     const val M_RESTAURANT = "m/restaurant"
@@ -114,6 +137,7 @@ object Routes {
 
 @Composable
 fun AppNav(modifier: Modifier = Modifier) {
+    val appContext = LocalContext.current.applicationContext
     var loggedIn by remember { mutableStateOf(!AuthTokenHolder.get().isNullOrBlank()) }
     LaunchedEffect(Unit) {
         if (!loggedIn) {
@@ -126,6 +150,11 @@ fun AppNav(modifier: Modifier = Modifier) {
                 loggedIn = false
             }
         }
+    }
+
+    // 登录后排 SI 收件箱后台轮询（JobScheduler，15 分钟）；登出取消
+    LaunchedEffect(loggedIn) {
+        if (loggedIn) SiPushScheduler.schedule(appContext) else SiPushScheduler.cancel(appContext)
     }
 
     // 回到前台再刷一次岗权 / 冲刷离线队列
@@ -163,34 +192,38 @@ fun AppNav(modifier: Modifier = Modifier) {
 
     val tabs: List<ProtoTab> = DefaultProtoTabs.filter { tab ->
         when (tab.route) {
-            Routes.HOME, Routes.CHAT, Routes.MORE, Routes.FRONT -> true
+            Routes.CHAT, Routes.MORE, Routes.FRONT -> true
             else -> AppModule.canOpenRoute(tab.route)
         }
     }.ifEmpty {
-        DefaultProtoTabs.filter { it.route == Routes.HOME || it.route == Routes.MORE }
+        DefaultProtoTabs.filter { it.route == Routes.MORE || it.route == Routes.FRONT }
     }
 
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val tabHighlightRoute = when {
+        currentRoute == Routes.HOME -> Routes.CHAT
         currentRoute == Routes.FRONT || currentRoute in Routes.frontChildRoutes -> Routes.FRONT
-        currentRoute?.startsWith("inventory") == true -> Routes.MORE
+        currentRoute?.startsWith("inventory") == true -> Routes.INVENTORY
         currentRoute?.startsWith("kitchen") == true -> Routes.KITCHEN
         currentRoute?.startsWith("m/") == true -> Routes.MORE
         else -> currentRoute
     }
-    val isMainTab = tabs.any { it.route == tabHighlightRoute }
+    // 一级页（底部 5 个 Tab 根页）不出返回键；其余子页（m/*、今日总览、进销存子页）均给返回键
+    val rootRoutes = setOf(Routes.FRONT, Routes.INVENTORY, Routes.CHAT, Routes.KITCHEN, Routes.MORE)
+    val isMainTab = currentRoute != null && currentRoute in rootRoutes
 
     fun handleLogout() {
         AppModule.logout()
+        SiPushScheduler.cancel(appContext)
         loggedIn = false
     }
 
     Box(
         modifier
             .fillMaxSize()
-            .background(PageBg)
+            .background(AppBgBrush)
     ) {
         Column(Modifier.fillMaxSize()) {
             SyncStatusBar(Modifier.fillMaxWidth())
@@ -200,7 +233,7 @@ fun AppNav(modifier: Modifier = Modifier) {
                 ) {
                     NavHost(
                         navController = navController,
-                        startDestination = Routes.HOME,
+                        startDestination = Routes.CHAT,
                         modifier = Modifier.fillMaxSize(),
                         enterTransition = {
                             fadeIn(tween(200)) + slideInHorizontally(tween(220)) { it / 28 }
@@ -227,7 +260,9 @@ fun AppNav(modifier: Modifier = Modifier) {
                                 navController.navigate(route)
                             })
                         }
-                        composable(Routes.INVENTORY) { InventoryScreen() }
+                        composable(Routes.INVENTORY) {
+                            InventoryScreen(onOpenModule = { navController.navigate(it) })
+                        }
                         composable(Routes.INVENTORY_CATALOG) {
                             InventoryScreen(com.pandawufu.shared.viewmodel.InventoryViewModel.InventoryTab.CATALOG)
                         }
@@ -243,7 +278,9 @@ fun AppNav(modifier: Modifier = Modifier) {
                         composable(Routes.INVENTORY_RECV) {
                             InventoryScreen(com.pandawufu.shared.viewmodel.InventoryViewModel.InventoryTab.RECV)
                         }
-                        composable(Routes.CHAT) { ChatScreen() }
+                        composable(Routes.CHAT) {
+                            ChatScreen(onOpenModule = { navController.navigate(it) })
+                        }
                         composable(Routes.KITCHEN) {
                             KitchenScreen(onOpenModule = { navController.navigate(it) })
                         }
@@ -266,6 +303,76 @@ fun AppNav(modifier: Modifier = Modifier) {
                         composable(Routes.M_REVIEW) { ReviewScreen() }
                         composable(Routes.M_LOSS) { LossScreen() }
                         composable(Routes.M_ACTIONS) { ActionsScreen() }
+                        composable(Routes.M_INBOX) {
+                            com.pandawufu.app.features.inbox.InboxScreen(
+                                onOpen = { route ->
+                                    runCatching { AppModule.modulePrefs.touch(route) }
+                                    navController.navigate(route)
+                                }
+                            )
+                        }
+                        composable(Routes.M_SI_POLICY) {
+                            com.pandawufu.app.features.inbox.PolicyScreen()
+                        }
+                        composable(Routes.M_SI_GOALS) {
+                            com.pandawufu.app.features.si.GoalScreen(
+                                onOpen = { route ->
+                                    runCatching { AppModule.modulePrefs.touch(route) }
+                                    navController.navigate(route)
+                                }
+                            )
+                        }
+                        composable(Routes.M_SI_SIM) {
+                            com.pandawufu.app.features.si.SimulateScreen()
+                        }
+                        composable(Routes.M_SI_TEAM) {
+                            com.pandawufu.app.features.si.TeamScreen(
+                                onOpen = { route ->
+                                    runCatching { AppModule.modulePrefs.touch(route) }
+                                    navController.navigate(route)
+                                }
+                            )
+                        }
+                        composable(Routes.M_SI_MISSIONS) {
+                            com.pandawufu.app.features.si.MissionScreen(
+                                onOpen = { route ->
+                                    runCatching { AppModule.modulePrefs.touch(route) }
+                                    navController.navigate(route)
+                                }
+                            )
+                        }
+                        composable(Routes.M_SI_SETTINGS) {
+                            com.pandawufu.app.features.si.SiSettingsScreen(
+                                onOpen = { route ->
+                                    runCatching { AppModule.modulePrefs.touch(route) }
+                                    navController.navigate(route)
+                                }
+                            )
+                        }
+                        composable(Routes.M_SI_COCKPIT) {
+                            com.pandawufu.app.features.si.SiCockpitScreen(
+                                onOpen = { route ->
+                                    runCatching { AppModule.modulePrefs.touch(route) }
+                                    navController.navigate(route)
+                                }
+                            )
+                        }
+                        composable(Routes.M_WB_PROCUREMENT) {
+                            com.pandawufu.app.features.si.ProcurementWorkbenchScreen(
+                                onOpen = { route ->
+                                    runCatching { AppModule.modulePrefs.touch(route) }
+                                    navController.navigate(route)
+                                }
+                            )
+                        }
+                        composable(Routes.M_WB_KITCHEN) {
+                            com.pandawufu.app.features.si.KitchenWorkbenchScreen(
+                                onOpen = { route ->
+                                    runCatching { AppModule.modulePrefs.touch(route) }
+                                    navController.navigate(route)
+                                }
+                            )
+                        }
                         composable(Routes.M_ORG) { OrgScreen() }
                         composable(Routes.M_RESTAURANT) {
                             RestaurantSettingsScreen(

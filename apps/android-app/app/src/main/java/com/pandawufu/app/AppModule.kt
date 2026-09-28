@@ -35,6 +35,8 @@ import com.pandawufu.shared.repository.ReportRepository
 import com.pandawufu.shared.repository.ReportRepositoryImpl
 import com.pandawufu.shared.repository.SnapshotRepository
 import com.pandawufu.shared.repository.SnapshotRepositoryImpl
+import com.pandawufu.shared.repository.SiRepository
+import com.pandawufu.shared.repository.SiRepositoryImpl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -53,6 +55,11 @@ object AppModule {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var appContext: Context
+
+    @Volatile
+    private var initialized = false
+
+    fun isInitialized(): Boolean = initialized
 
     var sessionStore: SessionStore? = null
         private set
@@ -119,9 +126,13 @@ object AppModule {
         private set
     lateinit var agentRepository: AgentRepository
         private set
+    lateinit var siRepository: SiRepository
+        private set
 
     fun init(context: Context) {
+        if (initialized) return
         appContext = context.applicationContext
+        initialized = true
         sessionStore = SessionStore(appContext).also {
             it.restoreToHolder()
             applySession(it)
@@ -140,7 +151,8 @@ object AppModule {
         kitchenRepository = KitchenRepositoryImpl(bffClient)
         inventoryRepository = InventoryRepositoryImpl(bffClient)
         modulesRepository = CachingModulesRepository(ModulesRepositoryImpl(bffClient), offlineCache, bffClient)
-        agentRepository = AgentRepositoryImpl(bffClient)
+        agentRepository = AgentRepositoryImpl(bffClient, sseClient)
+        siRepository = SiRepositoryImpl(bffClient)
 
         ConfirmGateway.init(actionRepository)
         syncEngine = SyncEngine(
@@ -196,6 +208,16 @@ object AppModule {
         route == "m/review" -> "review"
         route == "m/loss" -> "loss"
         route == "m/actions" -> "actions"
+        route == "m/inbox" -> "actions"
+        route == "m/si-policy" -> "actions"
+        route == "m/si-goals" -> "analysis"
+        route == "m/si-simulate" -> "analysis"
+        route == "m/si-team" -> "analysis"
+        route == "m/si-missions" -> "analysis"
+        route == "m/si-settings" -> "analysis"
+        route == "m/si-cockpit" -> "analysis"
+        route == "m/wb-procurement" -> "inventory"
+        route == "m/wb-kitchen" -> "kitchen"
         route == "m/org" || route == "m/restaurant" -> "org"
         route == "inventory" || route.startsWith("inventory/") -> "inventory"
         route == "kitchen" -> "kitchen"

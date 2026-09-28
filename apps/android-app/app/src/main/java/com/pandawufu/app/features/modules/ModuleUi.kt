@@ -35,6 +35,7 @@ import com.pandawufu.app.confirm.ConfirmRequest
 import com.pandawufu.app.ui.designsystem.CardHeader
 import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.AppBgBrush
 import com.pandawufu.app.ui.designsystem.PandaCard
 import com.pandawufu.app.ui.designsystem.ProtoKv
 import com.pandawufu.app.ui.designsystem.SmoothPane
@@ -63,6 +64,8 @@ fun ModuleScaffold(
     onRetry: (() -> Unit)? = null,
     /** 显式声明已有缓存；默认在首次成功加载后自动开启轻刷新 */
     hasCachedBody: Boolean = false,
+    /** SI 专家结论卡：显式指定专家域；null=按标题自动匹配；""=不显示 */
+    siSpecialist: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val onBack = LocalModuleBack.current
@@ -75,15 +78,15 @@ fun ModuleScaffold(
     Column(
         Modifier
             .fillMaxSize()
-            .background(PageBg)
+            .background(AppBgBrush)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-            .padding(bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = com.pandawufu.app.ui.designsystem.PagePadH, vertical = com.pandawufu.app.ui.designsystem.PagePadTop)
+            .padding(bottom = com.pandawufu.app.ui.designsystem.PageBottomInset),
+        verticalArrangement = Arrangement.spacedBy(com.pandawufu.app.ui.designsystem.SectionGap)
     ) {
         com.pandawufu.app.ui.designsystem.BrandBar(
-            title = com.pandawufu.app.ui.BossIa.Brand.NAME,
-            subtitle = com.pandawufu.app.ui.BossIa.Brand.moduleSubtitle("$title · $subtitle"),
+            title = title,
+            subtitle = subtitle,
             onBack = onBack
         )
         if (pills.isNotEmpty() && onPill != null) {
@@ -94,6 +97,10 @@ fun ModuleScaffold(
             )
         }
         SoftRefreshBar(active = softLoading)
+        val verdict = siSpecialist ?: siSpecialistFor(title)
+        if (verdict != null && verdict.isNotEmpty()) {
+            SiVerdictCard(verdict)
+        }
         when {
             error != null || hint != null ->
                 com.pandawufu.app.ui.designsystem.LoadStatusBanner(
@@ -101,13 +108,16 @@ fun ModuleScaffold(
                     hint = hint ?: if (error != null) "可点重试；无快照时模块会空开，推送后刷新" else null,
                     onRetry = onRetry
                 )
-            coldLoading -> CircularProgressIndicator(color = Ink, strokeWidth = 3.dp)
+            coldLoading -> com.pandawufu.app.ui.designsystem.ModuleSkeleton()
         }
         // 有硬错仍尽量展示内容（空态/缓存），避免整页死门
         if (empty && !loading) {
-            PandaCard {
-                Text(emptyText, fontSize = 13.sp, color = Sub)
-            }
+            com.pandawufu.app.ui.designsystem.EmptyState(
+                title = "暂无本店数据",
+                hint = emptyText,
+                actionLabel = if (onRetry != null) "刷新" else null,
+                onAction = onRetry
+            )
         }
         SmoothPane(key = selectedPill, modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -116,6 +126,20 @@ fun ModuleScaffold(
             )
         }
     }
+}
+
+/** 按模块标题自动匹配 SI 专家域；未识别返回 null（不显示结论卡） */
+internal fun siSpecialistFor(title: String): String? = when {
+    title.contains("设备") -> "equipment"
+    title.contains("食安") -> "foodsafe"
+    title.contains("供应链") -> "procurement"
+    title.contains("库存") || title.contains("缺货") || title.contains("补货") || title.contains("入库") -> "procurement"
+    title.contains("外卖") || title.contains("预订") || title.contains("排队") || title.contains("口碑") -> "traffic"
+    title.contains("会员") -> "marketing"
+    title.contains("财务") || title.contains("损耗") -> "finance"
+    title.contains("经营分析") || title.contains("排班") || title.contains("堂食") -> "all"
+    title.contains("后厨") || title.contains("菜谱") -> "kitchen"
+    else -> null
 }
 
 @Composable

@@ -21,6 +21,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -32,7 +34,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +60,7 @@ import com.pandawufu.app.ui.BossIa
 import com.pandawufu.app.ui.Routes
 import com.pandawufu.app.ui.designsystem.AiPink
 import com.pandawufu.app.ui.designsystem.BrandBar
+import com.pandawufu.app.ui.designsystem.AppScaffold
 import com.pandawufu.app.ui.designsystem.CardHeader
 import com.pandawufu.app.ui.designsystem.FiveBlack
 import com.pandawufu.app.ui.designsystem.FiveGreen
@@ -69,6 +74,7 @@ import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.KpiGrid
 import com.pandawufu.app.ui.designsystem.LoadStatusBanner
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.AppBgBrush
 import com.pandawufu.app.ui.designsystem.PandaCard
 import com.pandawufu.app.ui.designsystem.ProtoKv
 import com.pandawufu.app.ui.designsystem.SoftRefreshBar
@@ -110,10 +116,12 @@ fun HomeScreen(
     val modulesVm = remember { com.pandawufu.shared.viewmodel.ModulesViewModel(AppModule.modulesRepository) }
     val invVm = remember { InventoryViewModel(AppModule.inventoryRepository) }
     val kitVm = remember { KitchenViewModel(AppModule.kitchenRepository, AppModule.inventoryRepository) }
+    val siVm = remember { com.pandawufu.shared.viewmodel.SiViewModel(AppModule.siRepository) }
     val state by viewModel.state.collectAsState()
     val modulesState by modulesVm.state.collectAsState()
     val invState by invVm.state.collectAsState()
     val kitState by kitVm.state.collectAsState()
+    val siState by siVm.state.collectAsState()
     val context = LocalContext.current
 
     LaunchedEffect(Unit) {
@@ -125,6 +133,7 @@ fun HomeScreen(
         modulesVm.dispatch(com.pandawufu.shared.viewmodel.ModulesViewModel.Intent.LoadStaff)
         invVm.dispatch(InventoryViewModel.InventoryIntent.Refresh)
         kitVm.dispatch(KitchenViewModel.KitchenIntent.Refresh)
+        siVm.dispatch(com.pandawufu.shared.viewmodel.SiViewModel.Intent.Refresh)
     }
 
     // 从确认台/其他模块返回时自动刷新今日数据
@@ -147,6 +156,16 @@ fun HomeScreen(
             modulesVm.dispatch(com.pandawufu.shared.viewmodel.ModulesViewModel.Intent.LoadAnalysis)
             invVm.dispatch(InventoryViewModel.InventoryIntent.Refresh)
             kitVm.dispatch(KitchenViewModel.KitchenIntent.Refresh)
+        }
+    }
+
+    // SI 前台轮询：App 开着时每 60s 拉一次收件箱/简报（后台推送待 FCM 凭证接入）
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(60_000)
+            if (AppModule.isOnline()) {
+                siVm.dispatch(com.pandawufu.shared.viewmodel.SiViewModel.Intent.Refresh)
+            }
         }
     }
 
@@ -198,48 +217,50 @@ fun HomeScreen(
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(PageBg)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-            .padding(bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        BrandBar(
-            title = BossIa.Brand.NAME,
-            subtitle = BossIa.Brand.tabSubtitle(
-                BossIa.Tab.TODAY,
-                BossIa.Tab.TODAY_JOB,
-                listOfNotNull(
-                    AppModule.storeName
-                        ?.removePrefix("熊猫五福餐厅")
-                        ?.trim()
-                        ?.ifBlank { AppModule.storeName }
-                        ?: AppModule.storeName,
-                    AppModule.role
-                ).joinToString(" · ").ifBlank { BossIa.Home.GREET_FALLBACK }
-            ),
-            trailing = {
-                Row(
-                    Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color.White)
-                        .clickable { confirmLogout = true },
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Outlined.Logout, contentDescription = "退出", tint = Sub, modifier = Modifier.size(18.dp))
-                }
+    AppScaffold(
+        scroll = true,
+        title = BossIa.Brand.NAME,
+        onBack = com.pandawufu.app.features.modules.LocalModuleBack.current,
+        subtitle = listOfNotNull(
+            AppModule.storeName
+                ?.removePrefix("熊猫五福餐厅")
+                ?.trim()
+                ?.ifBlank { AppModule.storeName }
+                ?: AppModule.storeName,
+            AppModule.role
+        ).joinToString(" · ").ifBlank { BossIa.Brand.TAGLINE },
+        trailing = {
+            Row(
+                Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .clickable { confirmLogout = true },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Outlined.Logout, contentDescription = "退出", tint = Sub, modifier = Modifier.size(18.dp))
             }
-        )
+        }
+    ) {
 
         GreetBlock(
             name = greetHello() + "，$greetName",
             accent = roleAccent,
             sub = "$today · $freshHint"
+        )
+
+        SiBriefingCard(
+            headline = siState.briefing?.headline,
+            bullets = siState.briefing?.bullets.orEmpty(),
+            badge = siState.badge,
+            onOpen = { openModule(Routes.M_INBOX) }
+        )
+
+        SiPipelineCard(
+            pipeline = siState.pipeline,
+            onOpen = { openModule(it) },
+            onChanged = { siVm.dispatch(com.pandawufu.shared.viewmodel.SiViewModel.Intent.Refresh) }
         )
 
         SoftRefreshBar(active = state.loading && report != null)
@@ -253,11 +274,7 @@ fun HomeScreen(
 
         when {
             state.loading && report == null -> {
-                PandaCard {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                        CircularProgressIndicator(Modifier.size(28.dp), color = AiPink, strokeWidth = 3.dp)
-                    }
-                }
+                com.pandawufu.app.ui.designsystem.ModuleSkeleton()
             }
             state.error != null && report == null -> {
                 PandaCard {
@@ -289,11 +306,11 @@ fun HomeScreen(
                 val delta = report?.kpi?.firstOrNull { it.label.contains("营收") }?.delta
                     ?: "重要操作需确认后才会改数"
                 SumBanner(
-                    label = bannerLab + if (report?.mock == true) " · 演示" else "",
+                    label = bannerLab,
                     value = if (revenue.startsWith("¥") || revenue.startsWith("￥")) revenue else "¥ $revenue",
                     valueSuffix = orders?.let { "· $it 单" },
                     delta = when {
-                        report?.mock == true -> "演示数据 · 推送快照会切换成真数"
+                        report?.mock == true -> "暂无店内数据 · 推送快照后显示"
                         !report?.summary.isNullOrBlank() -> report?.summary.orEmpty()
                         noSalesToday -> "今日还没有销售记录 · 营业后自动更新，点此刷新"
                         else -> delta
@@ -381,7 +398,7 @@ fun HomeScreen(
                             openModule(Routes.M_ANALYSIS)
                         }
                         Text(
-                            if (report?.mock == true) "演示数据 · 仅作界面参考" else "来自门店日报与经营记录 · 不含预测",
+                            if (report?.mock == true) "暂无店内数据" else "来自门店日报与经营记录 · 不含预测",
                             fontSize = 10.sp,
                             color = Sub
                         )
@@ -1136,4 +1153,313 @@ private fun parseMoneyYuan(raw: String?): Double? {
 private fun withMetricUnit(value: String, unit: String): String {
     if (value.isBlank() || value == "—" || unit.isBlank()) return value
     return if (value.endsWith(unit)) value else "$value$unit"
+}
+
+/** SI 驾驶舱卡：一条结论 + 待办数，点进收件箱。全只读，写仍走确认台。 */
+@Composable
+private fun SiBriefingCard(
+    headline: String?,
+    bullets: List<String>,
+    badge: Int,
+    onOpen: () -> Unit
+) {
+    PandaCard {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("SI", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = AiPink)
+                Spacer(Modifier.size(6.dp))
+                Text("超级经营助理", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Ink)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (badge > 0) {
+                    Box(
+                        Modifier
+                            .clip(CircleShape)
+                            .background(FiveRed)
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text("$badge", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Spacer(Modifier.size(6.dp))
+                }
+                Text("收件箱 ›", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AiPink)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            headline?.takeIf { it.isNotBlank() } ?: "正在读取门店数据…",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Txt,
+            lineHeight = 19.sp
+        )
+        bullets.drop(1).take(2).forEach {
+            Text("· $it", fontSize = 11.5.sp, color = Sub, modifier = Modifier.padding(top = 3.dp))
+        }
+        Text(
+            "SI 只读取数 · 提案须你确认才落库",
+            fontSize = 10.sp,
+            color = Sub,
+            modifier = Modifier.padding(top = 6.dp)
+        )
+        // 整卡可点进收件箱
+        Spacer(
+            Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .clickable(onClick = onOpen)
+        )
+        Text(
+            "点此进收件箱 · 需拍板 / 执行中 / 预警 / 通知",
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink,
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .clickable(onClick = onOpen)
+        )
+    }
+}
+
+/** SI 主线：有序闭环 + 出方案一键流转（批准/退回）+ 下一步明细。 */
+@Composable
+private fun SiPipelineCard(
+    pipeline: com.pandawufu.shared.model.PipelineDto?,
+    onOpen: (String) -> Unit,
+    onChanged: () -> Unit
+) {
+    if (pipeline == null || pipeline.stages.isEmpty()) return
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busyId by remember { mutableStateOf<String?>(null) }
+    val nextLabel = pipeline.stages.firstOrNull { it.key == pipeline.nextKey }?.label ?: "看盘"
+
+    fun confirm(item: com.pandawufu.shared.model.PipelineItemDto) {
+        val id = item.id ?: return
+        busyId = id
+        scope.launch {
+            try {
+                AppModule.ensureSession()
+                val op = AppModule.account ?: AppModule.role ?: "老板"
+                val rev = runCatching {
+                    AppModule.bffClient.snapshotLatest().revText().ifBlank { null }
+                }.getOrNull()
+                com.pandawufu.shared.redline.ConfirmGateway.shared.confirm(
+                    com.pandawufu.shared.model.ActionDto(
+                        id = id,
+                        type = item.type ?: "",
+                        payload = kotlinx.serialization.json.JsonObject(emptyMap()),
+                        operator = op,
+                        rev = rev,
+                        baseRev = rev
+                    ),
+                    operator = op,
+                    rev = rev
+                )
+                Toast.makeText(context, "已批准 · ${item.title}", Toast.LENGTH_SHORT).show()
+                onChanged()
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "确认失败", Toast.LENGTH_SHORT).show()
+            } finally {
+                busyId = null
+            }
+        }
+    }
+
+    fun advanceMission(item: com.pandawufu.shared.model.PipelineItemDto) {
+        val mid = item.missionId ?: return
+        busyId = mid
+        scope.launch {
+            try {
+                AppModule.ensureSession()
+                AppModule.siRepository.advanceMission(mid, item.nextStepId)
+                Toast.makeText(context, "已推进 · ${item.nextStepLabel ?: "下一步"}", Toast.LENGTH_SHORT).show()
+                onChanged()
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "推进失败", Toast.LENGTH_SHORT).show()
+            } finally {
+                busyId = null
+            }
+        }
+    }
+
+    fun createMission(item: com.pandawufu.shared.model.PipelineItemDto) {
+        val tpl = item.missionTemplate ?: return
+        busyId = "tpl:$tpl"
+        scope.launch {
+            try {
+                AppModule.ensureSession()
+                AppModule.siRepository.createMission(
+                    com.pandawufu.shared.model.MissionCreateRequest(template = tpl, autonomy = "advise")
+                )
+                Toast.makeText(context, "已派战役 · $tpl", Toast.LENGTH_SHORT).show()
+                onChanged()
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "派战役失败", Toast.LENGTH_SHORT).show()
+            } finally {
+                busyId = null
+            }
+        }
+    }
+
+    fun reject(item: com.pandawufu.shared.model.PipelineItemDto) {
+        val id = item.id ?: return
+        busyId = id
+        scope.launch {
+            try {
+                AppModule.ensureSession()
+                val resp = AppModule.bffClient.rejectAction(id, "主线退回")
+                Toast.makeText(
+                    context,
+                    if (resp.ok) "已退回" else (resp.error ?: "退回失败"),
+                    Toast.LENGTH_SHORT
+                ).show()
+                if (resp.ok) onChanged()
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "失败", Toast.LENGTH_SHORT).show()
+            } finally {
+                busyId = null
+            }
+        }
+    }
+
+    PandaCard {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("SI 主线", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+            Text("下一步：$nextLabel", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AiPink)
+        }
+        Text("看盘 → 抓异常 → 出方案 → 执行 → 追踪 → 沉淀", fontSize = 10.sp, color = Sub)
+        Spacer(Modifier.height(6.dp))
+        pipeline.stages.forEachIndexed { index, s ->
+            val isNext = s.key == pipeline.nextKey
+            val dotColor = when (s.status) {
+                "alert" -> FiveRed
+                "warn" -> Color(0xFFE4871A)
+                "info" -> AiPink
+                else -> FiveGreen
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { s.route?.takeIf { it.isNotBlank() }?.let(onOpen) }
+                    .padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(if (isNext) dotColor else dotColor.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "${index + 1}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isNext) Color.White else dotColor
+                    )
+                }
+                Spacer(Modifier.size(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        s.label + if (isNext) " · 下一步" else "",
+                        fontSize = 12.sp,
+                        fontWeight = if (isNext) FontWeight.ExtraBold else FontWeight.SemiBold,
+                        color = Ink
+                    )
+                    Text(s.text, fontSize = 11.sp, color = Sub, lineHeight = 15.sp)
+                }
+                if (s.count > 0) {
+                    Text("${s.count}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = dotColor)
+                }
+            }
+            // 下一步明细：出方案可直接批准/退回，其余可去办
+            if (isNext && s.items.isNotEmpty()) {
+                s.items.forEach { item ->
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = 28.dp, bottom = 4.dp)
+                    ) {
+                        Text(item.title, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        if (item.sub.isNotBlank()) {
+                            Text(item.sub, fontSize = 10.5.sp, color = Sub, lineHeight = 14.sp)
+                        }
+                        val route = item.route
+                        when {
+                            s.key == "plan" && item.id != null -> Row(
+                                Modifier.fillMaxWidth().padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { confirm(item) },
+                                    enabled = busyId != item.id,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) { Text(if (busyId == item.id) "处理中…" else "批准执行", fontSize = 12.sp) }
+                                OutlinedButton(
+                                    onClick = { reject(item) },
+                                    enabled = busyId != item.id,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("退回", fontSize = 12.sp) }
+                            }
+                            s.key == "track" && item.missionId != null -> Row(
+                                Modifier.fillMaxWidth().padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { advanceMission(item) },
+                                    enabled = busyId != item.missionId,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) { Text(if (busyId == item.missionId) "推进中…" else "推进下一步", fontSize = 12.sp) }
+                                val r = item.route
+                                if (!r.isNullOrBlank()) {
+                                    OutlinedButton(
+                                        onClick = { onOpen(r) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text("详情", fontSize = 12.sp) }
+                                }
+                            }
+                            s.key == "find" && item.missionTemplate != null -> Row(
+                                Modifier.fillMaxWidth().padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { createMission(item) },
+                                    enabled = busyId != "tpl:${item.missionTemplate}",
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("派战役", fontSize = 12.sp) }
+                                val r = item.route
+                                if (!r.isNullOrBlank()) {
+                                    OutlinedButton(
+                                        onClick = { onOpen(r) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text("去办", fontSize = 12.sp) }
+                                }
+                            }
+                            !route.isNullOrBlank() -> OutlinedButton(
+                                onClick = { onOpen(route) },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.padding(top = 4.dp)
+                            ) { Text("去办", fontSize = 12.sp) }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

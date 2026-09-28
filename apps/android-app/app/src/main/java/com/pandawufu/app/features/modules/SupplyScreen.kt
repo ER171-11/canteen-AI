@@ -11,9 +11,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.sp
 import com.pandawufu.app.AppModule
 import com.pandawufu.app.ui.designsystem.AiPink
+import com.pandawufu.app.ui.designsystem.FiveRed
+import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Sub
+import com.pandawufu.shared.model.SupplyInsightDto
 import com.pandawufu.shared.model.VendorDto
 import com.pandawufu.shared.viewmodel.InventoryViewModel
+import com.pandawufu.shared.viewmodel.ModulesViewModel
+import androidx.compose.ui.text.font.FontWeight
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -22,12 +27,15 @@ import kotlinx.serialization.json.put
 @Composable
 fun SupplyScreen() {
     val viewModel = remember { InventoryViewModel(AppModule.inventoryRepository) }
+    val modVm = remember { ModulesViewModel(AppModule.modulesRepository) }
     val state by viewModel.state.collectAsState()
+    val modState by modVm.state.collectAsState()
     var tab by remember { mutableIntStateOf(0) }
     val pills = listOf("供应商", "报价", "账期")
     LaunchedEffect(Unit) {
         AppModule.ensureSession()
         viewModel.dispatch(InventoryViewModel.InventoryIntent.Refresh)
+        modVm.dispatch(ModulesViewModel.Intent.LoadSupply)
     }
 
     fun reload() = viewModel.dispatch(InventoryViewModel.InventoryIntent.Refresh)
@@ -57,6 +65,7 @@ fun SupplyScreen() {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        SupplyInsightCard(modState.supply?.insight)
         val q = compare.firstOrNull()?.second ?: quotes.firstOrNull()
         WriteActionButton(
             label = "报价转采购",
@@ -219,6 +228,49 @@ fun SupplyScreen() {
                 }
                 Text("改账期请到「供应商」Tab 点对应供应商。", color = Sub, fontSize = 11.sp)
             }
+        }
+    }
+}
+
+/** SI 供应链洞察卡：供应商 + 比价 + 账龄 */
+@Composable
+private fun SupplyInsightCard(ins: SupplyInsightDto?) {
+    if (ins == null) return
+    ModuleCard("SI · 供应链") {
+        ins.vendors?.let { v ->
+            KvRow("供应商", "${v.count} 家")
+            if (v.byCategory.isNotEmpty()) {
+                KvRow("品类", v.byCategory.entries.joinToString(" · ") { "${it.key} ${it.value}" })
+            }
+            if (v.byPeriod.isNotEmpty()) {
+                KvRow("账期", v.byPeriod.entries.joinToString(" · ") { "${it.key} ${it.value}" })
+            }
+        }
+        ins.compare?.let { c ->
+            if (c.available == 0) {
+                KvRow("比价", c.note)
+            } else {
+                KvRow("可多选比价", "${c.available} 项")
+                c.spreadTop.take(3).forEach { r ->
+                    KvRow(
+                        r.name,
+                        "最优 ${r.best?.src ?: "-"} ¥${r.best?.price ?: 0} · 价差 ${r.spreadPct ?: 0}%"
+                    )
+                }
+            }
+        }
+        ins.accounts?.let { a ->
+            KvRow("应付账款", "¥${a.payable.toInt()} · ${a.count} 家")
+            if (a.aging.over30 > 0 || a.aging.over60 > 0 || a.aging.overdue > 0) {
+                Text(
+                    "账龄 31-60 ¥${a.aging.over30.toInt()} · >60 ¥${a.aging.over60.toInt()} · 逾期 ¥${a.aging.overdue.toInt()}",
+                    color = FiveRed, fontWeight = FontWeight.SemiBold, fontSize = 12.sp
+                )
+            }
+        }
+        ins.advice.forEach {
+            val warn = it.contains("逾期") || it.contains("价差") || it.contains("考察") || it.contains("不足")
+            Text("· $it", color = if (warn) FiveRed else Ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
         }
     }
 }

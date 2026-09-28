@@ -51,7 +51,7 @@ import com.pandawufu.app.R
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
-/** 原型卡片：白底、20 圆角、轻阴影 */
+/** 卡片：白底、22 圆角、发丝边、柔和阴影、轻渐变面 */
 @Composable
 fun PandaCard(
     modifier: Modifier = Modifier,
@@ -60,10 +60,11 @@ fun PandaCard(
     Column(
         modifier
             .fillMaxWidth()
-            .shadow(3.dp, RoundedCornerShape(20.dp), ambientColor = ShadowColor, spotColor = ShadowColor)
-            .clip(RoundedCornerShape(20.dp))
-            .background(CardBg)
-            .padding(15.dp),
+            .shadow(5.dp, RoundedCornerShape(22.dp), ambientColor = ShadowColor, spotColor = ShadowColor)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Brush.verticalGradient(listOf(CardTop, CardBottom)))
+            .border(1.dp, CardHairline, RoundedCornerShape(22.dp))
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         content = content
     )
@@ -102,57 +103,78 @@ fun CardHeader(
     }
 }
 
-/** 品牌行：熊猫 logo + 顶栏常驻「熊猫五福」；页名/语境放副标题 */
+/**
+ * 统一顶部栏（页面标题优先）：
+ *   有返回 → 返回键 + 页面标题；无返回（一级页）→ 熊猫 logo + 页面标题。
+ *   标题一行加粗，副标题一行省略（门店/口径），右侧留给动作。
+ */
 @Composable
 fun BrandBar(
     title: String = com.pandawufu.app.ui.BossIa.Brand.NAME,
     subtitle: String = com.pandawufu.app.ui.BossIa.Brand.TAGLINE,
     onBack: (() -> Unit)? = null,
-    trailing: @Composable (() -> Unit)? = null
+    trailing: @Composable (() -> Unit)? = null,
+    showLogo: Boolean = true
 ) {
     Row(
-        Modifier.fillMaxWidth(),
+        Modifier
+            .fillMaxWidth()
+            .height(52.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            Modifier.weight(1f, fill = false),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) {
                 Box(
                     Modifier
                         .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(CircleShape)
                         .background(CardBg)
-                        .clickable(onClick = onBack)
-                        .border(1.dp, Color(0xFFE8E4EF), RoundedCornerShape(10.dp)),
+                        .border(1.dp, CardHairline, CircleShape)
+                        .clickable(onClick = onBack),
                     contentAlignment = Alignment.Center
                 ) {
                     Text("‹", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Txt)
                 }
+                Spacer(Modifier.width(10.dp))
+            } else if (showLogo) {
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(CardBg)
+                        .padding(5.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(
+                            if (Random.nextBoolean()) R.drawable.panda_male_sq else R.drawable.panda_female_sq
+                        ),
+                        contentDescription = com.pandawufu.app.ui.BossIa.Brand.NAME,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.Center
+                    )
+                }
+                Spacer(Modifier.width(9.dp))
             }
-            val male = remember { Random.nextBoolean() }
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .shadow(2.dp, RoundedCornerShape(12.dp))
-                    .background(CardBg, RoundedCornerShape(12.dp))
-                    .padding(6.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(if (male) R.drawable.panda_male_sq else R.drawable.panda_female_sq),
-                    contentDescription = com.pandawufu.app.ui.BossIa.Brand.NAME,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit,
-                    alignment = Alignment.Center
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Txt,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
-            }
-            Column(Modifier.weight(1f, fill = false)) {
-                Text(title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Txt, maxLines = 1)
-                Text(subtitle, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = Sub, maxLines = 2)
+                Text(
+                    subtitle,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Sub,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
             }
         }
         trailing?.invoke()
@@ -182,43 +204,52 @@ fun GreetBlock(name: String, accent: String, sub: String) {
     }
 }
 
-/** 墨色营收 banner */
+/** 墨色营收 banner（hero） */
 @Composable
 fun SumBanner(label: String, value: String, delta: String, valueSuffix: String? = null) {
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Brush.linearGradient(listOf(Ink, Color(0xFF3A3A3A))))
+            .shadow(8.dp, RoundedCornerShape(22.dp), ambientColor = ShadowColor, spotColor = ShadowColor)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF23252C), Ink)))
     ) {
         // 右上粉晕（对齐原型 ::after）
         Box(
             Modifier
                 .align(Alignment.TopEnd)
-                .offset(x = 20.dp, y = (-20).dp)
-                .size(110.dp)
+                .offset(x = 26.dp, y = (-26).dp)
+                .size(140.dp)
                 .clip(CircleShape)
-                .background(Color(255, 182, 193, 46))
+                .background(Color(255, 182, 193, 40))
+        )
+        Box(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = 30.dp, y = 30.dp)
+                .size(120.dp)
+                .clip(CircleShape)
+                .background(AiPurple.copy(alpha = 0.18f))
         )
         Column(
-            Modifier.padding(horizontal = 16.dp, vertical = 15.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            Modifier.padding(horizontal = 18.dp, vertical = 17.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFBBBBBB))
+            Text(label, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFB9BCC6))
             Text(
                 buildAnnotatedString {
-                    withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)) {
+                    withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 25.sp)) {
                         append(value)
                     }
                     if (!valueSuffix.isNullOrBlank()) {
                         append(" ")
-                        withStyle(SpanStyle(color = Color(0xFFBBBBBB), fontWeight = FontWeight.SemiBold, fontSize = 12.sp)) {
+                        withStyle(SpanStyle(color = Color(0xFFB9BCC6), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)) {
                             append(valueSuffix)
                         }
                     }
                 }
             )
-            Text(delta, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = FiveGreen)
+            Text(delta, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = FiveGreen)
         }
     }
 }
@@ -305,22 +336,27 @@ fun FiveSaleRow(tag: String, tagBg: Color, name: String, count: String, pct: Flo
 /** KPI 2×N 小格 */
 @Composable
 fun KpiGrid(items: List<Triple<String, String, String?>>, columns: Int = 2) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         items.chunked(columns).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { (lab, value, delta) ->
                     Column(
                         Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Brush.linearGradient(listOf(Color.White, Color(0xFFF7F8FB))))
-                            .border(1.dp, Line, RoundedCornerShape(16.dp))
-                            .padding(13.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color.White)
+                            .border(1.dp, CardHairline, RoundedCornerShape(18.dp))
+                            .padding(14.dp)
                     ) {
                         Text(lab, fontSize = 11.sp, color = Sub, fontWeight = FontWeight.SemiBold)
-                        Text(value, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Txt)
+                        Text(value, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Txt)
                         if (!delta.isNullOrBlank()) {
-                            Text(delta, fontSize = 10.5.sp, color = FiveGreen)
+                            val dc = when {
+                                delta.startsWith("+") -> FiveGreen
+                                delta.startsWith("-") -> FiveRed
+                                else -> Sub
+                            }
+                            Text(delta, fontSize = 10.5.sp, color = dc, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -343,9 +379,9 @@ fun ModuleCell(
 ) {
     Column(
         modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(Brush.linearGradient(listOf(Color.White, Color(0xFFF7F8FB))))
-            .border(1.dp, Line, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.White)
+            .border(1.dp, CardHairline, RoundedCornerShape(18.dp))
             .then(
                 if (onLongClick != null) {
                     Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -357,20 +393,20 @@ fun ModuleCell(
                     )
                 }
             )
-            .padding(vertical = 13.dp, horizontal = 6.dp),
+            .padding(vertical = 14.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             Modifier
-                .size(38.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .size(42.dp)
+                .clip(RoundedCornerShape(13.dp))
                 .background(iconBg),
             contentAlignment = Alignment.Center
         ) {
-            Text(label.take(1), fontWeight = FontWeight.Bold, color = Txt, fontSize = 14.sp)
+            Text(label.take(1), fontWeight = FontWeight.Bold, color = Txt, fontSize = 15.sp)
         }
-        Spacer(Modifier.height(6.dp))
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Txt)
+        Spacer(Modifier.height(7.dp))
+        Text(label, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Txt)
         Text(subtitle, fontSize = 9.sp, color = Sub)
     }
 }
@@ -385,23 +421,23 @@ fun ShortAction(
 ) {
     Column(
         modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(Brush.linearGradient(listOf(Color.White, Color(0xFFF7F8FB))))
-            .border(1.dp, Line, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.White)
+            .border(1.dp, CardHairline, RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 11.dp, horizontal = 4.dp),
+            .padding(vertical = 12.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             Modifier
-                .size(32.dp)
-                .clip(CircleShape)
+                .size(34.dp)
+                .clip(RoundedCornerShape(11.dp))
                 .background(iconBg),
             contentAlignment = Alignment.Center
         ) {
-            Text(label.take(1), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Txt)
+            Text(label.take(1), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Txt)
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(5.dp))
         Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Txt)
     }
 }

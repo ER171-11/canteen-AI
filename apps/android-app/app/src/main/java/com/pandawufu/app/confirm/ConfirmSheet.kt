@@ -1,13 +1,22 @@
 package com.pandawufu.app.confirm
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -18,11 +27,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.pandawufu.app.AppModule
 import com.pandawufu.app.ui.BossIa
+import com.pandawufu.app.ui.designsystem.CardHairline
+import com.pandawufu.app.ui.designsystem.FiveGreen
+import com.pandawufu.app.ui.designsystem.FiveRed
+import com.pandawufu.app.ui.designsystem.Ink
+import com.pandawufu.app.ui.designsystem.Line
+import com.pandawufu.app.ui.designsystem.Sub
+import com.pandawufu.app.ui.designsystem.Txt
 import com.pandawufu.shared.model.ActionDto
 import com.pandawufu.shared.model.ActionStatus
 import com.pandawufu.shared.redline.ConfirmGateway
@@ -55,6 +75,24 @@ object ConfirmBus {
     }
 }
 
+/** 高风险动作：影响价格/配方/账目/人事，需强提醒。 */
+private val HIGH_RISK_TYPES = setOf(
+    "dish.price", "dish.upsert", "dish.set_active", "recipe.upsert", "recipe.substitute",
+    "config.update", "staff.shift_upsert", "vip.campaign", "finance.approve", "finance.freeze",
+    "loss.approve", "pos.void", "pos.merge", "pos.split"
+)
+
+private fun riskLabel(type: String): Pair<String, Color> =
+    if (type in HIGH_RISK_TYPES) "高风险 · 请复核" to Color(0xFFE4871A)
+    else "常规操作" to FiveGreen
+
+/** 阶段：入队 → 确认 → 店内执行 */
+private fun phaseIndex(phase: String): Int = when {
+    phase.contains("店内") -> 2
+    phase.contains("确认中") || phase.contains("入队") -> 1
+    else -> 0
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConfirmSheetHost() {
@@ -65,35 +103,98 @@ fun ConfirmSheetHost() {
     var phase by mutableStateOf("确认")
     var error by mutableStateOf<String?>(null)
 
+    val (riskText, riskColor) = riskLabel(req.type)
+
     ModalBottomSheet(
         onDismissRequest = { if (!busy) ConfirmBus.clear() },
-        sheetState = sheetState
+        sheetState = sheetState,
+        containerColor = Color.White
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .padding(bottom = 72.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 20.dp, vertical = 10.dp)
+                .padding(bottom = 76.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("确认台", style = MaterialTheme.typography.titleMedium)
-            Text(req.title, style = MaterialTheme.typography.titleSmall)
-            Text(req.summary, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                "类型 ${req.type} · rev ${req.baseRev ?: "-"}",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                if (!AppModule.isOnline()) "确认后写入离线队列，联网自动同步到确认台"
-                else "⚠ 确认后由店内消费器改库并推快照；AI 不会直接写库。",
-                style = MaterialTheme.typography.bodySmall
-            )
-            error?.let { Text(it, color = Color(0xFFE8584A), style = MaterialTheme.typography.bodySmall) }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // 头部
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("确认台", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+                Box(
+                    Modifier
+                        .clip(CircleShape)
+                        .background(riskColor.copy(alpha = 0.12f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(riskText, color = riskColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // 事项
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFFF7F8FC))
+                    .border(1.dp, CardHairline, RoundedCornerShape(16.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(req.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Txt)
+                if (req.summary.isNotBlank()) {
+                    Text(req.summary, fontSize = 12.5.sp, color = Sub, lineHeight = 18.sp)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Chip("类型 ${req.type}")
+                    Chip("rev ${req.baseRev ?: "-"}")
+                }
+            }
+
+            // 风险/写回说明
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (req.type in HIGH_RISK_TYPES) Color(0xFFFFF6E8) else Color(0xFFF1F6FF))
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(if (req.type in HIGH_RISK_TYPES) "⚠" else "ⓘ", fontSize = 13.sp)
+                Text(
+                    if (!AppModule.isOnline()) "离线：确认后写入本地发件箱，联网自动同步到确认台"
+                    else "确认后由店内执行器改库并推快照；AI 不会直接写库，计价/库存核心零改动。",
+                    fontSize = 11.5.sp, color = if (req.type in HIGH_RISK_TYPES) Color(0xFF9A6B19) else Color(0xFF3B5B92),
+                    lineHeight = 16.sp
+                )
+            }
+
+            error?.let { Text(it, color = FiveRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+
+            // 执行进度：入队 → 确认 → 店内执行
+            if (busy) {
+                val idx = phaseIndex(phase)
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StepBar(index = idx)
+                    Text(phase, fontSize = 11.5.sp, color = Sub)
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)),
+                        color = Ink,
+                        trackColor = Line
+                    )
+                }
+            }
+
+            // 按钮层级：主 CTA + 次取消
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     onClick = { ConfirmBus.clear() },
                     enabled = !busy,
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.weight(1f).height(48.dp)
                 ) { Text("取消") }
                 Button(
                     onClick = {
@@ -260,11 +361,7 @@ fun ConfirmSheetHost() {
                                 }
                                 if (terminal != null) {
                                     req.onResult(Result.success(terminal!!))
-                                    OpsSignal.afterConfirm(
-                                        req.type,
-                                        executed = true,
-                                        detail = statusDesc
-                                    )
+                                    OpsSignal.afterConfirm(req.type, executed = true, detail = statusDesc)
                                     ConfirmBus.clear()
                                 } else {
                                     req.onResult(Result.success(confirmed))
@@ -280,8 +377,48 @@ fun ConfirmSheetHost() {
                         }
                     },
                     enabled = !busy,
-                    shape = RoundedCornerShape(12.dp)
-                ) { Text(if (busy) phase else "确认并等待执行") }
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White),
+                    modifier = Modifier.weight(1.6f).height(48.dp)
+                ) { Text(if (busy) phase else "确认并等待执行", fontWeight = FontWeight.Bold) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Chip(text: String) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White)
+            .border(1.dp, CardHairline, RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+    ) {
+        Text(text, fontSize = 10.sp, color = Sub)
+    }
+}
+
+@Composable
+private fun StepBar(index: Int) {
+    val labels = listOf("入队", "确认", "店内执行")
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        labels.forEachIndexed { i, label ->
+            val on = i <= index
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(
+                    Modifier
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(if (on) Ink else Line),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("${i + 1}", fontSize = 9.sp, color = if (on) Color.White else Sub, fontWeight = FontWeight.Bold)
+                }
+                Text(label, fontSize = 10.5.sp, color = if (on) Ink else Sub, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
+            }
+            if (i < labels.size - 1) {
+                Box(Modifier.weight(1f).height(1.dp).background(Line))
             }
         }
     }

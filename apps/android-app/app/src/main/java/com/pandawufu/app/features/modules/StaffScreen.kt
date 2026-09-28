@@ -26,7 +26,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pandawufu.app.AppModule
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.FiveRed
+import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Sub
+import com.pandawufu.shared.model.StaffInsightDto
 import com.pandawufu.shared.model.StaffShiftDto
 import com.pandawufu.shared.viewmodel.ModulesViewModel
 import kotlinx.serialization.json.buildJsonObject
@@ -62,6 +65,7 @@ fun StaffScreen() {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        StaffInsightCard(staff?.insight)
         DraftWriteButton(
             label = "补打卡（上班）",
             type = "staff.clock",
@@ -103,7 +107,10 @@ fun StaffScreen() {
                     onSuccess = { viewModel.dispatch(ModulesViewModel.Intent.LoadStaff) }
                 )
                 ModuleCard("周排班表") {
-                    WeekShiftGrid(staff?.shifts.orEmpty())
+                    WeekShiftGrid(
+                        staff?.shifts.orEmpty(),
+                        blocked = staff?.insight?.certs?.blockedScheduled?.toSet().orEmpty()
+                    )
                 }
                 ModuleCard("本周排班明细（${staff?.shifts?.size ?: 0}）") {
                     val list = staff?.shifts.orEmpty()
@@ -148,7 +155,7 @@ fun StaffScreen() {
 }
 
 @Composable
-private fun WeekShiftGrid(shifts: List<StaffShiftDto>) {
+private fun WeekShiftGrid(shifts: List<StaffShiftDto>, blocked: Set<String> = emptySet()) {
     val today = LocalDate.now()
     val monday = today.minusDays(((today.dayOfWeek.value + 6) % 7).toLong())
     val days = (0..6).map { monday.plusDays(it.toLong()) }
@@ -173,8 +180,10 @@ private fun WeekShiftGrid(shifts: List<StaffShiftDto>) {
                 Text(name.take(4), modifier = Modifier.weight(1.2f), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 days.forEach { d ->
                     val cell = byKey[name to fmt.format(d)]?.firstOrNull()
-                    val label = shiftShort(cell?.shift)
-                    val bg = shiftColor(cell?.shift)
+                    val isRest = cell?.shift?.contains("休") == true || cell?.shift?.contains("假") == true
+                    val banned = name in blocked && !isRest
+                    val label = if (banned) "禁" else shiftShort(cell?.shift)
+                    val bg = if (banned) Color(0xFFFCE4E1) else shiftColor(cell?.shift)
                     Box(
                         Modifier
                             .weight(1f)
@@ -183,12 +192,17 @@ private fun WeekShiftGrid(shifts: List<StaffShiftDto>) {
                             .padding(vertical = 6.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF333333))
+                        Text(
+                            label,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (banned) FiveRed else Color(0xFF333333)
+                        )
                     }
                 }
             }
         }
-        Text("A 早 / B 中 / C 晚 / 休", fontSize = 10.sp, color = Sub)
+        Text("A 早 / B 中 / C 晚 / 休 · 禁=健康证禁岗", fontSize = 10.sp, color = Sub)
     }
 }
 
@@ -213,5 +227,50 @@ private fun shiftColor(s: String?): Color {
         t.contains("晚") || t.equals("C", true) -> Color(0xFFE2F0E2)
         t.isBlank() -> PageBg
         else -> Color(0xFFFCEDD0)
+    }
+}
+
+/** SI 排班洞察卡：班表 + 打卡异常 + 健康证禁岗 + 峰谷加排 */
+@Composable
+private fun StaffInsightCard(ins: StaffInsightDto?) {
+    if (ins == null) return
+    ModuleCard("SI · 排班与合规") {
+        ins.today?.let { t ->
+            KvRow("今日班表", "${t.date} · ${t.shifts} 人 · ${t.staff} 员工在岗")
+            if (t.byShift.isNotEmpty()) {
+                KvRow("班次", t.byShift.entries.joinToString(" · ") { "${it.key} ${it.value}" })
+            }
+        }
+        ins.clock?.let { c ->
+            KvRow("打卡", "应到 ${c.expected} · 实到 ${c.clocked} · 迟到 ${c.late} · 补录 ${c.makeup}")
+            if (c.absent.isNotEmpty()) {
+                Text("缺勤：${c.absent.joinToString("、")}", color = FiveRed, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            }
+        }
+        ins.certs?.let { c ->
+            if (c.blockedScheduled.isNotEmpty()) {
+                Text(
+                    "禁岗：${c.blockedScheduled.joinToString("、")}（健康证<7天，禁止排班）",
+                    color = FiveRed, fontWeight = FontWeight.Bold, fontSize = 12.sp
+                )
+            }
+            if (c.expiring.isNotEmpty()) {
+                KvRow("证照临期", c.expiring.joinToString(" · ") { "${it.holder} ${it.days}天" })
+            }
+            if (c.blockedScheduled.isEmpty() && c.expiring.isEmpty()) KvRow("健康证", "无临期/禁岗")
+        }
+        ins.training?.let { tr ->
+            KvRow("培训", "共 ${tr.total} · 未过 ${tr.pending}")
+        }
+        ins.peak?.let { p ->
+            Text(
+                "峰谷：${p.text}" + if (p.suggestAdd) " · 建议加排 1 人" else "",
+                color = if (p.suggestAdd) FiveRed else Ink,
+                fontWeight = FontWeight.SemiBold, fontSize = 12.sp
+            )
+        }
+        ins.advice.forEach {
+            Text("· $it", color = if (it.contains("禁岗") || it.contains("缺勤")) FiveRed else Sub, fontSize = 12.sp)
+        }
     }
 }

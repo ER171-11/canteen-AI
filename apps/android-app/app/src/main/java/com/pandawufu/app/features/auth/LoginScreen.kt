@@ -62,20 +62,11 @@ import com.pandawufu.app.ui.designsystem.FiveYellow
 import com.pandawufu.app.ui.designsystem.GreetBlock
 import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.AppBgBrush
 import com.pandawufu.app.ui.designsystem.PandaCard
 import com.pandawufu.app.ui.designsystem.Sub
 import com.pandawufu.app.ui.designsystem.Txt
 import kotlinx.coroutines.launch
-
-private data class DemoRole(val label: String, val account: String, val hint: String)
-
-private val demoRoles = listOf(
-    DemoRole(BossIa.Brand.BOSS_NAME, "boss", "全店拍板 · ${BossIa.Brand.STORE}"),
-    DemoRole("店长", "manager", "店务统筹"),
-    DemoRole("收银", "cashier", "桌台收银"),
-    DemoRole("厨房", "kitchen", "工单出品"),
-    DemoRole("财务", "finance", "对账结算")
-)
 
 @Composable
 fun LoginScreen(onLoggedIn: () -> Unit, modifier: Modifier = Modifier) {
@@ -96,14 +87,9 @@ fun LoginScreen(onLoggedIn: () -> Unit, modifier: Modifier = Modifier) {
     val offlineReady = remember { AppModule.canEnterOffline() }
     val sessionSummary = remember { AppModule.localSessionSummary() }
 
-    fun submit() {
+    fun runLogin(acc: String, pw: String) {
         if (loading) return
-        val acc = account.trim()
-        if (acc.isEmpty()) {
-            error = "请输入账号"
-            return
-        }
-        if (password.isEmpty()) {
+        if (pw.isEmpty()) {
             error = "请输入密码"
             return
         }
@@ -117,12 +103,12 @@ fun LoginScreen(onLoggedIn: () -> Unit, modifier: Modifier = Modifier) {
             val result = if (modeRegister) {
                 AppModule.registerDetailed(
                     acc,
-                    password,
+                    pw,
                     invite.trim(),
                     displayName.trim().ifEmpty { null }
                 )
             } else {
-                AppModule.loginDetailed(acc, password)
+                AppModule.loginDetailed(acc, pw)
             }
             loading = false
             when (result) {
@@ -135,10 +121,28 @@ fun LoginScreen(onLoggedIn: () -> Unit, modifier: Modifier = Modifier) {
         }
     }
 
+    fun submit() {
+        if (loading) return
+        val acc = account.trim()
+        if (acc.isEmpty()) {
+            error = "请输入账号"
+            return
+        }
+        runLogin(acc, password)
+    }
+
+    /** 一键登录：用真实门店岗位账号 + 默认测试密码直接登录（仅调试版入口） */
+    fun quickLogin(acc: String) {
+        if (loading) return
+        account = acc
+        password = QUICK_LOGIN_PASSWORD
+        runLogin(acc, QUICK_LOGIN_PASSWORD)
+    }
+
     Column(
         modifier
             .fillMaxSize()
-            .background(PageBg)
+            .background(AppBgBrush)
             .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 24.dp)
@@ -220,59 +224,50 @@ fun LoginScreen(onLoggedIn: () -> Unit, modifier: Modifier = Modifier) {
             }
         }
 
+        if (BuildConfig.DEBUG && !modeRegister) {
+            PandaCard {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("一键登录 · 真实岗位账号", fontSize = 13.sp, color = Txt, fontWeight = FontWeight.Bold)
+                    Text("调试版", fontSize = 10.sp, color = AiPurple, fontWeight = FontWeight.Bold)
+                }
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QUICK_LOGIN_ACCOUNTS.forEach { qa ->
+                        QuickAccountChip(
+                            label = qa.first,
+                            account = qa.second,
+                            enabled = !loading,
+                            onClick = { quickLogin(qa.second) }
+                        )
+                    }
+                }
+                Text(
+                    "同一门店真实账号并按下发岗位权限登录，密码默认 $QUICK_LOGIN_PASSWORD；仅调试版可见。",
+                    fontSize = 10.sp,
+                    color = Sub
+                )
+            }
+        }
+
         PandaCard {
             GreetBlock(
                 name = if (modeRegister) "欢迎加入" else "账号登录",
                 accent = if (modeRegister) "·注册" else "·门店",
                 sub = if (modeRegister) "注册后默认可读，写权限由店长开通"
-                else "输入账号密码进入；演示岗可点下方一键填充"
+                else "使用门店分配的账号登录"
             )
-
-            if (!modeRegister) {
-                Text("演示岗位（一键填入）", fontSize = 11.sp, color = Sub)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    demoRoles.forEach { role ->
-                        val selected = account == role.account
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (selected) Ink else CardBg)
-                                .border(1.dp, if (selected) Ink else Color(0xFFE5E7EB), RoundedCornerShape(20.dp))
-                                .clickable {
-                                    account = role.account
-                                    password = "wufu123"
-                                    error = null
-                                }
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                        ) {
-                            Column {
-                                Text(
-                                    role.label,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (selected) Color.White else Txt
-                                )
-                                Text(
-                                    role.hint,
-                                    fontSize = 10.sp,
-                                    color = if (selected) Color.White.copy(alpha = 0.75f) else Sub
-                                )
-                            }
-                        }
-                    }
-                }
-            }
 
             OutlinedTextField(
                 value = account,
                 onValueChange = { account = it; error = null },
                 label = { Text("账号") },
-                placeholder = { Text(if (modeRegister) "自设账号，如 zhangsan" else "如 boss / manager") },
+                placeholder = { Text(if (modeRegister) "自设账号，如 zhangsan" else "门店账号") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
@@ -393,11 +388,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, modifier: Modifier = Modifier) {
                         )
                     ) {
                         Text(
-                            when {
-                                !online -> "微信登录（需联网）"
-                                WeChatAuth.isSdkReady() -> "微信登录"
-                                else -> "微信登录（开发模拟）"
-                            },
+                            if (!online) "微信登录（需联网）" else "微信登录",
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp
                         )
@@ -406,7 +397,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, modifier: Modifier = Modifier) {
                         if (WeChatAuth.isSdkReady())
                             "使用微信授权进入本店；首次登录为只读岗，店长可在后台改岗"
                         else
-                            "未配置 wechat.app.id 时为开发模拟（不唤起微信客户端）",
+                            "使用微信授权进入本店；首次登录为只读岗，店长可在「门店岗位」改岗",
                         fontSize = 11.sp,
                         color = Sub
                     )
@@ -478,5 +469,37 @@ private fun StatusChip(text: String, bg: Color, fg: Color) {
             .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
         Text(text, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = fg)
+    }
+}
+
+/** 调试版一键登录：岗位名 → 真实门店账号（密码统一默认） */
+private val QUICK_LOGIN_ACCOUNTS = listOf(
+    "老板" to "boss",
+    "店长" to "manager",
+    "收银" to "cashier",
+    "厨房" to "kitchen",
+    "财务" to "finance",
+    "只读" to "newbie"
+)
+private const val QUICK_LOGIN_PASSWORD = "wufu123"
+
+@Composable
+private fun QuickAccountChip(
+    label: String,
+    account: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(CardBg)
+            .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Text(account, fontSize = 10.sp, color = Sub)
     }
 }

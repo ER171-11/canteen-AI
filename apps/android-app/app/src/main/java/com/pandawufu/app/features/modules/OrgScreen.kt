@@ -84,6 +84,7 @@ fun OrgScreen() {
         data?.inviteHint?.let {
             Text(it, style = MaterialTheme.typography.bodySmall)
         }
+        data?.let { OrgHealthCard(it) }
         if (canWriteOrg) {
             Button(
                 onClick = { showCreateStore = true },
@@ -381,5 +382,28 @@ fun OrgScreen() {
                 OutlinedButton(onClick = { showCreateUser = false }) { Text("取消") }
             }
         )
+    }
+}
+
+/** SI 组织体检：门店/岗位/账号与写权限覆盖 */
+@Composable
+private fun OrgHealthCard(org: OrgOverviewResponse) {
+    val writePositions = org.positions.count { it.write == true }
+    val writeUsers = org.users.count { it.canWrite == true || (it.role == "老板") || (it.role == "店长") }
+    val noStore = org.users.count { it.storeName.isNullOrBlank() }
+    val noPosition = org.users.count { it.positionName.isNullOrBlank() && it.role.isNullOrBlank() }
+    ModuleCard("SI · 组织体检") {
+        KvRow("门店", "${org.stores.size} 家")
+        KvRow("岗位", "${org.positions.size} 个 · 可写 $writePositions")
+        KvRow("账号", "${org.users.size} 个 · 可写 $writeUsers")
+        if (noStore > 0) {
+            Text("· 未绑定门店账号 $noStore 个", color = androidx.compose.ui.graphics.Color(0xFFE8584A))
+        }
+        if (noPosition > 0) {
+            Text("· 未设岗账号 $noPosition 个", color = androidx.compose.ui.graphics.Color(0xFFE8584A))
+        }
+        if (noStore == 0 && noPosition == 0) {
+            Text("· 组织与权限配置完整", color = androidx.compose.ui.graphics.Color(0xFF2E7D32))
+        }
     }
 }

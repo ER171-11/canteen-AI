@@ -30,6 +30,7 @@ import com.pandawufu.app.ui.designsystem.AiPurple
 import com.pandawufu.app.ui.designsystem.Sub
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.put
 import java.io.ByteArrayOutputStream
 
@@ -268,4 +269,141 @@ fun KimiCtaCard(spec: KimiCtaSpec, baseRev: String? = null) {
 fun KimiCtaByType(kimiType: String, baseRev: String? = null) {
     val spec = KIMI_SPECS.find { it.kimiType == kimiType } ?: return
     KimiCtaCard(spec, baseRev)
+}
+
+/**
+ * 采购到货 · 拍照验收入库：识别结果按行映射为 verdict，写 recv.accept（带 recv_id）。
+ * 识别结论仅供参考；无识别行时按「待人工复核(warn)」记录，不臆造合格。
+ */
+@Composable
+fun KimiRecvCta(
+    recvId: String,
+    supplier: String,
+    itemNames: List<String>,
+    baseRev: String? = null,
+    onDone: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var pendingAfterCapture by remember { mutableStateOf(false) }
+
+    fun submit(rows: List<List<String>>) {
+        val valid = rows.filter { it.getOrNull(0)?.isNotBlank() == true }
+        val items = buildJsonArray {
+            if (valid.isNotEmpty()) {
+                valid.forEach { row ->
+                    val name = row.getOrNull(0) ?: ""
+                    val value = row.getOrNull(1) ?: ""
+                    val status = row.getOrNull(2)?.takeIf { it in setOf("pass", "warn", "fail") } ?: "warn"
+                    add(buildJsonObject {
+                        put("ing_name", name)
+                        put("verdict", status)
+                        put("spec_req", value)
+                        put("detail", "拍照验收·$status")
+                    })
+                }
+            } else {
+                itemNames.forEach { n ->
+                    add(buildJsonObject {
+                        put("ing_name", n)
+                        put("verdict", "warn")
+                        put("detail", "拍照验收·待人工复核")
+                    })
+                }
+            }
+        }
+        ConfirmBus.ask(
+            ConfirmRequest(
+                title = "拍照验收入库",
+                summary = "$supplier · 识别 ${rows.size} 行 → recv.accept（recv_id=$recvId）\n不合格项将记 fail，需人工处置",
+                type = "recv.accept",
+                payload = buildJsonObject {
+                    put("recv_id", recvId)
+                    put("source", "kimi_recv")
+                    put("items", items)
+                },
+                baseRev = baseRev,
+                onResult = { r ->
+                    Toast.makeText(
+                        context,
+                        r.fold({ "已记录验收 · ${it.id}" }, { it.message ?: "失败" }),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    if (r.isSuccess) onDone()
+                }
+            )
+        )
+    }
+
+    fun runVision(imageBase64: String, degraded: Boolean) {
+        busy = true
+        scope.launch {
+            var rows: List<List<String>> = emptyList()
+            try {
+                AppModule.ensureSession()
+                val resp = AppModule.kimiRepository.callVision(
+                    type = "recv",
+                    imageBase64 = imageBase64,
+                    ctx = mapOf(
+                        "recv_id" to recvId,
+                        "supplier" to supplier,
+                        "items" to itemNames.joinToString("、"),
+                        "degraded" to if (degraded) "1" else "0"
+                    )
+                )
+                rows = resp.result?.rows ?: emptyList()
+                if (degraded && rows.isEmpty()) {
+                    Toast.makeText(context, "无照片：按待人工复核记录", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "识别失败：${e.message ?: "降级"}（按待人工复核记录）", Toast.LENGTH_SHORT).show()
+            }
+            submit(rows)
+            busy = false
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (!pendingAfterCapture) return@rememberLauncherForActivityResult
+        pendingAfterCapture = false
+        if (bitmap != null) runVision(bitmapToBase64(bitmap), degraded = false)
+        else runVision("", degraded = true)
+    }
+    val cameraPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            pendingAfterCapture = true
+            try { cameraLauncher.launch(null) } catch (e: Exception) {
+                pendingAfterCapture = false
+                runVision("", degraded = true)
+            }
+        } else {
+            Toast.makeText(context, "未授权相机，按待人工复核记录", Toast.LENGTH_SHORT).show()
+            runVision("", degraded = true)
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(1.dp, AiPurple, RoundedCornerShape(14.dp))
+            .clickable(enabled = !busy && AppModule.canWrite()) {
+                cameraPermission.launch(android.Manifest.permission.CAMERA)
+            }
+            .padding(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            if (busy) "识别中…" else "📷 拍照验收（$supplier）",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            color = AiPurple
+        )
+        Text("按标准核对数量/规格/鲜度/批次 · 逐行 pass/warn/fail", style = MaterialTheme.typography.bodySmall, color = Sub)
+    }
 }

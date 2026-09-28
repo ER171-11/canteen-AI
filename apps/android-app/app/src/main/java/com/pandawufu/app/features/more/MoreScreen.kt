@@ -39,6 +39,7 @@ import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Line
 import com.pandawufu.app.ui.designsystem.ModuleCell
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.AppBgBrush
 import com.pandawufu.app.ui.designsystem.PandaCard
 import com.pandawufu.app.ui.designsystem.Sub
 import com.pandawufu.app.ui.designsystem.Txt
@@ -162,15 +163,15 @@ fun MoreScreen(onOpenModule: (String) -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(PageBg)
+            .background(AppBgBrush)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 14.dp, vertical = 12.dp)
             .padding(bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         BrandBar(
-            title = BossIa.Brand.NAME,
-            subtitle = BossIa.Brand.tabSubtitle(BossIa.Tab.MINE, BossIa.Tab.MINE_JOB, storeLine)
+            title = "我的",
+            subtitle = listOfNotNull(storeLine, BossIa.Tab.MINE_JOB).joinToString(" · ")
         )
 
         Text(

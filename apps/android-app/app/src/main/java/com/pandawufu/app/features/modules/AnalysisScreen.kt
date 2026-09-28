@@ -72,7 +72,7 @@ fun AnalysisScreen() {
     val context = LocalContext.current
     ModuleScaffold(
         title = "经营分析",
-        subtitle = if (a?.mock == true) "演示数据 · 接通销售流水后变真" else when (tab) {
+        subtitle = if (a?.mock == true) "暂无销售流水 · 推送后生成" else when (tab) {
             0 -> "日营收趋势"
             1 -> "时段 × 星期热力"
             2 -> "菜品波士顿矩阵"
@@ -89,7 +89,7 @@ fun AnalysisScreen() {
         onPill = { tab = it }
     ) {
         if (a?.mock == true) {
-            Text("当前为演示分析，店内暂无足够销售流水", color = FiveYellow, fontSize = 12.sp)
+            Text("店内暂无销售流水，暂不生成分析", color = FiveYellow, fontSize = 12.sp)
         }
         a?.note?.let { Text(it, color = Sub, fontSize = 12.sp) }
 
@@ -268,42 +268,59 @@ fun AnalysisScreen() {
             }
             4 -> {
                 val e = a?.efficiency
-                ModuleCard("效率指标 · 本周") {
+                ModuleCard("效率指标 · 全周期") {
                     if (e == null) Text("暂无效率", color = Sub, fontSize = 12.sp)
                     else {
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            EffRing("翻台率·演示", "3.2", FiveGreen)
-                            EffRing("坪效/㎡", e.dailyAvgRevenue?.let { "¥${(it / 120).toInt()}" } ?: "¥680", FiveYellow)
-                            EffRing("人效/人", e.avgTicket?.let { "¥${(it * 14).toInt()}" } ?: "¥648", FivePurple)
+                            EffRing(
+                                "翻台率",
+                                e.turnover?.let { "${"%.1f".format(it)}" } ?: "—",
+                                FiveGreen
+                            )
+                            EffRing(
+                                "坪效/㎡",
+                                e.revenuePerSqm?.let { "¥${"%.0f".format(it)}" } ?: "—",
+                                FiveYellow
+                            )
+                            EffRing(
+                                "人效/人",
+                                e.revenuePerStaff?.let { "¥${"%.0f".format(it)}" } ?: "—",
+                                FivePurple
+                            )
                         }
-                        KvRow("客单价", e.avgTicket?.let { "¥${"%.0f".format(it)}" } ?: "-")
+                        KvRow("客单价", e.avgTicket?.let { "¥${"%.2f".format(it)}" } ?: "-")
                         KvRow("日均营收", e.dailyAvgRevenue?.let { "¥${"%.0f".format(it)}" } ?: "-")
                         KvRow("订单量", "${e.totalOrders ?: "-"}")
+                        KvRow(
+                            "口径",
+                            "面积 ${e.area?.let { "%.0f".format(it) } ?: "-"}㎡ · 员工 ${e.staff?.let { "%.0f".format(it) } ?: "-"} 人 · 桌位 ${e.tables ?: 0} 张"
+                        )
+                        if (e.turnover == null) {
+                            Text("翻台率需桌位/座位参数（我的餐厅·经营 可配）", color = FiveYellow, fontSize = 11.sp)
+                        }
                     }
                 }
-                ModuleCard("同环比 · 4周") {
-                    val trend = a?.trend.orEmpty()
-                    val revs = trend.mapNotNull { it.revenue }
-                    val mom = if (revs.size >= 2) {
-                        val last = revs.last()
-                        val prev = revs[revs.lastIndex - 1]
-                        if (prev > 0) (last - prev) / prev * 100 else null
-                    } else null
-                    KvRow("营收环比", mom?.let { "${if (it >= 0) "+" else ""}${"%.1f".format(it)}%" } ?: "演示 +4.2%")
-                    KvRow("营收同比（演示）", "+11.6%")
-                    KvRow("毛利环比（演示）", "+0.8pct")
-                    KvRow("客单价同比（演示）", e?.avgTicket?.let { "+¥${"%.1f".format(it * 0.05)}" } ?: "+¥2.4")
-                    Text("标注「演示」为示例数据，非店内实测", color = Sub, fontSize = 12.sp)
+                ModuleCard("同环比 · 真实口径") {
+                    val c = a?.compare
+                    if (c == null) Text("样本不足", color = Sub, fontSize = 12.sp)
+                    else {
+                        KvRow("周环比（近7日 vs 前7日）", pctText(c.wowRevPct))
+                        KvRow("月环比（近30 vs 前30）", pctText(c.momRevPct))
+                        KvRow("同比（近30 vs 去年同期）", c.yoyRevPct?.let { pctText(it) } ?: "样本不足（需 ≥1 年流水）")
+                        KvRow(
+                            "近7日 / 前7日营收",
+                            "¥${"%.0f".format(c.last7Rev ?: 0.0)} / ¥${"%.0f".format(c.prev7Rev ?: 0.0)}"
+                        )
+                        Text("基于 ${c.days ?: 0} 个营业日真实流水计算", color = Sub, fontSize = 11.sp)
+                    }
                 }
                 ModuleCard("天气 / 节假日关联") {
                     val hol = a?.forecast?.holidays.orEmpty()
                     if (hol.isEmpty()) {
-                        KvRow("雨天热汤点单（演示）", "+14%")
-                        KvRow("气温每降 3℃（演示）", "汤品主食 +8%")
-                        Text("暂无节假日关联数据，上行为示例规则", color = Sub, fontSize = 12.sp)
+                        Text("未接入天气数据源；接入后可由 SI 关联时段与品类。", color = Sub, fontSize = 12.sp)
                     } else {
                         hol.take(4).forEach { h -> KvRow(h.label ?: "-", h.effect ?: "-") }
                     }
@@ -696,6 +713,12 @@ private fun MatrixPriceDialog(
 
 private fun fmtQty(v: Double?): String =
     if (v == null) "-" else String.format(Locale.CHINA, if (v >= 10) "%.0f" else "%.1f", v)
+
+private fun pctText(v: Double?): String {
+    if (v == null) return "—"
+    val s = if (v >= 0) "+" else ""
+    return "$s${"%.1f".format(v)}%"
+}
 
 @Composable
 private fun EffRing(label: String, value: String, color: Color) {

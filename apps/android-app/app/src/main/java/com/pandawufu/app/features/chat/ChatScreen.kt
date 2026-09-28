@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,15 +44,19 @@ import com.pandawufu.app.AppModule
 import com.pandawufu.app.confirm.ConfirmBus
 import com.pandawufu.app.confirm.ConfirmRequest
 import com.pandawufu.app.ui.BossIa
+import com.pandawufu.app.ui.Routes
 import com.pandawufu.app.ui.designsystem.BrandBar
+import com.pandawufu.app.ui.designsystem.AppScaffold
 import com.pandawufu.app.ui.designsystem.CardBg
 import com.pandawufu.app.ui.designsystem.FiveGreen
 import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Line
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.AppBgBrush
 import com.pandawufu.app.ui.designsystem.Sub
 import com.pandawufu.app.ui.designsystem.Txt
 import com.pandawufu.shared.model.AgentActionCard
+import com.pandawufu.shared.model.AgentStepDto
 import com.pandawufu.shared.viewmodel.ChatViewModel
 
 /** 老板 AI 页场景分组（对齐原型 p-chat suggest-grid，不堆工具箱） */
@@ -83,13 +89,18 @@ private val WELCOME_TEXT = BossIa.Ai.INTRO
 
 /** 对应原型 p-chat：对话为主 · agent 只读问答 · 写操作走 ConfirmBus */
 @Composable
-fun ChatScreen() {
+fun ChatScreen(onOpenModule: (String) -> Unit = {}) {
     val context = LocalContext.current
     val viewModel = remember { ChatViewModel(AppModule.agentRepository) }
+    val siVm = remember { com.pandawufu.shared.viewmodel.SiViewModel(AppModule.siRepository) }
     val state by viewModel.state.collectAsState()
+    val siState by siVm.state.collectAsState()
     var input by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) { AppModule.ensureSession() }
+    LaunchedEffect(Unit) {
+        AppModule.ensureSession()
+        siVm.dispatch(com.pandawufu.shared.viewmodel.SiViewModel.Intent.Refresh)
+    }
 
     fun ask(q: String) {
         val trimmed = q.trim()
@@ -121,17 +132,21 @@ fun ChatScreen() {
         )
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(PageBg)
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-            .padding(bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+    AppScaffold(
+        title = BossIa.Ai.TITLE,
+        subtitle = BossIa.Ai.SUB
     ) {
-        BrandBar(
-            title = BossIa.Brand.NAME,
-            subtitle = BossIa.Brand.tabSubtitle(BossIa.Tab.AI, BossIa.Ai.SUB)
+        val canCockpit = AppModule.role == "老板" || AppModule.role == "店长" || AppModule.can("analysis")
+        val workbenches = buildList {
+            if (AppModule.can("inventory")) add("采购工作台" to Routes.M_WB_PROCUREMENT)
+            if (AppModule.can("kitchen")) add("厨师工作台" to Routes.M_WB_KITCHEN)
+        }
+        SiToolRow(
+            decide = siState.inbox?.counts?.decide ?: 0,
+            doing = siState.inbox?.counts?.doing ?: 0,
+            canCockpit = canCockpit,
+            workbenches = workbenches,
+            onOpen = onOpenModule
         )
 
         state.note?.let {
@@ -152,6 +167,9 @@ fun ChatScreen() {
 
             items(state.messages) { msg ->
                 ChatBubble(role = msg.role, text = msg.text)
+                if (msg.role == "assistant" && msg.steps.isNotEmpty()) {
+                    ChatSteps(steps = msg.steps, engine = msg.engine)
+                }
                 if (msg.role == "assistant" && msg.cards.isNotEmpty()) {
                     ChatActionCards(cards = msg.cards, onOpen = { openCard(it) })
                 }
@@ -173,7 +191,7 @@ fun ChatScreen() {
                 value = input,
                 onValueChange = { input = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("问店 AI…") },
+                placeholder = { Text("问店 SI…") },
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp)
             )
@@ -225,6 +243,138 @@ private fun ChatActionCards(
                 }
             }
         }
+    }
+}
+
+/** SI 指挥台入口：按老板高频三件事组织（要拍板 / 在办 / 目标）+ 低频设置收口。 */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun SiToolRow(
+    decide: Int,
+    doing: Int,
+    canCockpit: Boolean,
+    workbenches: List<Pair<String, String>>,
+    onOpen: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (canCockpit) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Ink)
+                    .clickable { onOpen(Routes.M_SI_COCKPIT) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Text("全局 SI 驾驶舱", fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                Text("全店态势一屏看 ›", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.8f))
+            }
+        }
+        if (workbenches.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                workbenches.forEach { (label, route) ->
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White)
+                            .border(1.dp, Line, RoundedCornerShape(12.dp))
+                            .clickable { onOpen(route) }
+                            .padding(10.dp)
+                    ) {
+                        Text("我的工作台", fontSize = 9.5.sp, color = Sub)
+                        Text(label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    }
+                }
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(CardBg)
+                .border(1.dp, Line, RoundedCornerShape(12.dp))
+                .clickable { onOpen(Routes.HOME) }
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text("今日总览", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Text("简报 · 主线 · KPI ›", fontSize = 10.5.sp, color = Sub)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SiEntryCell(
+                title = "要我拍板",
+                subtitle = if (decide > 0) "$decide 条等你点头" else "暂无待批",
+                badge = decide,
+                modifier = Modifier.weight(1f),
+                onClick = { onOpen(Routes.M_INBOX) }
+            )
+            SiEntryCell(
+                title = "SI 在办",
+                subtitle = if (doing > 0) "执行中 $doing · 战役" else "战役 · 目标",
+                badge = 0,
+                modifier = Modifier.weight(1f),
+                onClick = { onOpen(Routes.M_SI_MISSIONS) }
+            )
+            SiEntryCell(
+                title = "目标",
+                subtitle = "老板定标 · SI 盯",
+                badge = 0,
+                modifier = Modifier.weight(1f),
+                onClick = { onOpen(Routes.M_SI_GOALS) }
+            )
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(CardBg)
+                .border(1.dp, Line, RoundedCornerShape(12.dp))
+                .clickable { onOpen(Routes.M_SI_SETTINGS) }
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text("SI 设置与能力", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Text("授权 · 专家团 · 知识 · 模拟 ›", fontSize = 10.5.sp, color = Sub)
+        }
+    }
+}
+
+@Composable
+private fun SiEntryCell(
+    title: String,
+    subtitle: String,
+    badge: Int,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White)
+            .border(1.dp, Line, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(10.dp)
+    ) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text(title, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+            if (badge > 0) {
+                androidx.compose.foundation.layout.Spacer(Modifier.size(4.dp))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFFE8584A))
+                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                ) {
+                    Text("$badge", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+        Text(subtitle, fontSize = 10.sp, color = Sub)
     }
 }
 
@@ -302,6 +452,41 @@ private fun ChatFollowUpChips(suggestions: List<String>, onPick: (String) -> Uni
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ChatSteps(steps: List<AgentStepDto>, engine: String?) {    val label = if (engine == "si") "SI 查了这些只读数据" else "答案来自门店快照"
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, fontSize = 10.sp, color = Sub, fontWeight = FontWeight.SemiBold)
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            steps.forEach { s ->
+                Text(
+                    "🔧 ${toolLabel(s.tool)}",
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(CardBg)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    fontSize = 10.sp,
+                    color = Ink
+                )
+            }
+        }
+    }
+}
+
+private fun toolLabel(tool: String): String = when (tool) {
+    "store_overview" -> "营收概况"
+    "low_stock" -> "缺货清单"
+    "forecast_restock" -> "备货预测"
+    "dish_margin" -> "菜品毛利"
+    "sales_trend" -> "营收走势"
+    "pending_actions" -> "确认台待办"
+    "list_alerts" -> "预警汇总"
+    else -> tool
+}
+
 @Composable
 private fun ChatBubble(role: String, text: String) {
     val isUser = role == "user"
@@ -314,7 +499,7 @@ private fun ChatBubble(role: String, text: String) {
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                if (isUser) "我" else "问店 AI · 在线",
+                if (isUser) "我" else "问店 SI · 在线",
                 style = MaterialTheme.typography.labelMedium,
                 color = Sub,
                 fontWeight = FontWeight.SemiBold

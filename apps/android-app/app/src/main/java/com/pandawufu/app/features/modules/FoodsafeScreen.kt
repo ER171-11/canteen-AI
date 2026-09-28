@@ -9,8 +9,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import com.pandawufu.app.AppModule
+import com.pandawufu.app.ui.designsystem.FiveRed
+import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Sub
+import com.pandawufu.shared.model.FoodsafeInsightDto
 import com.pandawufu.shared.viewmodel.ModulesViewModel
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -47,6 +51,7 @@ fun FoodsafeScreen() {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        FoodsafeInsightCard(fs?.insight)
         when (tab) {
             0 -> {
                 DraftWriteButton(
@@ -219,6 +224,47 @@ fun FoodsafeScreen() {
                     }
                 }
             }
+        }
+    }
+}
+
+/** SI 食安洞察卡：证照临期/禁岗 + 留样 48h + 消毒漏做 + 溯源待补 */
+@Composable
+private fun FoodsafeInsightCard(ins: FoodsafeInsightDto?) {
+    if (ins == null) return
+    ModuleCard("SI · 食安台账") {
+        ins.certs?.let { c ->
+            if (c.storeRisks.isNotEmpty()) {
+                Text("停业风险：${c.storeRisks.joinToString("、")} 已过期", color = FiveRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+            if (c.healthBlocked.isNotEmpty()) {
+                Text("健康证禁岗：${c.healthBlocked.joinToString("、")}", color = FiveRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+            if (c.warnings.isNotEmpty()) {
+                KvRow(
+                    "证照临期",
+                    c.warnings.take(4).joinToString(" · ") { "${it.holder.ifBlank { it.type }} ${it.days ?: "-"}天" }
+                )
+            }
+            if (c.storeRisks.isEmpty() && c.healthBlocked.isEmpty() && c.warnings.isEmpty()) {
+                KvRow("证照", "无临期/禁岗")
+            }
+        }
+        ins.samples?.let { s ->
+            KvRow("留样", "待处理 ${s.pending} · 2h 内到期 ${s.dueSoon} · 已超期 ${s.expired} · 克重不足 ${s.underWeight}")
+        }
+        ins.disinfect?.let { d ->
+            KvRow("消毒", "区域 ${d.areas} · 今日完成 ${d.todayDone}" + if (d.missed.isNotEmpty()) " · 漏做 ${d.missed.size}" else "")
+            if (d.missed.isNotEmpty()) {
+                Text("漏做：${d.missed.joinToString("、")}", color = FiveRed, fontSize = 12.sp)
+            }
+        }
+        ins.trace?.let { t ->
+            KvRow("溯源", "批次 ${t.batches} · 待补检验报告 ${t.missingCert}")
+        }
+        ins.advice.forEach {
+            val warn = it.contains("风险") || it.contains("禁岗") || it.contains("超") || it.contains("漏做") || it.contains("不足") || it.contains("待补")
+            Text("· $it", color = if (warn) FiveRed else Ink, fontSize = 12.sp)
         }
     }
 }

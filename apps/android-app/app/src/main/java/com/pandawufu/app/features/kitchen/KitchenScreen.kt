@@ -33,6 +33,7 @@ import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Line
 import com.pandawufu.app.ui.designsystem.LoadStatusBanner
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.AppBgBrush
 import com.pandawufu.app.ui.designsystem.SmoothPane
 import com.pandawufu.app.ui.designsystem.SoftRefreshBar
 import com.pandawufu.app.ui.designsystem.Sub
@@ -71,22 +72,19 @@ fun KitchenScreen(onOpenModule: (String) -> Unit = {}) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(PageBg)
+            .background(AppBgBrush)
             .padding(horizontal = 14.dp, vertical = 12.dp)
             .padding(bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         BrandBar(
-            title = BossIa.Brand.NAME,
-            subtitle = BossIa.Brand.tabSubtitle(
-                BossIa.Tab.KITCHEN,
-                when (state.tab) {
-                    KitchenViewModel.KitchenTab.WORKORDERS -> BossIa.Kitchen.WO_SUB
-                    KitchenViewModel.KitchenTab.BOARD -> BossIa.Kitchen.BOARD_SUB
-                    KitchenViewModel.KitchenTab.QC -> BossIa.Kitchen.QC_SUB
-                    KitchenViewModel.KitchenTab.RECIPES -> BossIa.Kitchen.RECIPE_SUB
-                }
-            )
+            title = BossIa.Tab.KITCHEN,
+            subtitle = when (state.tab) {
+                KitchenViewModel.KitchenTab.WORKORDERS -> BossIa.Kitchen.WO_SUB
+                KitchenViewModel.KitchenTab.BOARD -> BossIa.Kitchen.BOARD_SUB
+                KitchenViewModel.KitchenTab.QC -> BossIa.Kitchen.QC_SUB
+                KitchenViewModel.KitchenTab.RECIPES -> BossIa.Kitchen.RECIPE_SUB
+            }
         )
 
         PillTabRow(
@@ -103,6 +101,22 @@ fun KitchenScreen(onOpenModule: (String) -> Unit = {}) {
         }
 
         SoftRefreshBar(active = state.loading && hasBody)
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                .background(com.pandawufu.app.ui.designsystem.Ink)
+                .clickable { onOpenModule(com.pandawufu.app.ui.Routes.M_WB_KITCHEN) }
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("厨师工作台", fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            Text("按菜谱标准制作与品控 ›", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.8f))
+        }
+
+        com.pandawufu.app.features.modules.SiVerdictCard("kitchen")
 
         if (state.error != null || state.emptyHint != null) {
             LoadStatusBanner(

@@ -52,6 +52,7 @@ import com.pandawufu.app.ui.designsystem.Line
 import com.pandawufu.app.ui.designsystem.LoadStatusBanner
 import com.pandawufu.app.ui.designsystem.ModuleCell
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.AppBgBrush
 import com.pandawufu.app.ui.designsystem.PandaCard
 import com.pandawufu.app.ui.designsystem.SoftRefreshBar
 import com.pandawufu.app.ui.designsystem.Sub
@@ -88,6 +89,17 @@ fun FrontHallScreen(onOpen: (String) -> Unit) {
         modulesVm.dispatch(ModulesViewModel.Intent.LoadVip)
         invVm.dispatch(InventoryViewModel.InventoryIntent.Refresh)
         kitVm.dispatch(KitchenViewModel.KitchenIntent.Refresh)
+    }
+
+    // 近实时：前厅开着时每 20s 刷工单看板/桌态，后厨出品/待传变化即时可见
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(20_000)
+            if (AppModule.isOnline()) {
+                kitVm.dispatch(KitchenViewModel.KitchenIntent.Refresh)
+                invVm.dispatch(InventoryViewModel.InventoryIntent.Refresh)
+            }
+        }
     }
 
     val tables = invState.posTables
@@ -194,28 +206,11 @@ fun FrontHallScreen(onOpen: (String) -> Unit) {
 
     val frontMods = BossIa.modules.filter { it.group == "前厅" && AppModule.canOpenRoute(it.route) }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(PageBg)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-            .padding(bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    com.pandawufu.app.ui.designsystem.AppScaffold(
+        scroll = true,
+        title = BossIa.Tab.FRONT,
+        subtitle = BossIa.FrontHall.JOB
     ) {
-        BrandBar(
-            title = BossIa.Brand.NAME,
-            subtitle = BossIa.Brand.tabSubtitle(
-                BossIa.Tab.FRONT,
-                BossIa.FrontHall.JOB,
-                AppModule.storeName
-                    ?.removePrefix("熊猫五福餐厅")
-                    ?.trim()
-                    ?.ifBlank { AppModule.storeName }
-                    ?: AppModule.storeName
-            )
-        )
-
         SoftRefreshBar(
             active = (modulesState.loading || invState.loading || kitState.loading) &&
                 (modulesState.booking != null || invState.posTables.isNotEmpty() || kitState.board.isNotEmpty())
@@ -243,33 +238,38 @@ fun FrontHallScreen(onOpen: (String) -> Unit) {
             )
         }
 
-        // —— 可视化管道 ——
+        // —— 可视化管道（流程优先，口径真实）——
+        val readyCount = kitState.boardTables.sumOf { it.ready }
+        val payable = tables.count { (it.amount ?: 0.0) > 0 }
         PandaCard {
-            CardHeader("前厅管道", more = BossIa.FrontHall.PIPE_HINT)
+            CardHeader("前厅管道", more = "迎客 → 开台 → 传菜 → 收钱 → 客评")
             Row(
                 Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                PipeStep("1 迎客", queueN + bookN, queueN > 3) {
+                PipeStep("迎客", queueN + bookN, "组", queueN > 3, FiveYellow) {
                     open(Routes.M_BOOKING, if (queueN > 0) 1 else 0)
                 }
                 PipeArrow()
-                PipeStep("2 开台", busy, busy > tableN * 0.7) {
+                PipeStep("开台", busy, "桌", busy > tableN * 0.7, FiveRed) {
                     open(Routes.M_POS, 0)
                 }
                 PipeArrow()
-                PipeStep("3 服务", clean, clean > 2) {
-                    open(Routes.M_POS, 0)
+                PipeStep("传菜", readyCount, "份", readyCount > 0, AiPink) {
+                    onOpen(Routes.KITCHEN)
                 }
                 PipeArrow()
-                PipeStep("4 收钱", takeoutOpen, takeoutOpen > 5) {
+                PipeStep("收钱", payable, "桌", payable > 0, FiveGreen) {
+                    // 定位到第一张待结账桌并直达结账页
+                    val firstPayable = tables.firstOrNull { (it.amount ?: 0.0) > 0 }?.id
+                    com.pandawufu.app.features.modules.ModuleEntry.openTable(firstPayable)
                     open(Routes.M_POS, 2)
                 }
                 PipeArrow()
-                PipeStep("5 客评", reviewPending, reviewPending > 0) {
+                PipeStep("客评", reviewPending, "条", reviewPending > 0, FiveRed) {
                     open(Routes.M_REVIEW, 1)
                 }
             }
@@ -321,6 +321,43 @@ fun FrontHallScreen(onOpen: (String) -> Unit) {
                 }
                 PulseCell("会员", "$vipN", "人", Color(0xFFE8584A), Modifier.weight(1f)) {
                     open(Routes.M_VIP)
+                }
+            }
+        }
+
+        // —— 待结账（定位到桌，一键去结账）——
+        val payableTables = tables.filter { (it.amount ?: 0.0) > 0 }
+        if (payableTables.isNotEmpty()) {
+            PandaCard {
+                CardHeader("待结账", more = "${payableTables.size} 桌 · 点桌去结账")
+                payableTables.take(6).forEach { t ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(1.dp, Line, RoundedCornerShape(10.dp))
+                            .clickable {
+                                com.pandawufu.app.features.modules.ModuleEntry.openTable(t.id)
+                                open(Routes.M_POS, 2)
+                            }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "桌 ${t.no ?: t.name ?: t.id}",
+                            fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Ink
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "¥${"%.0f".format(t.amount ?: 0.0)}",
+                                fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = FiveGreen
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("结账 ›", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AiPink)
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
                 }
             }
         }
@@ -815,23 +852,39 @@ private fun buildSmartSignals(
 }
 
 @Composable
-private fun PipeStep(label: String, badge: Int, hot: Boolean, onClick: () -> Unit) {
+private fun PipeStep(
+    label: String,
+    value: Int,
+    unit: String,
+    hot: Boolean,
+    accent: Color,
+    onClick: () -> Unit
+) {
     Column(
         Modifier
+            .width(78.dp)
             .clip(RoundedCornerShape(14.dp))
-            .background(if (hot) Color(0xFFFFF0F4) else Color.White)
-            .border(1.dp, if (hot) AiPink.copy(alpha = 0.45f) else Line, RoundedCornerShape(14.dp))
+            .background(if (hot) accent.copy(alpha = 0.12f) else Color(0xFFF7F8FB))
+            .border(
+                1.dp,
+                if (hot) accent.copy(alpha = 0.5f) else Line,
+                RoundedCornerShape(14.dp)
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 10.dp, vertical = 9.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Ink)
-        Text(
-            if (badge > 0) "$badge" else "·",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = if (hot) FiveRed else Txt
-        )
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Sub)
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                if (value > 0) "$value" else "0",
+                fontSize = 19.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (hot) accent else Txt
+            )
+            Spacer(Modifier.width(2.dp))
+            Text(unit, fontSize = 9.5.sp, color = Sub, modifier = Modifier.padding(bottom = 2.dp))
+        }
     }
 }
 

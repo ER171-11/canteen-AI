@@ -39,7 +39,8 @@ import com.pandawufu.shared.viewmodel.InventoryViewModel
 /** 货品：库存 → 缺货 → 下单 → 入库；产品库/供应商为主数据 */
 @Composable
 fun InventoryScreen(
-    initialTab: InventoryViewModel.InventoryTab = InventoryViewModel.InventoryTab.STOCK
+    initialTab: InventoryViewModel.InventoryTab = InventoryViewModel.InventoryTab.STOCK,
+    onOpenModule: (String) -> Unit = {}
 ) {
     val viewModel = remember { InventoryViewModel(AppModule.inventoryRepository) }
     val state by viewModel.state.collectAsState()
@@ -73,21 +74,19 @@ fun InventoryScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         BrandBar(
-            title = BossIa.Brand.NAME,
-            subtitle = BossIa.Brand.tabSubtitle(
-                BossIa.Tab.GOODS,
-                when (state.tab) {
-                    InventoryViewModel.InventoryTab.STOCK -> BossIa.Goods.stockSub(
-                        state.countCritical, state.countLow, state.stock.size
-                    )
-                    InventoryViewModel.InventoryTab.RESTOCK -> BossIa.Goods.RESTOCK_SUB
-                    InventoryViewModel.InventoryTab.PURCHASE -> BossIa.Goods.PURCHASE_SUB
-                    InventoryViewModel.InventoryTab.RECV -> BossIa.Goods.RECV_SUB
-                    InventoryViewModel.InventoryTab.CATALOG -> BossIa.Goods.CATALOG_SUB
-                    InventoryViewModel.InventoryTab.VENDORS ->
-                        BossIa.Goods.VENDORS_SUB + " · ${state.vendors.size.coerceAtLeast(state.suppliers.size)} 家"
-                }
-            )
+            title = "进销存",
+            onBack = com.pandawufu.app.features.modules.LocalModuleBack.current,
+            subtitle = when (state.tab) {
+                InventoryViewModel.InventoryTab.STOCK -> BossIa.Goods.stockSub(
+                    state.countCritical, state.countLow, state.stock.size
+                )
+                InventoryViewModel.InventoryTab.RESTOCK -> BossIa.Goods.RESTOCK_SUB
+                InventoryViewModel.InventoryTab.PURCHASE -> BossIa.Goods.PURCHASE_SUB
+                InventoryViewModel.InventoryTab.RECV -> BossIa.Goods.RECV_SUB
+                InventoryViewModel.InventoryTab.CATALOG -> BossIa.Goods.CATALOG_SUB
+                InventoryViewModel.InventoryTab.VENDORS ->
+                    BossIa.Goods.VENDORS_SUB + " · ${state.vendors.size.coerceAtLeast(state.suppliers.size)} 家"
+            }
         )
 
         PillTabRow(
@@ -96,14 +95,27 @@ fun InventoryScreen(
             onSelect = { idx -> go(InventoryViewModel.InventoryTab.entries[idx]) }
         )
 
-        val onPipe = state.tab == InventoryViewModel.InventoryTab.RESTOCK ||
-            state.tab == InventoryViewModel.InventoryTab.PURCHASE ||
-            state.tab == InventoryViewModel.InventoryTab.RECV
+        // 办货链流程条常显：缺货 → 下单 → 入库（进销存 tab 首屏即可见）
+        val onPipe = true
         if (onPipe) {
             BuyPipelineStrip(active = state.tab, onStep = { go(it) })
         }
 
         SoftRefreshBar(active = state.loading && hasBody)
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Ink)
+                .clickable { onOpenModule(com.pandawufu.app.ui.Routes.M_WB_PROCUREMENT) }
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("采购工作台", fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            Text("按菜谱与需求下单 · 按标准验收 ›", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.8f))
+        }
 
         if (state.error != null || state.emptyHint != null) {
             val fail = state.error?.let { LoadFailure.fromMessage(it) }

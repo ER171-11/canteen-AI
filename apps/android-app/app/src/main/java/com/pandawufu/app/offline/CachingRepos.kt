@@ -1,6 +1,7 @@
 package com.pandawufu.app.offline
 
 import com.pandawufu.shared.model.SupplyModuleDto
+import com.pandawufu.shared.model.PosModuleDto
 import com.pandawufu.shared.model.LossModuleDto
 import com.pandawufu.shared.model.ReviewModuleDto
 import com.pandawufu.shared.model.VipModuleDto
@@ -105,4 +106,5 @@ class CachingModulesRepository(
     override suspend fun finance(): FinanceModuleDto = wrap("modules/finance") { inner.finance() }
     override suspend fun loss(): LossModuleDto = wrap("modules/loss") { inner.loss() }
     override suspend fun supply(): SupplyModuleDto = wrap("modules/supply") { inner.supply() }
+    override suspend fun pos(): PosModuleDto = wrap("modules/pos") { inner.pos() }
 }

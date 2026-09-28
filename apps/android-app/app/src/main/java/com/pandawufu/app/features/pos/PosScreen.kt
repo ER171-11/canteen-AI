@@ -55,6 +55,7 @@ import com.pandawufu.app.ui.designsystem.FiveRed
 import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Line
 import com.pandawufu.app.ui.designsystem.PageBg
+import com.pandawufu.app.ui.designsystem.AppBgBrush
 import com.pandawufu.app.ui.designsystem.PandaCard
 import com.pandawufu.app.ui.designsystem.SmoothPane
 import com.pandawufu.app.ui.designsystem.SoftRefreshBar
@@ -76,6 +77,9 @@ import com.pandawufu.shared.model.DishDto
 import com.pandawufu.shared.model.PosTableDto
 import com.pandawufu.shared.pos.UndoStack
 import com.pandawufu.shared.viewmodel.InventoryViewModel
+import com.pandawufu.shared.viewmodel.ModulesViewModel
+import com.pandawufu.shared.model.PosInsightDto
+import com.pandawufu.app.features.modules.KvRow
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -112,18 +116,23 @@ private fun cartItemsJson(cartLines: List<CartLine>) = buildJsonArray {
 @Composable
 fun PosScreen() {
     val viewModel = remember { InventoryViewModel(AppModule.inventoryRepository) }
+    val modVm = remember { ModulesViewModel(AppModule.modulesRepository) }
     val state by viewModel.state.collectAsState()
+    val modState by modVm.state.collectAsState()
     val context = LocalContext.current
     val undo = remember { UndoStack("pos-floor") }
     var undoTick by remember { mutableIntStateOf(0) }
     var mode by remember { mutableStateOf(PosMode.STATE) }
     var selected by remember { mutableStateOf<List<String>>(emptyList()) }
+    val pendingTable = remember { ModuleEntry.consumeTable() }
     var page by remember {
-        val idx = ModuleEntry.consumePill(0).coerceIn(0, PosPage.entries.lastIndex)
+        val idx = if (pendingTable != null) PosPage.PAY.ordinal
+        else ModuleEntry.consumePill(0).coerceIn(0, PosPage.entries.lastIndex)
         mutableStateOf(PosPage.entries[idx])
     }
     var cart by remember { mutableStateOf<Map<String, CartLine>>(emptyMap()) }
-    var payTableId by remember { mutableStateOf<String?>(null) }
+    // 深链预选桌台（前厅「收钱」→ 直接落到结账页并选中该桌）
+    var payTableId by remember { mutableStateOf(pendingTable) }
     var dishCat by remember { mutableStateOf(AppModule.modulePrefs.posDefaultCat()) }
     var serviceTable by remember { mutableStateOf<PosTableDto?>(null) }
     var voidTable by remember { mutableStateOf<PosTableDto?>(null) }
@@ -132,6 +141,7 @@ fun PosScreen() {
     LaunchedEffect(Unit) {
         AppModule.ensureSession()
         viewModel.dispatch(InventoryViewModel.InventoryIntent.Refresh)
+        modVm.dispatch(ModulesViewModel.Intent.LoadPos)
         dishCat = AppModule.modulePrefs.posDefaultCat()
     }
 
@@ -150,7 +160,8 @@ fun PosScreen() {
         payload: kotlinx.serialization.json.JsonObject,
         undoLabel: String? = null,
         undoBefore: String? = null,
-        undoAfter: String? = null
+        undoAfter: String? = null,
+        after: (() -> Unit)? = null
     ) {
         ConfirmBus.ask(
             ConfirmRequest(
@@ -172,6 +183,7 @@ fun PosScreen() {
                     if (r.isSuccess) {
                         viewModel.dispatch(InventoryViewModel.InventoryIntent.Refresh)
                         if (type == "pos.pay") cart = emptyMap()
+                        after?.invoke()
                     }
                     selected = emptyList()
                     mode = PosMode.STATE
@@ -194,28 +206,26 @@ fun PosScreen() {
     Column(
         Modifier
             .fillMaxSize()
-            .background(PageBg)
+            .background(AppBgBrush)
             .padding(horizontal = 14.dp, vertical = 12.dp)
             .padding(bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         com.pandawufu.app.ui.designsystem.BrandBar(
-            title = BossIa.Brand.NAME,
-            subtitle = BossIa.Brand.moduleSubtitle(
-                when {
-                    page == PosPage.FLOOR && mode == PosMode.SERVICE ->
-                        "${BossIa.Pos.TITLE} · 服务模式 · 点就餐桌：加菜/催菜/退菜/打包/客诉"
-                    page == PosPage.FLOOR && busyCount > 0 ->
-                        "${BossIa.Pos.TITLE} · 就餐 $busyCount · 待清 $cleanCount · 点桌改态"
-                    page == PosPage.MENU && cartCount > 0 ->
-                        "${BossIa.Pos.TITLE} · 已点 $cartCount 份 · ¥${fmtMoney(cartTotal)}"
-                    page == PosPage.PAY ->
-                        if (cartCount > 0) "${BossIa.Pos.TITLE} · 待收 ¥${fmtMoney(cartTotal)}"
-                        else "${BossIa.Pos.TITLE} · 选已挂单桌或先点菜"
-                    tables.isEmpty() -> "${BossIa.Pos.TITLE} · 先配桌台平面"
-                    else -> BossIa.Pos.SUB
-                }
-            ),
+            title = BossIa.Pos.TITLE,
+            subtitle = when {
+                page == PosPage.FLOOR && mode == PosMode.SERVICE ->
+                    "服务模式 · 点就餐桌：加菜/催菜/退菜/打包/客诉"
+                page == PosPage.FLOOR && busyCount > 0 ->
+                    "就餐 $busyCount · 待清 $cleanCount · 点桌改态"
+                page == PosPage.MENU && cartCount > 0 ->
+                    "已点 $cartCount 份 · ¥${fmtMoney(cartTotal)}"
+                page == PosPage.PAY ->
+                    if (cartCount > 0) "待收 ¥${fmtMoney(cartTotal)}"
+                    else "选已挂单桌或先点菜"
+                tables.isEmpty() -> "先配桌台平面"
+                else -> BossIa.Pos.SUB
+            },
             onBack = com.pandawufu.app.features.modules.LocalModuleBack.current
         )
             PillTabRow(
@@ -225,6 +235,8 @@ fun PosScreen() {
         )
 
         SoftRefreshBar(active = state.loading && tables.isNotEmpty())
+
+        PosInsightCard(modState.pos?.insight)
 
         SmoothPane(key = page, modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (page) {
@@ -318,6 +330,15 @@ fun PosScreen() {
                         table.billSummary ?: "挂单结账"
                     }
                     val qty = if (useCart) cartCount else 1
+                    // 储值结账：需该桌已识别会员；结账成功后联动会员储值扣减
+                    if (method == "储值" && table.vipMemberId.isNullOrBlank()) {
+                        Toast.makeText(
+                            context,
+                            "该桌未识别会员，无法储值结账；请先在「会员·到店」识别会员",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        return@PosPayPage
+                    }
                     askConfirm(
                         title = "确认结账",
                         summary = "桌 ${table.no ?: table.id} · ¥${fmtMoney(amount)} · $method\n$dishSummary",
@@ -335,7 +356,26 @@ fun PosScreen() {
                         },
                         undoLabel = "pay",
                         undoBefore = "${table.id}|busy",
-                        undoAfter = "${table.id}|free"
+                        undoAfter = "${table.id}|free",
+                        after = if (method == "储值") {
+                            {
+                                ConfirmBus.ask(
+                                    ConfirmRequest(
+                                        title = "会员储值扣减",
+                                        summary = "${table.vipName ?: table.vipMemberId} · 扣 ¥${fmtMoney(amount)}（储值结账联动）",
+                                        type = "vip.balance_deduct",
+                                        payload = buildJsonObject {
+                                            put("member_id", table.vipMemberId ?: "")
+                                            put("amount", amount)
+                                            put("table_id", table.id)
+                                            put("note", "储值结账·桌 ${table.no ?: table.id}")
+                                        },
+                                        baseRev = null,
+                                        onResult = { Toast.makeText(context, "储值扣减已提交", Toast.LENGTH_SHORT).show() }
+                                    )
+                                )
+                            }
+                        } else null
                     )
                 }
             )
@@ -1154,3 +1194,32 @@ private fun PatrolStat(label: String, n: Int, color: Color, modifier: Modifier =
 }
 
 private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
+/** SI 堂食洞察卡：桌台四态 + 今日实收/支付方式 */
+@Composable
+private fun PosInsightCard(ins: PosInsightDto?) {
+    if (ins == null) return
+    PandaCard {
+        Text("SI · 堂食经营", fontWeight = FontWeight.Bold, color = Ink, fontSize = 14.sp)
+        ins.tables?.let { t ->
+            KvRow(
+                "桌台",
+                "${t.total} 桌 · 空闲 ${t.byState["free"] ?: 0} · 就餐 ${t.byState["busy"] ?: 0} · 待清 ${t.byState["clean"] ?: 0} · 预订 ${t.byState["rsv"] ?: 0}"
+            )
+            t.occupancyPct?.let { KvRow("占用率", "$it%" + if (t.vipTables > 0) " · VIP 桌 ${t.vipTables}" else "") }
+        }
+        ins.payments?.let { p ->
+            KvRow("今日实收", "¥${p.amount.toInt()} · ${p.count} 笔 · 桌均 ¥${p.avg.toInt()}")
+            if (p.byMethod.isNotEmpty()) {
+                KvRow("支付方式", p.byMethod.entries.joinToString(" · ") { "${it.key} ¥${it.value.toInt()}" })
+            }
+        }
+        ins.revenue?.let { r ->
+            if (r.dineToday > 0) KvRow("今日堂食销售", "¥${r.dineToday.toInt()}")
+        }
+        ins.advice.forEach {
+            val warn = it.contains("待清") || it.contains("占用") || it.contains("未登记")
+            Text("· $it", color = if (warn) FiveRed else Ink, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}

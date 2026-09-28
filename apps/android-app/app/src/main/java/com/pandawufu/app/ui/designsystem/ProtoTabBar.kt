@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DinnerDining
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Today
@@ -51,12 +52,12 @@ data class ProtoTab(
     val isAiFab: Boolean = false
 )
 
-/** 底栏方案 C：今日 · 前厅 · AI · 后厨 · 我的（货品收入「我的·进销」） */
+/** 底栏：前厅 · 进销存 · SI · 后厨 · 我的（业务域对称，SI 居中） */
 val DefaultProtoTabs = listOf(
-    ProtoTab("home", "今日", Icons.Filled.Today),
     ProtoTab("front", "前厅", Icons.Filled.Storefront),
-    // icon 仅占位；AI FAB 用熊猫头像
-    ProtoTab("chat", "AI", Icons.Filled.Today, isAiFab = true),
+    ProtoTab("inventory", "进销存", Icons.Filled.Inventory2),
+    // icon 仅占位；SI FAB 用熊猫头像
+    ProtoTab("chat", "SI", Icons.Filled.Today, isAiFab = true),
     ProtoTab("kitchen", "后厨", Icons.Filled.DinnerDining),
     ProtoTab("more", "我的", Icons.Filled.Person)
 )
@@ -151,7 +152,7 @@ fun ProtoTabBar(
         ) {
             Image(
                 painter = painterResource(pandaRes),
-                contentDescription = "问店 AI",
+                contentDescription = "问店 SI",
                 modifier = Modifier
                     .size(46.dp)
                     .background(Color.White, CircleShape)

@@ -29,6 +29,11 @@ import com.pandawufu.app.ui.designsystem.DualSparkline
 import com.pandawufu.app.ui.designsystem.FiveRed
 import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Sub
+import com.pandawufu.shared.model.TakeoutInsightDto
+import com.pandawufu.shared.model.VipInsightDto
+import com.pandawufu.shared.model.FinanceInsightDto
+import com.pandawufu.shared.model.LossInsightDto
+import com.pandawufu.shared.model.ReviewInsightDto
 import com.pandawufu.shared.viewmodel.HomeViewModel
 import com.pandawufu.shared.viewmodel.InventoryViewModel
 import com.pandawufu.shared.viewmodel.KitchenViewModel
@@ -71,6 +76,7 @@ fun TakeoutScreen() {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        TakeoutInsightCard(t?.insight)
         when (tab) {
             0 -> {
                 WriteActionButton(
@@ -276,6 +282,7 @@ fun VipScreen() {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        VipInsightCard(vip?.insight)
         when (tab) {
             0 -> {
                 ModuleCard("会员资产") {
@@ -293,13 +300,40 @@ fun VipScreen() {
                     }
                 }
             }
-            1 -> ModuleCard("储值余额（${stored.size}）") {
-                if (stored.isEmpty()) Text("暂无储值会员", style = MaterialTheme.typography.bodySmall)
-                stored.take(30).forEach { m ->
-                    KvRow(
-                        "${m.name ?: m.memberId}",
-                        "¥${m.balance ?: 0} · ${m.level ?: "储值卡"}"
+            1 -> {
+                ModuleCard("储值余额（${stored.size}）") {
+                    if (stored.isEmpty()) Text("暂无储值会员", style = MaterialTheme.typography.bodySmall)
+                    stored.take(30).forEach { m ->
+                        KvRow(
+                            "${m.name ?: m.memberId}",
+                            "¥${m.balance ?: 0} · ${m.level ?: "储值卡"}"
+                        )
+                    }
+                }
+                if (stored.isNotEmpty()) {
+                    val m0 = stored.first()
+                    DraftWriteButton(
+                        label = "储值扣减（联动结账）",
+                        type = "vip.balance_deduct",
+                        fields = mapOf(
+                            "会员ID" to (m0.memberId ?: ""),
+                            "扣减金额" to "50",
+                            "桌台" to "",
+                            "备注" to "结账储值扣减"
+                        ),
+                        summaryOf = { d -> "会员 ${d["会员ID"]} 储值扣减 ¥${d["扣减金额"]}" },
+                        buildPayload = { d ->
+                            buildJsonObject {
+                                put("member_id", d["会员ID"] ?: "")
+                                put("amount", d["扣减金额"]?.toDoubleOrNull() ?: 0.0)
+                                put("table_id", d["桌台"] ?: "")
+                                put("note", d["备注"] ?: "")
+                            }
+                        },
+                        baseRev = vip?.rev?.toString(),
+                        onSuccess = { viewModel.dispatch(ModulesViewModel.Intent.LoadVip) }
                     )
+                    Text("余额不足将被拒绝，不会出现负余额；成功后写入到店/审计记录。", color = Sub, fontSize = 11.sp)
                 }
             }
             2 -> {
@@ -484,6 +518,7 @@ fun FinanceScreen() {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        FinanceInsightCard(fin?.insight)
         when (tab) {
             0 -> {
                 ModuleCard("今日三方勾兑 · ${recon?.date ?: "-"}") {
@@ -671,6 +706,7 @@ fun LossScreen() {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        LossInsightCard(loss?.insight)
         when (tab) {
             0 -> {
                 ModuleCard("损耗分析 · 按原因汇总") {
@@ -706,6 +742,7 @@ fun LossScreen() {
                             put("amount", d["金额"]?.toDoubleOrNull() ?: 100.0)
                             put("reason", d["原因"] ?: "操作失误")
                             put("reporter", AppModule.account ?: AppModule.role ?: "老板")
+                            put("pending", true)
                         }
                     },
                     baseRev = loss?.rev?.toString() ?: inv.rev,
@@ -721,6 +758,43 @@ fun LossScreen() {
                             "${r.date ?: "-"} ${r.ingName ?: "-"}",
                             "${r.qty ?: "-"} · ${r.reason ?: ""} · ${r.status ?: ""}"
                         )
+                    }
+                }
+                val pendingLoss = reports.filter {
+                    val s = it.status ?: ""
+                    s.isBlank() || s.contains("待")
+                }
+                ModuleCard("待审批报损（${pendingLoss.size}）") {
+                    if (pendingLoss.isEmpty()) {
+                        Text("无待审批报损 · 提交后在此审批扣库存", color = Sub, fontSize = 12.sp)
+                    }
+                    pendingLoss.take(20).forEach { r ->
+                        KvRow("${r.date ?: "-"} ${r.ingName ?: "-"}", "${r.qty ?: "-"} · ${r.reason ?: ""}")
+                        val rid = r.id
+                        if (rid != null && AppModule.canWrite()) {
+                            WriteActionButton(
+                                label = "审批扣库存",
+                                type = "loss.approve",
+                                summary = "报损#${rid} ${r.ingName ?: ""} × ${r.qty ?: 0} → 审批并扣库存",
+                                payload = buildJsonObject { put("id", rid) },
+                                baseRev = loss?.rev?.toString(),
+                                onSuccess = {
+                                    viewModel.dispatch(ModulesViewModel.Intent.LoadLoss)
+                                    invVm.dispatch(InventoryViewModel.InventoryIntent.Refresh)
+                                }
+                            )
+                            WriteActionButton(
+                                label = "驳回",
+                                type = "loss.reject",
+                                summary = "报损#${rid} → 驳回（不扣库存）",
+                                payload = buildJsonObject {
+                                    put("id", rid)
+                                    put("reason", "证据不足")
+                                },
+                                baseRev = loss?.rev?.toString(),
+                                onSuccess = { viewModel.dispatch(ModulesViewModel.Intent.LoadLoss) }
+                            )
+                        }
                     }
                 }
             }
@@ -757,7 +831,7 @@ fun EquipmentScreen() {
     ModuleScaffold(
         title = "设备",
         subtitle = when {
-            eq?.mockTemps == true -> "演示温度 · 可接真 IoT"
+            eq?.mockTemps == true -> "温度数据未接入 · 可接真 IoT"
             tab == 0 -> if (over.isNotEmpty()) "超温 ${over.size} 台 · 立即核查" else "冷柜温度"
             tab == 1 -> "用电能耗"
             else -> "维保计划"
@@ -785,10 +859,12 @@ fun EquipmentScreen() {
                 }
                 over.forEach { t ->
                     ModuleCard("${t.device} 温度曲线") {
-                        val series = t.history.map { it.toFloat() }.ifEmpty {
-                            listOf(4f, 4.2f, 4.5f, 5.1f, 5.8f, 6.4f, 6.9f, 7.1f, (t.temp ?: 7.2).toFloat())
+                        val series = t.history.map { it.toFloat() }
+                        if (series.size >= 2) {
+                            DualSparkline(series, color = FiveRed)
+                        } else {
+                            Text("暂无历史曲线（需 IoT 推送 eq_temp 时序）· 当前 ${t.temp}℃", color = Sub, fontSize = 12.sp)
                         }
-                        DualSparkline(series, color = FiveRed)
                         Text(
                             "超温上升 · 已 ${t.minutes ?: 0} 分钟 · 应 ≤${t.max}℃",
                             color = FiveRed,
@@ -819,7 +895,7 @@ fun EquipmentScreen() {
             }
             1 -> {
                 val sum = eq?.energySummary
-                ModuleCard(if (sum?.mock == true) "本月能耗费用（演示）" else "本月能耗费用") {
+                ModuleCard("本月能耗费用") {
                     if (sum == null || sum.items.isEmpty()) {
                         Text("暂无能耗汇总", style = MaterialTheme.typography.bodySmall)
                     } else {
@@ -867,8 +943,8 @@ fun EquipmentScreen() {
                 ModuleCard("设备维保到期") {
                     val list = eq?.maintain.orEmpty()
                     if (list.isEmpty()) {
-                        Text("中央空调 · 滤网建议 30 天周期（演示提示）", color = Sub, fontSize = 12.sp)
-                        Text("推送 eq_maintain 后显示真实维保台账。", color = Sub, fontSize = 11.sp)
+                        Text("暂无维保台账 · 可点上方「登记维保 / 报修」建立记录", color = Sub, fontSize = 12.sp)
+                        Text("推送 eq_maintain 后显示真实维保记录与到期提醒。", color = Sub, fontSize = 11.sp)
                     } else {
                         list.take(20).forEach { m ->
                             KvRow("${m.device} · ${m.kind}", "${m.operator} · ${m.ts}")
@@ -942,6 +1018,7 @@ fun ReviewScreen() {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        ReviewInsightCard(rev?.insight)
         when (tab) {
             0 -> {
                 ModuleCard("评分概览") {
@@ -1026,6 +1103,204 @@ fun ReviewScreen() {
                     }
                 }
             }
+        }
+    }
+}
+
+/** SI 外卖洞察卡：渠道概览 + 对账差异闭环 + 差评归因（可联动菜品矩阵） */
+@Composable
+private fun TakeoutInsightCard(ins: TakeoutInsightDto?) {
+    if (ins == null) return
+    ModuleCard("SI · 外卖经营") {
+        ins.overview?.let { o ->
+            KvRow("营收 / 结算", "¥${o.gross.toInt()} / ¥${o.settle.toInt()}")
+            KvRow("单量 / 客单", "${o.orders} 单 · ¥${o.avgOrder.toInt()}")
+            o.feeRate?.let { KvRow("平台扣点率", "$it%") }
+            KvRow("在途", "${o.open} 单")
+            if (o.byPlatform.isNotEmpty()) {
+                KvRow(
+                    "平台分布",
+                    o.byPlatform.entries.joinToString(" · ") { "${it.key} ${it.value.orders}单/¥${it.value.amount.toInt()}" }
+                )
+            }
+        }
+        ins.reconcile?.let { r ->
+            KvRow(
+                "对账",
+                if (r.clean) "已一致" else "差异 ${r.pending.size} 笔 · 合计 ¥${r.diffSum.toInt()}"
+            )
+            r.byStatus.entries.take(4).forEach { (k, v) -> KvRow("· $k", "$v 笔") }
+        }
+        ins.reviews?.let { rv ->
+            if (rv.total > 0) {
+                KvRow("差评", "${rv.bad} 条 · 待回 ${rv.replyPending}")
+                if (rv.reasons.isNotEmpty()) {
+                    KvRow("高频原因", rv.reasons.entries.sortedByDescending { it.value }.take(4).joinToString(" · ") { "${it.key}${it.value}" })
+                }
+                if (rv.dishFlags.isNotEmpty()) {
+                    KvRow("涉及菜品", rv.dishFlags.entries.sortedByDescending { it.value }.take(4).joinToString(" · ") { "${it.key}×${it.value}" })
+                    Text("可在「经营分析·菜品」矩阵对照是否为瘦狗/问题菜", color = Sub, fontSize = 11.sp)
+                }
+            } else {
+                KvRow("差评", "暂无差评样本")
+            }
+        }
+        ins.advice.forEach {
+            val alert = it.contains("差异") || it.contains("差评") || it.contains("在途")
+            Text(
+                "· $it",
+                color = if (alert) FiveRed else Ink,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
+/** SI 会员洞察卡：资产 + 券状态机 + 生日 + 到店 */
+@Composable
+private fun VipInsightCard(ins: VipInsightDto?) {
+    if (ins == null) return
+    ModuleCard("SI · 会员资产") {
+        ins.assets?.let { a ->
+            KvRow("会员数 / 本月新增", "${a.members} / ${a.newThisMonth}")
+            KvRow("储值总额", "¥${a.storedTotal.toInt()} · ${a.withBalance} 人有余额")
+            if (a.byLevel.isNotEmpty()) {
+                KvRow("等级分布", a.byLevel.entries.joinToString(" · ") { "${it.key} ${it.value}" })
+            }
+        }
+        ins.coupons?.let { c ->
+            KvRow("券", "共 ${c.total} · 待核销负债 ¥${c.liability.toInt()} · 已用 ¥${c.usedValue.toInt()}")
+            if (c.byStatus.isNotEmpty()) {
+                KvRow("券状态", c.byStatus.entries.joinToString(" · ") { "${it.key} ${it.value}" })
+            }
+            if (c.expiring7d > 0 || c.expired > 0) {
+                KvRow("临期/过期", "${c.expiring7d} 张 / ${c.expired} 张")
+            }
+        }
+        ins.recharge?.let { r ->
+            KvRow("储值充值", "${r.count} 笔 · ¥${r.total.toInt()}" + if (r.bigCount > 0) " · 大额 ${r.bigCount}" else "")
+        }
+        ins.birthday?.let { b ->
+            if (b.soon > 0) KvRow("本周生日", "${b.soon} 人 · ${b.names.joinToString("、")}")
+        }
+        ins.visits?.let { v -> KvRow("到店识别", "${v.count} 次 · ${v.uniqueMembers} 人") }
+        ins.advice.forEach {
+            val warn = it.contains("临期") || it.contains("过期") || it.contains("大额")
+            Text("· $it", color = if (warn) FiveRed else Ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+        }
+    }
+}
+
+/** SI 财务洞察卡：发票额度 + 税务待申报 + 现金流 + 分账冻结 */
+@Composable
+private fun FinanceInsightCard(ins: FinanceInsightDto?) {
+    if (ins == null) return
+    ModuleCard("SI · 财务健康") {
+        ins.invoices?.let { v ->
+            KvRow(
+                "发票额度",
+                "已用 ¥${v.issuedThisMonth.toInt()} / ¥${v.quota.toInt()} · 剩 ¥${v.remaining.toInt()}" +
+                    (v.usagePct?.let { "（$it%）" } ?: "")
+            )
+            if (v.byDirection.isNotEmpty()) {
+                KvRow("发票方向", v.byDirection.entries.joinToString(" · ") { "${it.key} ¥${it.value.toInt()}" })
+            }
+        }
+        ins.tax?.let { t ->
+            KvRow("待申报", "${t.pendingCount} 项 · ¥${t.payable.toInt()}")
+            if (t.pending.isNotEmpty()) {
+                KvRow("税种", t.pending.joinToString(" · ") { "${it.kind} ¥${it.amount.toInt()}" })
+            }
+        }
+        ins.cashflow?.let { c ->
+            KvRow("现金流", "收 ¥${c.income.toInt()} · 支 ¥${c.expense.toInt()} · 净 ¥${c.net.toInt()}")
+        }
+        ins.split?.let { s ->
+            KvRow("分账", "共 ${s.count} · 冻结 ${s.frozenCount} 笔 ¥${s.frozenAmount.toInt()}" + (s.frozenUntil?.let { "（至 $it）" } ?: ""))
+        }
+        ins.advice.forEach {
+            val warn = it.contains("超支") || it.contains("额度") || it.contains("待申报") || it.contains("为负")
+            Text("· $it", color = if (warn) FiveRed else Ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+        }
+    }
+}
+
+/** SI 损耗洞察卡：损耗率 + 归因 + 报损审批 + 盘点差异 */
+@Composable
+private fun LossInsightCard(ins: LossInsightDto?) {
+    if (ins == null) return
+    ModuleCard("SI · 损耗与报损") {
+        KvRow("本月损耗金额", "¥${ins.totalAmount.toInt()} · ${ins.records} 笔")
+        ins.lossRatePct?.let { r ->
+            val red = r > 1.5
+            Text(
+                "损耗率 $r%" + if (red) "（超红线 1.5%）" else if (r > 1) "（高于 1%）" else "",
+                color = if (r > 1) FiveRed else Ink,
+                fontWeight = FontWeight.SemiBold, fontSize = 12.sp
+            )
+        }
+        if (ins.byReasonAmount.isNotEmpty()) {
+            KvRow(
+                "按原因",
+                ins.byReasonAmount.entries.sortedByDescending { it.value }.take(4)
+                    .joinToString(" · ") { "${it.key} ¥${it.value.toInt()}" }
+            )
+        }
+        if (ins.topIngredients.isNotEmpty()) {
+            KvRow(
+                "高损原料",
+                ins.topIngredients.take(4).joinToString(" · ") { "${it.name} ¥${it.amount.toInt()}" } +
+                    (ins.topSharePct?.let { "（首位占 $it%）" } ?: "")
+            )
+        }
+        ins.approvals?.let { a ->
+            KvRow("报损审批", "待审 ${a.pending} · 通过 ${a.approved} · 驳回 ${a.rejected}" + if (a.bigPending > 0) " · 大额 ${a.bigPending}" else "")
+        }
+        ins.inventory?.let { iv ->
+            if (iv.diffCount > 0) {
+                KvRow("盘点差异", "${iv.diffCount} 项 · 盘亏 ${iv.lossQty} / 盘盈 ${iv.overQty}")
+            }
+        }
+        ins.advice.forEach {
+            val warn = it.contains("超") || it.contains("待审") || it.contains("≥¥500") || it.contains("重点") || it.contains("高")
+            Text("· $it", color = if (warn) FiveRed else Ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+        }
+    }
+}
+
+/** SI 口碑洞察卡：评分聚合 + 差评归因 + 改进闭环 + 好评素材 */
+@Composable
+private fun ReviewInsightCard(ins: ReviewInsightDto?) {
+    if (ins == null) return
+    ModuleCard("SI · 口碑健康") {
+        ins.scores?.let { s ->
+            KvRow("平台综合评分", s.overall?.let { "★$it" } ?: "—")
+            s.localAvg?.let { KvRow("本店评价均分", "★$it") }
+            if (s.byPlatform.isNotEmpty()) {
+                KvRow("平台", s.byPlatform.joinToString(" · ") { "${it.name} ★${it.rating ?: "-"}（${it.orders ?: 0}单）" })
+            }
+        }
+        ins.bad?.let { b ->
+            KvRow("差评", "${b.count} 条")
+            if (b.reasons.isNotEmpty()) {
+                KvRow("高频原因", b.reasons.entries.sortedByDescending { it.value }.take(4).joinToString(" · ") { "${it.key}${it.value}" })
+            }
+            if (b.dishFlags.isNotEmpty()) {
+                KvRow("涉及菜品", b.dishFlags.entries.sortedByDescending { it.value }.take(4).joinToString(" · ") { "${it.key}×${it.value}" })
+            }
+            b.items.take(3).forEach { KvRow("· ${it.source ?: "-"} ★${it.rating}", it.content.take(30)) }
+        }
+        ins.improve?.let { im ->
+            KvRow("改进闭环", "共 ${im.total} · 未闭环 ${im.open}" + if (im.overdue.isNotEmpty()) " · 逾期 ${im.overdue.size}" else "")
+            im.byStatus.entries.forEach { (k, v) -> KvRow("· $k", "$v 项") }
+        }
+        ins.good?.let { g ->
+            KvRow("好评素材", "${g.count} 条可入库 · 已审核 ${g.quotesApproved}/${g.quotesTotal}")
+        }
+        ins.advice.forEach {
+            val warn = it.contains("差评") || it.contains("未闭环") || it.contains("评分") || it.contains("提升")
+            Text("· $it", color = if (warn) FiveRed else Ink, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
         }
     }
 }

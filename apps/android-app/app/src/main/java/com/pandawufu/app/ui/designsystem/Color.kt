@@ -1,14 +1,25 @@
 package com.pandawufu.app.ui.designsystem
 
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-// 视觉 token 全量（取自原型 熊猫五福App原型.html CSS 变量）
-val Ink = Color(0xFF1A1A1A)          // --ink 主色
-val PageBg = Color(0xFFEEF1F5)       // --bg 页面底
+// 视觉 token 全量（对齐现代 iOS/原生 App 观感）
+val Ink = Color(0xFF17181C)          // 主色（近黑）
+val PageBg = Color(0xFFF3F5F9)       // 页面底（柔和中性）
 val CardBg = Color(0xFFFFFFFF)       // 卡片
-val Txt = Color(0xFF2B2B2B)          // --txt 正文
-val Sub = Color(0xFF8A8F98)          // --sub 次要文字
-val Line = Color(0xFFECEEF2)         // --line 分隔线
+val CardTop = Color(0xFFFFFFFF)      // 卡片渐变上
+val CardBottom = Color(0xFFFBFCFE)   // 卡片渐变下
+val CardHairline = Color(0xFFECEFF5) // 卡片发丝边
+val Txt = Color(0xFF23252B)          // 正文
+val Sub = Color(0xFF8A909C)          // 次要文字
+val Line = Color(0xFFE9ECF2)         // 分隔线
+
+/** 页面背景渐变（顶部更亮，营造层次） */
+val AppBgBrush = Brush.verticalGradient(listOf(Color(0xFFF7F9FD), PageBg))
+
+// 品牌主色（粉紫渐变）
+val Brand = Color(0xFF7C5CFF)
+val BrandSoft = Color(0xFFEDE7FF)
 
 // AI 渐变（FAB / AI 相关元素）
 val AiPink = Color(0xFFF48FB1)
@@ -18,7 +29,7 @@ val AiPurple = Color(0xFF9B6BBF)
 val FiveRed = Color(0xFFE8584A)
 val FiveBlack = Color(0xFF3A3A3A)
 val FiveYellow = Color(0xFFF2B233)
-val FiveGreen = Color(0xFF5BA85B)
+val FiveGreen = Color(0xFF3FA25A)
 val FivePurple = Color(0xFF9B6BBF)
 
 // 圆角 token（dp）：14 / 20 / 26

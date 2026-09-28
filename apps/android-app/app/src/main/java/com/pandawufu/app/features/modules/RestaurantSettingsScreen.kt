@@ -145,6 +145,14 @@ fun RestaurantSettingsScreen(onOpen: (String) -> Unit = {}) {
         selectedPill = tab,
         onPill = { tab = it }
     ) {
+        ConfigHealthCard(
+            tables = invState.posTables,
+            dishes = invState.dishes,
+            openHour = openHour,
+            closeHour = closeHour,
+            defaultCat = defaultCat,
+            flourSafe = flourSafe
+        )
         when (tab) {
             0 -> StoreProfileSection(
                 store = store,
@@ -510,7 +518,7 @@ private fun OpsPrefsSection(
             }
         }
     }
-    ModuleCard("库存默认（示例）") {
+    ModuleCard("库存安全线默认") {
         Text("全局面粉安全线；其它原料到产品库逐条改。", color = Sub, fontSize = 12.sp)
         OutlinedTextField(
             value = flourSafe, onValueChange = onFlour,
@@ -1190,4 +1198,35 @@ private fun TableEditDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
+}
+
+/** SI 门店配置体检：桌台/营业偏好/菜单挂菜谱覆盖率 */
+@Composable
+private fun ConfigHealthCard(
+    tables: List<PosTableDto>,
+    dishes: List<DishDto>,
+    openHour: String,
+    closeHour: String,
+    defaultCat: String,
+    flourSafe: String
+) {
+    val seats = tables.sumOf { it.seats ?: 0 }
+    val byZone = tables.groupingBy { it.zone?.takeIf { z -> z.isNotBlank() } ?: "未分区" }.eachCount()
+    val linked = dishes.count {
+        !it.skuId.isNullOrBlank() || !it.recipeLink.isNullOrBlank() || !it.baobenId.isNullOrBlank()
+    }
+    val cov = if (dishes.isEmpty()) null else linked * 100 / dishes.size
+    com.pandawufu.app.ui.designsystem.PandaCard {
+        Text("SI · 门店配置体检", fontWeight = FontWeight.Bold, color = Ink)
+        KvRow("桌台", "${tables.size} 张 · 座位 $seats · " + byZone.entries.joinToString(" ") { "${it.key}${it.value}" })
+        KvRow("营业时段", "$openHour - $closeHour · 默认菜类 $defaultCat")
+        KvRow("面粉安全线", flourSafe)
+        KvRow("菜单挂菜谱", "${dishes.size} 道 · 已挂 $linked" + (cov?.let { "（覆盖 $it%）" } ?: ""))
+        if (tables.isEmpty()) {
+            Text("· 未配桌台：收银/预订无法开台", color = androidx.compose.ui.graphics.Color(0xFFE8584A), fontSize = 12.sp)
+        }
+        if (cov != null && cov < 80) {
+            Text("· 菜谱覆盖率 ${cov}%：未挂菜谱的菜无法自动扣料/算成本", color = androidx.compose.ui.graphics.Color(0xFFE8584A), fontSize = 12.sp)
+        }
+    }
 }
