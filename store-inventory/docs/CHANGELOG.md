@@ -271,3 +271,25 @@
   并还原 `renderOrders()` 末尾两行、`syncAllOrderRecv()` 末尾的 `syncPlanStatus()`、`init()` 中的 `autoRestockPlan()`、
   结构测算页 `syncCalc/calcStatText` 与 `#tab-calc` 工具条/页尾文案；`DB.plans/restock/dishAlias` 为可选字段，不删亦可正常运行
 
+## [2026-09-28] T1 - Git 基线提交（建立回档点）
+
+- 背景: 架构收敛（ADR-002 去 Python）与验证体系修复累计产生 **173 个未提交文件**，无任何回档点，
+  无法区分改动责任人，也无法回滚
+- 决策: 不混合成一次大提交，按主题拆为 **9 次单一主题提交**（`217046d..5efbfe9`），工作区恢复干净：
+  1. `c799e74` 验证体系修复（平价测试 6/6 + 4/4 + 9/9、`_python.js` 绕行 Windows python3 别名）
+  2. `9405e29` 规范与基线（ADR-002、迁移颗粒度规范、FP-进货入库基线、忠实性映射表、CI R14 守卫）
+  3. `6c422d5` BFF 存量演进（模块路由、算法注册/执行器、actions/agent/report、消费者、契约脚本）
+  4. `8b2a711` BFF 新增能力（SI 智能经营 + AI Agent + 工作台/收件箱/策略/应用发布）
+  5. `5387731` KMP 共享层（SI/工作台 DTO、Repository/ViewModel、网络层）
+  6. `c69fab0` admin-web（应用发布页、rowKey 工具、favicon/菜单/API 类型、vite 配置）
+  7. `1e63486` Android（SI 工作台/推送/收件箱、设计系统、导航与离线缓存）
+  8. `867d53d` iOS（SI 与收件箱视图、入口与首页）
+  9. `5efbfe9` 脚本与旧物（dev-up / 局域网联调 / e2e / 演示数据清理 / old 启动与比价批处理）
+- 影响范围: 仅版本历史，未改动任何文件内容
+- AI避坑提示:
+  - **回档锚点** = `217046d`（T1 之前）；此后每一批工作的改动都必须能单独回滚到某次提交
+  - 后续每批工作结束前，`git status` 必须干净；禁止在脏工作区上开始下一批任务
+  - 提交粒度按主题，不按时间；一次提交只讲一件事
+- 回档方案: `git reset --hard 217046d`（丢弃 T1 全部基线提交，文件回到未提交状态需配合 `git checkout`）；
+  单批回滚用 `git revert <sha>`
+
