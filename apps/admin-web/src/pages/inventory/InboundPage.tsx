@@ -3,6 +3,7 @@ import { rk } from '../../utils/rowKey'
 import {
   Button,
   Card,
+  Col,
   DatePicker,
   Drawer,
   Empty,
@@ -10,8 +11,10 @@ import {
   Input,
   InputNumber,
   Modal,
+  Row,
   Select,
   Space,
+  Statistic,
   Table,
   Tag,
   Tooltip,
@@ -30,12 +33,13 @@ import type {
   AcceptStandard,
   IngItem,
   InventoryDoc,
+  InventoryLine,
   RecvAcceptRecord,
 } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
 import MockAlert from '../kitchen/components/MockAlert'
 import { MOCK_RECV } from './mock'
-import { docDebt, docPaid, formatLinesSummary } from './utils'
+import { docDebt, docPaid, formatLinesSummary, lineAmount } from './utils'
 import { COLORS } from '../../theme'
 
 function asDoc(r: unknown): InventoryDoc | null {
@@ -162,6 +166,25 @@ export default function InboundPage() {
         .sort((a, b) => String(b.date).localeCompare(String(a.date))),
     [docs, supplier],
   )
+
+  /**
+   * FP-RECV-10 顶部汇总卡。口径对齐旧版 renderRecvKpi()（旧 HTML:1502-1511）：
+   *   累计应付 = Σ 全部进货单 payable；累计实付 = Σ 已付；欠供应商 = 应付 − 实付
+   *   「本月」= 近 30 天（旧版 daysAgo(29) 起，含今日），非自然月
+   * 注意：用全部 docs，不随供应商筛选变化（与旧版一致）。
+   */
+  const kpi = useMemo(() => {
+    const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
+    const pay = r2(docs.reduce((a, d) => a + (Number(d.payable) || 0), 0))
+    const got = r2(docs.reduce((a, d) => a + docPaid(d), 0))
+    const cutoff = dayjs().subtract(29, 'day').format('YYYY-MM-DD')
+    const mPay = r2(
+      docs
+        .filter((d) => String(d.date ?? '') >= cutoff)
+        .reduce((a, d) => a + (Number(d.payable) || 0), 0),
+    )
+    return { monthPayable: mPay, totalPayable: pay, totalPaid: got, debt: r2(pay - got) }
+  }, [docs])
 
   const drawerAccepts = useMemo(() => {
     if (!drawerDoc) return []
@@ -326,9 +349,105 @@ export default function InboundPage() {
     },
   ]
 
+  /** FP-RECV-11 明细行内展开：逐项 名称/数量/单价/金额（对齐旧版 renderRecv() :1519-1521） */
+  const lineCols: ColumnsType<InventoryLine> = [
+    { title: '原料', key: 'name', render: (_, l) => ingName(String(l.ing ?? l.name ?? '')) },
+    {
+      title: '订购量',
+      dataIndex: 'qty',
+      width: 90,
+      align: 'right',
+      render: (v) => (v == null ? '-' : v),
+    },
+    {
+      title: '实收量',
+      key: 'recvQty',
+      width: 90,
+      align: 'right',
+      render: (_, l) => (l.recvQty == null ? '-' : l.recvQty),
+    },
+    {
+      title: '单价',
+      dataIndex: 'price',
+      width: 90,
+      align: 'right',
+      render: (v) => (v == null ? '-' : `¥${v}`),
+    },
+    {
+      title: '金额',
+      key: 'amount',
+      width: 100,
+      align: 'right',
+      render: (_, l) => `¥${lineAmount(l)}`,
+    },
+  ]
+
+  const expandedRowRender = (doc: InventoryDoc) => {
+    const lines = doc.lines ?? []
+    if (!lines.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该单无明细行" />
+    const total = Math.round(lines.reduce((a, l) => a + lineAmount(l), 0) * 100) / 100
+    return (
+      <Table<InventoryLine>
+        size="small"
+        rowKey={rk}
+        columns={lineCols}
+        dataSource={lines}
+        pagination={false}
+        summary={() => (
+          <Table.Summary.Row>
+            <Table.Summary.Cell index={0}>
+              <Typography.Text type="secondary">共 {lines.length} 项</Typography.Text>
+            </Table.Summary.Cell>
+            <Table.Summary.Cell index={1} />
+            <Table.Summary.Cell index={2} />
+            <Table.Summary.Cell index={3}>
+              <Typography.Text type="secondary">合计</Typography.Text>
+            </Table.Summary.Cell>
+            <Table.Summary.Cell index={4} align="right">
+              <Typography.Text strong>¥{total}</Typography.Text>
+            </Table.Summary.Cell>
+          </Table.Summary.Row>
+        )}
+      />
+    )
+  }
+
   return (
     <div>
       {isMock && <MockAlert endpoint="/api/snapshot/latest · data.recv" />}
+      {/* FP-RECV-10 顶部汇总卡（口径同旧版 renderRecvKpi()，「本月」= 近 30 天） */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="本月进货应付"
+              prefix="¥"
+              value={kpi.monthPayable}
+              suffix={<span style={{ fontSize: 12 }}>（近30天）</span>}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic title="累计应付" prefix="¥" value={kpi.totalPayable} />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic title="累计实付" prefix="¥" value={kpi.totalPaid} />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="欠供应商"
+              prefix="¥"
+              value={kpi.debt}
+              valueStyle={{ color: kpi.debt > 0.01 ? COLORS.red : COLORS.green }}
+            />
+          </Card>
+        </Col>
+      </Row>
       <Card
         title="进货入库（JH 进货单）"
         extra={
@@ -371,6 +490,11 @@ export default function InboundPage() {
             pagination={{ pageSize: 15 }}
             scroll={{ x: 1100 }}
             rowClassName={(r) => (docDebt(r) > 0.01 ? 'ant-table-row-warning' : '')}
+            /* FP-RECV-11 明细行内展开：逐项 名称/数量/单价/金额 */
+            expandable={{
+              expandedRowRender,
+              rowExpandable: (r) => (r.lines?.length ?? 0) > 0,
+            }}
           />
         )}
       </Card>

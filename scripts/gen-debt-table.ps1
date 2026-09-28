@@ -24,6 +24,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $dir  = Join-Path $root 'docs/迁移基线'
 $out  = Join-Path $dir '欠账总表.md'
+$spec = Join-Path $root 'docs/迁移颗粒度规范.md'   # 附录 A 表格也由本脚本重写
 
 # ---------------------------------------------------------------- 波次定义
 $waves = [ordered]@{
@@ -45,6 +46,14 @@ $pageName = @{
 }
 # 同页内排序覆盖（默认按 FP 序号升序）
 $numOverride = @{ 'FP-SET-01' = 99 }   # 模块状态总览属锦上添花，排本页末位
+
+# 附录 A 的页面顺序与状态列文案
+$pageOrder  = @('RECV','PO','ING','DISH','SALE','CALC','PRICE','DASH','SET')
+$pageStatus = @{
+  RECV='🟡 进行中（替代模式）'; PO='🟡 待人工复核'; ING='🟡 待人工复核'; DISH='🟡 待人工复核'
+  SALE='🟡 待人工复核 · ⚠️ 整页缺失'; CALC='🟡 待人工复核 · ⚠️ 半页缺失'; PRICE='🟡 待人工复核'
+  DASH='🟡 待人工复核 · ⚠️ MOCK 掩盖缺口'; SET='🟡 待人工复核 · ⚠️ 零移植'
+}
 
 # ------------------------------------------------- FP → (波次, 建议角色, 阻塞/依赖)
 $m = @{}
@@ -174,8 +183,11 @@ M 'FP-SET-17' 'W4' 'BFF(动作)+前端' '最高危：强制先自动备份'
 # ---------------------------------------------------------------- 解析基线
 $items = @()
 $statTot = @{ total=0; up=0; eq=0; todo=0; dead=0 }
+$pageStat = @{}   # page => @{ file=; total=; up=; eq=; todo=; dead= }
+foreach ($k in $pageName.Keys) { $pageStat[$k] = @{ file=''; total=0; up=0; eq=0; todo=0; dead=0 } }
 
 Get-ChildItem (Join-Path $dir 'FP-*.md') | Sort-Object Name | ForEach-Object {
+  $rel = 'docs/迁移基线/' + $_.Name
   $rows = Get-Content $_.FullName -Encoding UTF8 | Where-Object { $_ -match '^\|\s*FP-' }
   foreach ($r in $rows) {
     $cells = ($r -split '(?<!\\)\|')
@@ -183,16 +195,18 @@ Get-ChildItem (Join-Path $dir 'FP-*.md') | Sort-Object Name | ForEach-Object {
     $id   = $cells[1].Trim()
     $name = $cells[2].Trim()
     $st   = $cells[5].Trim()
-    $statTot.total++
+    $page = ($id -replace '^FP-([A-Z]+)-\d+$','$1')
+    if (-not $pageStat.ContainsKey($page)) { Write-Warning "未知页面前缀：$id"; continue }
+
+    $statTot.total++; $pageStat[$page].total++; $pageStat[$page].file = $rel
     $isTodo = $false
-    if    ($st -match '⬆️') { $statTot.up++ }
-    elseif($st -match '🔄') { $statTot.eq++ }
-    elseif($st -match '⚰️') { $statTot.dead++ }
-    elseif($st -match '⬜') { $statTot.todo++; $isTodo = $true }
+    if    ($st -match '⬆️') { $statTot.up++  ; $pageStat[$page].up++   }
+    elseif($st -match '🔄') { $statTot.eq++  ; $pageStat[$page].eq++   }
+    elseif($st -match '⚰️') { $statTot.dead++; $pageStat[$page].dead++ }
+    elseif($st -match '⬜') { $statTot.todo++; $pageStat[$page].todo++; $isTodo = $true }
     else { Write-Warning "无四态标注：$id" }
     if (-not $isTodo) { continue }
 
-    $page = ($id -replace '^FP-([A-Z]+)-\d+$','$1')
     if (-not $m.ContainsKey($id)) { Write-Warning "未分配波次：$id"; continue }
     $items += [pscustomobject]@{
       Id=$id; Name=$name; Page=$page; Num=[int]($id -replace '^FP-[A-Z]+-','')
@@ -200,6 +214,32 @@ Get-ChildItem (Join-Path $dir 'FP-*.md') | Sort-Object Name | ForEach-Object {
     }
   }
 }
+
+# -------------------------------------------- 校验：各基线文件「## 汇总」是否与行标注一致
+# （T2 就栽在这里：人工写的汇总数与行标注不符。宁可报警，不要静默漂移。）
+$drift = 0
+Get-ChildItem (Join-Path $dir 'FP-*.md') | Sort-Object Name | ForEach-Object {
+  $txt  = Get-Content $_.FullName -Raw -Encoding UTF8
+  $rows = Get-Content $_.FullName -Encoding UTF8 | Where-Object { $_ -match '^\|\s*FP-' }
+  $cnt  = @{ n=$rows.Count; a=0; b=0; c=0; d=0 }
+  foreach ($r in $rows) {
+    $st = ($r -split '(?<!\\)\|')[5].Trim()
+    if    ($st -match '⬆️') { $cnt.a++ }
+    elseif($st -match '🔄') { $cnt.b++ }
+    elseif($st -match '⬜') { $cnt.c++ }
+    elseif($st -match '⚰️') { $cnt.d++ }
+  }
+  $s = @{ n=-1; a=-1; c=-1 }
+  if ($txt -match '(?s)## 汇总.*?\|\s*FP 总数\s*\|\s*(\d+)')   { $s.n = [int]$Matches[1] }
+  if ($txt -match '(?s)## 汇总.*?\|\s*⬆️ 已移植\s*\|\s*(\d+)') { $s.a = [int]$Matches[1] }
+  if ($txt -match '(?s)## 汇总.*?\|\s*⬜ 待补\s*\|\s*(\d+)')   { $s.c = [int]$Matches[1] }
+  if ($s.n -ne $cnt.n -or $s.a -ne $cnt.a -or $s.c -ne $cnt.c) {
+    $drift++
+    Write-Warning ("汇总漂移 {0}：汇总记 总{1}/⬆️{2}/⬜{3}，行标注实为 总{4}/⬆️{5}/⬜{6}" -f `
+      $_.Name, $s.n, $s.a, $s.c, $cnt.n, $cnt.a, $cnt.c)
+  }
+}
+if ($drift) { Write-Host ("警告：{0} 份基线的汇总数与行标注不一致，请修正汇总表" -f $drift) -ForegroundColor Yellow }
 
 # ---------------------------------------------------------------- 排序与卡号
 $ordered = @()
@@ -215,6 +255,8 @@ foreach ($w in $waves.Keys) {
 
 # ---------------------------------------------------------------- 渲染
 $utf8 = New-Object System.Text.UTF8Encoding($false)
+# 反引号在双引号里是转义符，必须这样取，否则 -f 拼接时会被吃掉
+$bt = '`'
 $L = New-Object System.Collections.Generic.List[string]
 function Add([string]$s='') { $L.Add($s) }
 
@@ -254,7 +296,7 @@ foreach ($w in $waves.Keys) {
   Add '|---|---|---|---|---|---|---|'
   foreach ($it in $grp) {
     $dep = if ($it.Dep) { $it.Dep } else { '—' }
-    Add ("| `{0}` | {1} | {2} {3} | {4} | 待指派 | {5} | {6} |" -f $it.Card, $it.Id, $it.Page, $pageName[$it.Page], $it.Name, $it.Role, $dep)
+    Add ("| $bt{0}$bt | {1} | {2} {3} | {4} | 待指派 | {5} | {6} |" -f $it.Card, $it.Id, $it.Page, $pageName[$it.Page], $it.Name, $it.Role, $dep)
   }
   Add ''
 }
@@ -278,15 +320,47 @@ Add '- 平价测试全绿属另一条门禁，不能替代本表。'
 
 $text = $L -join "`n"
 
+# ------------------------------------------------- 同步重写规范的附录 A 表格
+$A = New-Object System.Collections.Generic.List[string]
+$A.Add('<!-- APPENDIX-A:BEGIN 本表由 scripts/gen-debt-table.ps1 自动生成，请勿手工编辑 -->')
+$A.Add('| 源页面 | 清单文件 | FP 数 | ⬆️ | 🔄 | ⬜ | ⚰️ | 状态 |')
+$A.Add('|---|---|---|---|---|---|---|---|')
+foreach ($p in $pageOrder) {
+  $s = $pageStat[$p]
+  $A.Add(("| {0} {1} | $bt{2}$bt | {3} | {4} | {5} | {6} | {7} | {8} |" -f `
+    $pageName[$p], $p, $s.file, $s.total, $s.up, $s.eq, $s.todo, $s.dead, $pageStatus[$p]))
+}
+$A.Add(("| **合计（9 页）** | — | **{0}** | **{1}** | **{2}** | **{3}** | **{4}** | ⬜ 欠账 {3} 项 |" -f `
+  $statTot.total, $statTot.up, $statTot.eq, $statTot.todo, $statTot.dead))
+$A.Add('<!-- APPENDIX-A:END -->')
+$appendix = $A -join "`n"
+
+$specRaw = Get-Content $spec -Raw -Encoding UTF8
+$specText = $null
+if ($specRaw -match '(?s)(<!-- APPENDIX-A:BEGIN[^>]*-->.*?<!-- APPENDIX-A:END -->)') {
+  $specText = $specRaw -replace [regex]::Escape($Matches[1]), $appendix
+} else {
+  Write-Warning "未找到附录 A 标记块，跳过规范同步"
+  $specText = $specRaw
+}
+$specText = $specText -replace "`r`n","`n"
+
 if ($Check) {
+  $ok = $true
   if (Test-Path $out) {
-    $cur = (Get-Content $out -Raw -Encoding UTF8) -replace "`r`n","`n"
-    if ($cur.Trim() -eq $text.Trim()) { Write-Host 'CHECK OK: 欠账总表与基线一致' -ForegroundColor Green; exit 0 }
-    else { Write-Host 'CHECK FAIL: 欠账总表已过期，请重新生成' -ForegroundColor Red; exit 1 }
-  } else { Write-Host 'CHECK FAIL: 欠账总表不存在' -ForegroundColor Red; exit 1 }
+    $cur = ((Get-Content $out -Raw -Encoding UTF8) -replace "`r`n","`n")
+    if ($cur.Trim() -ne $text.Trim()) { Write-Host 'CHECK FAIL: 欠账总表已过期，请重新生成' -ForegroundColor Red; $ok = $false }
+  } else { Write-Host 'CHECK FAIL: 欠账总表不存在' -ForegroundColor Red; $ok = $false }
+  if ($specText.Trim() -ne ($specRaw -replace "`r`n","`n").Trim()) {
+    Write-Host 'CHECK FAIL: 规范附录 A 已过期，请重新生成' -ForegroundColor Red; $ok = $false
+  }
+  if ($ok) { Write-Host 'CHECK OK: 欠账总表与规范附录 A 均与基线一致' -ForegroundColor Green; exit 0 }
+  exit 1
 }
 
 [System.IO.File]::WriteAllText($out, ($text + "`n"), $utf8)
+[System.IO.File]::WriteAllText($spec, $specText, $utf8)
 Write-Host ("已生成：{0}" -f $out)
+Write-Host ("已同步：{0} 附录 A" -f $spec)
 Write-Host ("基线 {0} 项 → ⬆️ {1} / ⬜ {2}；欠账卡 {3} 张" -f $statTot.total, $statTot.up, $statTot.todo, $ordered.Count)
 foreach ($w in $waves.Keys) { Write-Host ("  {0}: {1}" -f $w, ($ordered | Where-Object { $_.W -eq $w }).Count) }

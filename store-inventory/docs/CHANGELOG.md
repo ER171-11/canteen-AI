@@ -301,6 +301,29 @@
   - 全部清单为 AI 抽取，**未经人工复核**，按规范 §2.2 复核签字后才算正式基线
 - 回档方案: 删除 `docs/迁移基线/FP-{采购管理,原料库存,菜品配方,销售收银,结构测算,外接比价,经营概览,设置}.md` 并还原附录 A 表格
 
+## [2026-09-28] T4 - 进货入库只读项补齐（FP-RECV-10 / FP-RECV-11）
+
+- 背景: T2/T3 只清点了欠账，尚未真正补上任何功能。按「只读 > 写操作、老板每日必用 > 偶尔使用」
+  的排序原则，先补成本最低、零红线的两个只读项
+- 决策: 只改 `apps/admin-web/src/pages/inventory/InboundPage.tsx`，**不动后端、不写库、不改算法**
+  1. **FP-RECV-10 顶部汇总卡**（4 张 `Statistic`）：本月进货应付 / 累计应付 / 累计实付 / 欠供应商
+     - 口径**严格对齐**旧版 `renderRecvKpi()`（旧 HTML:1502-1511）：
+       `累计应付 = Σ payable`；`累计实付 = Σ payments.amount`；`欠供应商 = 应付 − 实付`
+     - ⚠️ **「本月」是近 30 天**（旧版 `daysAgo(29)` 起，含今日），**不是自然月**
+     - KPI 用**全部 `docs`**，不随供应商筛选变化（与旧版一致）
+  2. **FP-RECV-11 明细行内展开**：Table 加 `expandable`，逐项显示 原料/订购量/实收量/单价/金额 + 合计行
+     （对齐旧版 `renderRecv()` :1519-1521 的逐项渲染；原实现被 `ellipsis` 截断为 `…`）
+- 影响范围: 仅 `apps/admin-web/src/pages/inventory/InboundPage.tsx`（新增 `Row/Col/Statistic` 与
+  `InventoryLine` 导入、`kpi` useMemo、`lineCols`、`expandedRowRender`）
+- 验证: `npx tsc --noEmit` 无错；`npm run build` 通过（仅有既存的 chunk >500kB 告警）。
+  **未做浏览器视觉校验**，且「数值与旧系统口径一致」需人工拿真实数据比对
+- AI避坑提示:
+  - 改任何 KPI 前先回看旧版 `renderRecvKpi()`——「本月」= 近 30 天，写错成自然月是最容易犯的错
+  - 汇总卡**不要用 `filtered`**（会随筛选变），要用 `docs`，否则与旧版口径不一致
+  - 补齐 FP 后必须：改 `docs/迁移基线/FP-*.md` 该行状态 → **重跑 `scripts/gen-debt-table.ps1`**（欠账总表与规范附录 A 自动同步）
+- 回档方案: `git revert` 本次提交；或删除 `InboundPage.tsx` 的 KPI `Row`、`kpi` useMemo、`lineCols`、`expandedRowRender` 与 Table 的 `expandable`
+- 后续: 欠账从 113 → **111**；进货入库页剩 9 项 ⬜，下一个是 FP-RECV-04/05/06 结算单全家桶（T5）
+
 ## [2026-09-28] T3 - 欠账总表与排期（113 张任务卡）
 
 - 背景: T2 锁定了 113 项 ⬜，但 ⬜ 只是「承认缺失」，还不是「有人会做」——
