@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { rk } from '../../utils/rowKey'
 import {
   Button,
@@ -49,7 +49,7 @@ export default function BookingPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [form] = Form.useForm()
 
-  const load = (d = date.format('YYYY-MM-DD')) => {
+  const load = useCallback((d = date.format('YYYY-MM-DD')) => {
     setLoading(true)
     fetchBooking(d)
       .then((r) => {
@@ -65,11 +65,11 @@ export default function BookingPage() {
         setIsMock(true)
       })
       .finally(() => setLoading(false))
-  }
+  }, [date])
 
   useEffect(() => {
     load()
-  }, [date])
+  }, [load])
 
   const runAction = async (type: string, payload: Record<string, unknown>, okMsg: string) => {
     setBusy(true)

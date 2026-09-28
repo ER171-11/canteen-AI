@@ -21,7 +21,10 @@ const ROOT = path.resolve(SEED_DIR, '..', '..', '..'); // canteenAI/
 const PY_DIR = path.join(ROOT, 'store-inventory');
 const PY_SEED_DIR = path.join(ROOT, 'old', 'store-inventory-legacy', 'python-seed');
 const MIGRATIONS_DIR = path.join(PY_DIR, 'migrations');
-const BASE_DB = path.join(PY_DIR, 'data', '餐厅系统.db');
+// 真实基座库路径。该库不入 VCS（store-inventory/.gitignore 的 *.db），CI 上必然缺失；
+// 此时 copyBaseDb() 会回退为「按 migrations 全量重建」——即差分测试仍在真实执行。
+// 可用 SEED_BASE_DB 显式指定（便于在 CI 或空环境复现同一条件）。
+const BASE_DB = process.env.SEED_BASE_DB || path.join(PY_DIR, 'data', '餐厅系统.db');
 
 const PY_MASTER = path.join(PY_SEED_DIR, 'seed_master_data.py');
 const PY_MODULES = path.join(PY_SEED_DIR, 'seed_modules.py');

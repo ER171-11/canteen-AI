@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
   Button,
@@ -36,7 +36,7 @@ export default function SystemConfigPage() {
   const [busy, setBusy] = useState(false)
   const [form] = Form.useForm()
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true)
     client
       .get<{ ok: boolean; config: Config; source?: string; rev?: number }>('/admin/config')
@@ -54,11 +54,11 @@ export default function SystemConfigPage() {
       })
       .catch((e) => message.error(e?.response?.data?.error || '加载配置失败'))
       .finally(() => setLoading(false))
-  }
+  }, [form])
 
   useEffect(() => {
     load()
-  }, [])
+  }, [load])
 
   /* ---- 结算单模板（FP-SET-18/19，与 FP-RECV-06 同一缺口）----
    * 存储位置：bff/data/settle_template.json（独立文件）。
@@ -69,11 +69,11 @@ export default function SystemConfigPage() {
   const [tplBusy, setTplBusy] = useState(false)
   const [tplForm] = Form.useForm()
 
-  const fillTplForm = (t: SettleTemplate) => {
+  const fillTplForm = useCallback((t: SettleTemplate) => {
     tplForm.setFieldsValue({ ...t, subjects: (t.subjects || []).join('/') })
-  }
+  }, [tplForm])
 
-  const loadTpl = () => {
+  const loadTpl = useCallback(() => {
     fetchSettleTemplate()
       .then((r) => {
         const t = normalizeSettleTpl(r.template)
@@ -85,11 +85,11 @@ export default function SystemConfigPage() {
         const err = e as { response?: { data?: { error?: string } } }
         message.error(err.response?.data?.error || '加载结算单模板失败')
       })
-  }
+  }, [fillTplForm])
 
   useEffect(() => {
     loadTpl()
-  }, [])
+  }, [loadTpl])
 
   const saveTpl = async (vals: Record<string, string>) => {
     setTplBusy(true)

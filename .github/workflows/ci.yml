@@ -26,7 +26,13 @@ jobs:
         run: |
           cd bff
           node server.js &
-          sleep 1
+          # 原为 `sleep 1`：慢 runner 上服务未就绪会让契约测试失败或空跑。
+          # 改为轮询健康检查（/api/health 为公开端点，无需 token）。
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8787/api/health >/dev/null && break
+            sleep 0.5
+          done
+          curl -sf http://127.0.0.1:8787/api/health >/dev/null || { echo "FAIL: BFF 未在 20s 内就绪"; exit 1; }
           bash test_contract.sh
 
   algorithms-parity:
@@ -54,10 +60,17 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: apps/admin-web/package-lock.json
-      - name: admin-web install & build
+      - name: admin-web install
         run: |
           cd apps/admin-web
           npm ci
+      - name: admin-web lint（ESLint，--max-warnings 0）
+        run: |
+          cd apps/admin-web
+          npm run lint
+      - name: admin-web 类型检查 & 构建（build = tsc --noEmit && vite build）
+        run: |
+          cd apps/admin-web
           npm run build
 
   store-node:
@@ -73,6 +86,9 @@ jobs:
       - name: 店内节点(Node) + seed 测试 + DDL 幂等
         run: |
           node bff/store-node/run-tests.js
+          # seed 平价测试：真实基座库不入 VCS（store-inventory/.gitignore 的 *.db），
+          # seed/testutil.copyBaseDb() 会按 migrations 全量重建后做 Node↔Python 差分。
+          # 2026-09-28 之前此步骤在基座库缺失时静默 exit 0（假绿）；现已真实执行。
           node bff/store-node/seed/run-tests.js
           rm -f /tmp/test_ci.db
           sqlite3 /tmp/test_ci.db < store-inventory/migrations/001_new_tables.sql
@@ -87,7 +103,31 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: KMP commonTest
+      - name: KMP commonTest（经 android-app 根工程构建 :shared）
+        # kmp-shared 不是 Gradle 根工程：
+        #   1) 它没有 gradlew / gradle-wrapper.jar；
+        #   2) 它没有声明 kotlin("multiplatform") / com.android.library / app.cash.sqldelight
+        #      的插件版本（版本声明在 apps/android-app/build.gradle.kts）。
+        # 而 apps/android-app/settings.gradle.kts 已把 :shared 映射到 ../../kmp-shared。
+        # 因此必须在 android-app 根下构建；原 `cd kmp-shared && ./gradlew` 必挂。
         run: |
-          cd kmp-shared
-          ./gradlew :compileKotlinMetadata testDebugUnitTest --stacktrace
+          cd apps/android-app
+          ./gradlew :shared:compileKotlinMetadata :shared:testDebugUnitTest --stacktrace
+
+  lint-zero-dep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 零依赖静态检查（全量 JS 语法 + 卫生规则）
+        run: node scripts/lint-zero-dep.js
+
+  debt-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 基线与欠账总表漂移校验
+        shell: pwsh
+        run: scripts/gen-debt-table.ps1 -Check
