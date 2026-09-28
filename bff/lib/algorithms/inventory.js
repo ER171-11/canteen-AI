@@ -10,6 +10,7 @@
  *   loss.report                       → applyLossReport
  *   recv.inbound                      → applyRecvInbound
  *   recv.accept                       → insertRecvAccept
+ *   recv.pay                          → applyRecvPay（补付 / 欠款清收）
  *   stock.count                       → applyStockCount + insertStockCount
  *   order.mark                        → applyOrderMark
  *   vendor.upsert                     → upsertVendor
@@ -588,6 +589,56 @@ function insertRecvAccept(ctx, payload) {
   return 'recv_accept 写入 ' + n + ' 行 · recv_id=' + (recvId || '-');
 }
 
+/* ---------- recv.pay ---------- */
+
+/**
+ * recv.pay：进货单补付 / 欠款清收。
+ *
+ * 只往 data.recv[i].payments 追加一条记录：
+ *   不改 payable、不碰库存与均价、不写 logs —— 与旧版 openGet(:2076) 语义一致。
+ *
+ * 校验一律在**服务端**强制（不能只靠前端），失败 throw → 消费器置 failed，绝不静默：
+ *   · 必须能定位进货单（recv_id 命中 id 或 no）
+ *   · amount 必须 > 0
+ *   · amount 不得超过 欠款 + 0.01（旧版 :2075 同口径）
+ * 幂等：同一笔款被重复执行时，第二次会因「超过欠款」被拒，不会重复记账。
+ */
+function applyRecvPay(data, payload) {
+  if (!Array.isArray(data.recv)) throw new Error('data.recv 不是数组');
+  const rid = payload.recv_id != null ? String(payload.recv_id) : '';
+  if (!rid) throw new Error('recv.pay 缺 recv_id');
+  const doc = data.recv.find((p) => p && (String(p.id) === rid || String(p.no) === rid));
+  if (!doc) throw new Error('recv.pay 未找到进货单: ' + rid);
+
+  const amount = Math.round((num(payload.amount, 0) + 1e-12) * 100) / 100;
+  if (!(amount > 0)) throw new Error('recv.pay 金额必须大于 0：' + payload.amount);
+
+  const paid = Array.isArray(doc.payments)
+    ? doc.payments.reduce((a, p) => a + num(p && p.amount, 0), 0)
+    : 0;
+  const debt = Math.round((num(doc.payable, 0) - paid + 1e-12) * 100) / 100;
+  if (amount > debt + 0.01) {
+    throw new Error(
+      'recv.pay 金额超过欠款：本次 ' + amount + ' > 欠款 ' + Math.max(0, debt),
+    );
+  }
+
+  if (!Array.isArray(doc.payments)) doc.payments = [];
+  doc.payments.push({
+    amount: amount,
+    date: payload.date || today(),
+    method: payload.method || '现金/扫码',
+    source: payload.source || 'admin-web/inventory/inbound',
+    ts: payload.ts || nowIso(),
+  });
+
+  const left = Math.round((num(doc.payable, 0) - (paid + amount) + 1e-12) * 100) / 100;
+  return (
+    'recv.pay ' + (doc.no || rid) + ' 收款 ' + amount + ' 元（' + (payload.method || '现金/扫码') + '）' +
+    ' · 剩余欠款 ' + Math.max(0, left) + ' 元'
+  );
+}
+
 /* ---------- stock.count ---------- */
 
 /**
@@ -905,6 +956,7 @@ module.exports = {
   rejectLossReport,
   applyRecvInbound,
   insertRecvAccept,
+  applyRecvPay,
   applyStockCount,
   insertStockCount,
   applyOrderMark,

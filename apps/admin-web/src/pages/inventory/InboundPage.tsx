@@ -43,6 +43,7 @@ import { docDebt, docPaid, formatLinesSummary, lineAmount } from './utils'
 import { COLORS } from '../../theme'
 import SettleModal from './settle/SettleModal'
 import SettleBatchModal from './settle/SettleBatchModal'
+import PayModal from './PayModal'
 import { DEFAULT_SETTLE_TPL, loadSettleTpl } from './settle/template'
 import type { SettleTemplate } from '../../api/types'
 import type { IngLookup } from './settle/data'
@@ -108,6 +109,8 @@ export default function InboundPage() {
   const [tpl, setTpl] = useState<SettleTemplate>(DEFAULT_SETTLE_TPL)
   const [settleDoc, setSettleDoc] = useState<InventoryDoc | null>(null)
   const [settleBatchOpen, setSettleBatchOpen] = useState(false)
+  /* FP-RECV-07 补付（欠款清收）：走 recv.pay 审批队列，不直写库 */
+  const [payDoc, setPayDoc] = useState<InventoryDoc | null>(null)
 
   const load = useCallback((d: Dayjs) => {
     setLoading(true)
@@ -327,6 +330,12 @@ export default function InboundPage() {
           <Button type="link" size="small" onClick={() => setSettleDoc(r)}>
             结算单
           </Button>
+          {/* FP-RECV-07 补付：仅欠款单显示，走 recv.pay 审批队列 */}
+          {canWrite && !isMock && docDebt(r) > 0.01 && (
+            <Button type="link" size="small" onClick={() => setPayDoc(r)}>
+              补付
+            </Button>
+          )}
           {canWrite && !isMock && (
             <Button type="link" size="small" onClick={() => openAcceptModal(r)}>
               补录
@@ -689,6 +698,14 @@ export default function InboundPage() {
         tpl={tpl}
         lookup={ingLookup}
         onClose={() => setSettleBatchOpen(false)}
+      />
+
+      {/* FP-RECV-07 补付：入队后刷新列表（执行要等审批中心确认） */}
+      <PayModal
+        open={!!payDoc}
+        doc={payDoc}
+        onClose={() => setPayDoc(null)}
+        onQueued={() => load(acceptDate)}
       />
     </div>
   )

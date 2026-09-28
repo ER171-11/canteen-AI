@@ -28,6 +28,8 @@ registerAll({
   'loss.reject': (ctx, data, payload) => inv.rejectLossReport(ctx, data, payload),
   'recv.inbound': (ctx, data, payload) => inv.applyRecvInbound(data, payload),
   'recv.accept': (ctx, data, payload) => inv.insertRecvAccept(ctx, payload),
+  /* 补付 / 欠款清收：不登记 type 会被消费器判 need-manual 驳回（consumer.js:9） */
+  'recv.pay': (ctx, data, payload) => inv.applyRecvPay(data, payload),
   'stock.count': (ctx, data, payload) => inv.applyStockCount(data, payload, ctx),
   'order.mark': (ctx, data, payload) => inv.applyOrderMark(data, payload),
   'vendor.upsert': (ctx, data, payload) => inv.upsertVendor(data, payload, ctx),
