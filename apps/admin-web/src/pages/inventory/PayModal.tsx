@@ -96,7 +96,9 @@ export default function PayModal({ open, doc, onClose, onQueued }: PayModalProps
           单据：<b>{doc.no ?? doc.id}</b>（{doc.date}）
         </div>
         <div>
-          应付：<b>¥{fmt(Number(doc.payable) || 0)}</b>　已付：¥{fmt(docPaid(doc))}　欠：
+          应付：<b>¥{fmt(Number(doc.payable) || 0)}</b>
+          {'\u3000'}已付：¥{fmt(docPaid(doc))}
+          {'\u3000'}欠：
           <b style={{ color: '#cf1322' }}>¥{fmt(debt)}</b>
         </div>
 

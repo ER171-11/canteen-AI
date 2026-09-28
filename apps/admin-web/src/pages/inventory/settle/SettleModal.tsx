@@ -129,11 +129,13 @@ export default function SettleModal({
       </Space>
 
       <div>
-        明细 <b>{data.count}</b> 项　应付全额 <b>¥{fmt(data.payable)}</b>　已付 ¥{fmt(data.paid)}
-        　欠款 ¥{fmt(data.debt)}
+        明细 <b>{data.count}</b> 项{'\u3000'}应付全额 <b>¥{fmt(data.payable)}</b>
+        {'\u3000'}已付 ¥{fmt(data.paid)}
+        {'\u3000'}欠款 ¥{fmt(data.debt)}
       </div>
       <div style={{ color: '#666' }}>
-        单据编号 {settleNo(doc)}　人民币大写：{numToCn(data.payable)}
+        单据编号 {settleNo(doc)}
+        {'\u3000'}人民币大写：{numToCn(data.payable)}
       </div>
     </Modal>
   )

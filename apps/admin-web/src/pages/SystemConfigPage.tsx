@@ -95,7 +95,7 @@ export default function SystemConfigPage() {
     setTplBusy(true)
     try {
       const subs = String(vals.subjects || '')
-        .split(/[\/、,，]/)
+        .split(/[、,，/]/)
         .map((s) => s.trim())
         .filter(Boolean)
       const next = normalizeSettleTpl({ ...tpl, ...vals, subjects: subs })

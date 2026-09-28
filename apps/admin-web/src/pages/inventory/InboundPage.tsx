@@ -45,6 +45,8 @@ import SettleModal from './settle/SettleModal'
 import SettleBatchModal from './settle/SettleBatchModal'
 import PayModal from './PayModal'
 import { DEFAULT_SETTLE_TPL, loadSettleTpl } from './settle/template'
+import { exportSettlePdf } from './settle/pdf'
+import type { SettleOpts } from './settle/html'
 import type { SettleTemplate } from '../../api/types'
 import type { IngLookup } from './settle/data'
 
@@ -227,6 +229,17 @@ export default function InboundPage() {
     )
     return accepts.filter((a) => a.ing_name && names.has(String(a.ing_name)))
   }, [drawerDoc, acceptsByRecv, accepts, ingName])
+
+  /* FP-RECV-04/05 PDF：canvas 光栅化 → JPEG → 极简 PDF 容器（零依赖） */
+  const exportPdf = async (
+    list: InventoryDoc[],
+    t: SettleTemplate,
+    opts: SettleOpts,
+    single: boolean,
+  ) => {
+    const name = await exportSettlePdf(list, t, ingLookup, opts, single)
+    message.success(`已导出 PDF：${name}（可直接发微信）`)
+  }
 
   const openAcceptModal = (doc?: InventoryDoc) => {
     form.resetFields()
@@ -684,13 +697,14 @@ export default function InboundPage() {
         </Form>
       </Modal>
 
-      {/* 结算单（只读输出层）：PDF 按钮在 P2-a 交付 pdf.ts 后接入 */}
+      {/* 结算单（只读输出层） */}
       <SettleModal
         open={!!settleDoc}
         doc={settleDoc}
         tpl={tpl}
         lookup={ingLookup}
         onClose={() => setSettleDoc(null)}
+        onExportPdf={(doc, t, opts) => exportPdf([doc], t, opts, true)}
       />
       <SettleBatchModal
         open={settleBatchOpen}
@@ -698,6 +712,7 @@ export default function InboundPage() {
         tpl={tpl}
         lookup={ingLookup}
         onClose={() => setSettleBatchOpen(false)}
+        onExportPdf={(list, t, opts) => exportPdf(list, t, opts, false)}
       />
 
       {/* FP-RECV-07 补付：入队后刷新列表（执行要等审批中心确认） */}

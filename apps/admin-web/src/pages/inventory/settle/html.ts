@@ -90,7 +90,7 @@ export function settleSheet(
      <td class="k">银行账号</td><td>${esc(tpl.payeeAccount || '')}</td></tr>`
       : ''
 
-  const batchTag = ex.total ? `　·　第 ${ex.index} / ${ex.total} 张` : ''
+  const batchTag = ex.total ? `\u3000·\u3000第 ${ex.index} / ${ex.total} 张` : ''
 
   return `
   <div class="ttl"><div class="rest">${esc(restName)}</div><div class="doc">${esc(tpl.title)}</div></div>
@@ -108,7 +108,7 @@ export function settleSheet(
   <div class="sum">
     <div class="big">小写合计：<span class="num">¥${fmt(d.payable)}</span></div>
     <div class="big">人民币大写：${numToCn(d.payable)}</div>
-    <div class="sub">明细 ${d.count} 项 · 合计数量 ${fmt(d.totalQty, 3)}　|　应付全额 ¥${fmt(d.payable)}　已付 ¥${fmt(d.paid)}　欠款 ¥${fmt(d.debt)}</div>
+    <div class="sub">明细 ${d.count} 项 · 合计数量 ${fmt(d.totalQty, 3)}\u3000|\u3000应付全额 ¥${fmt(d.payable)}\u3000已付 ¥${fmt(d.paid)}\u3000欠款 ¥${fmt(d.debt)}</div>
   </div>
   <div class="signs">${signs}</div>
   <div class="foot"><span>${esc(tpl.footer || '')}</span><span>制单时间：${new Date().toLocaleString('zh-CN')}${batchTag}</span></div>`
