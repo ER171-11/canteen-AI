@@ -41,6 +41,11 @@ import MockAlert from '../kitchen/components/MockAlert'
 import { MOCK_RECV } from './mock'
 import { docDebt, docPaid, formatLinesSummary, lineAmount } from './utils'
 import { COLORS } from '../../theme'
+import SettleModal from './settle/SettleModal'
+import SettleBatchModal from './settle/SettleBatchModal'
+import { DEFAULT_SETTLE_TPL, loadSettleTpl } from './settle/template'
+import type { SettleTemplate } from '../../api/types'
+import type { IngLookup } from './settle/data'
 
 function asDoc(r: unknown): InventoryDoc | null {
   if (!r || typeof r !== 'object') return null
@@ -99,6 +104,10 @@ export default function InboundPage() {
   const [acceptOpen, setAcceptOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [form] = Form.useForm()
+  /* 结算单（只读输出层）：模板 + 弹窗状态 */
+  const [tpl, setTpl] = useState<SettleTemplate>(DEFAULT_SETTLE_TPL)
+  const [settleDoc, setSettleDoc] = useState<InventoryDoc | null>(null)
+  const [settleBatchOpen, setSettleBatchOpen] = useState(false)
 
   const load = useCallback((d: Dayjs) => {
     setLoading(true)
@@ -129,6 +138,17 @@ export default function InboundPage() {
     load(acceptDate)
   }, [acceptDate, load])
 
+  /* 结算单模板：取不到就回落默认，不阻断页面（结算单是只读输出层） */
+  useEffect(() => {
+    let alive = true
+    loadSettleTpl()
+      .then((t) => alive && setTpl(t))
+      .catch(() => alive && setTpl(DEFAULT_SETTLE_TPL))
+    return () => {
+      alive = false
+    }
+  }, [])
+
   const ingName = useMemo(() => {
     const m = new Map(ings.map((g) => [g.id, g.name]))
     return (id: string) => m.get(id) ?? id ?? '?'
@@ -145,6 +165,13 @@ export default function InboundPage() {
     }
     return m
   }, [accepts])
+
+  /** 结算单用：原料 id → {名称, 采购单位}（旧版 ing(l.ing) 对应物） */
+  const ingLookup = useMemo<IngLookup>(() => {
+    const m = new Map<string, { name: string; buy: string }>()
+    for (const g of ings) m.set(String(g.id), { name: g.name, buy: g.buy ?? '' })
+    return (id: string) => m.get(String(id))
+  }, [ings])
 
   const standardByName = useMemo(() => {
     const m = new Map<string, AcceptStandard>()
@@ -295,6 +322,10 @@ export default function InboundPage() {
         <Space size={0}>
           <Button type="link" size="small" onClick={() => setDrawerDoc(r)}>
             验收明细
+          </Button>
+          {/* FP-RECV-04 行内结算单（只读输出层，不写库） */}
+          <Button type="link" size="small" onClick={() => setSettleDoc(r)}>
+            结算单
           </Button>
           {canWrite && !isMock && (
             <Button type="link" size="small" onClick={() => openAcceptModal(r)}>
@@ -467,6 +498,10 @@ export default function InboundPage() {
               value={supplier}
               onChange={setSupplier}
             />
+            {/* FP-RECV-05 批量生成结算单（只读输出层） */}
+            <Button disabled={!filtered.length} onClick={() => setSettleBatchOpen(true)}>
+              批量结算单
+            </Button>
             <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
               <Button
                 type="primary"
@@ -639,6 +674,22 @@ export default function InboundPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 结算单（只读输出层）：PDF 按钮在 P2-a 交付 pdf.ts 后接入 */}
+      <SettleModal
+        open={!!settleDoc}
+        doc={settleDoc}
+        tpl={tpl}
+        lookup={ingLookup}
+        onClose={() => setSettleDoc(null)}
+      />
+      <SettleBatchModal
+        open={settleBatchOpen}
+        list={filtered}
+        tpl={tpl}
+        lookup={ingLookup}
+        onClose={() => setSettleBatchOpen(false)}
+      />
     </div>
   )
 }

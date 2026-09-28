@@ -6,13 +6,16 @@ import {
   Form,
   Input,
   InputNumber,
+  Popconfirm,
   Space,
   Tooltip,
   Typography,
   message,
 } from 'antd'
 import { client } from '../api/client'
-import { postAction } from '../api'
+import { fetchSettleTemplate, postAction, saveSettleTemplate } from '../api'
+import type { SettleTemplate } from '../api/types'
+import { DEFAULT_SETTLE_TPL, normalizeSettleTpl } from './inventory/settle/template'
 import { useAuthStore } from '../store/auth'
 
 type Config = {
@@ -57,7 +60,78 @@ export default function SystemConfigPage() {
     load()
   }, [])
 
+  /* ---- 结算单模板（FP-SET-18/19，与 FP-RECV-06 同一缺口）----
+   * 存储位置：bff/data/settle_template.json（独立文件）。
+   * 不进业务库、不走审批队列 —— 它只是「只读输出层」的排版配置，不是业务数据。
+   */
+  const [tpl, setTpl] = useState<SettleTemplate>(DEFAULT_SETTLE_TPL)
+  const [tplSource, setTplSource] = useState<string>('-')
+  const [tplBusy, setTplBusy] = useState(false)
+  const [tplForm] = Form.useForm()
+
+  const fillTplForm = (t: SettleTemplate) => {
+    tplForm.setFieldsValue({ ...t, subjects: (t.subjects || []).join('/') })
+  }
+
+  const loadTpl = () => {
+    fetchSettleTemplate()
+      .then((r) => {
+        const t = normalizeSettleTpl(r.template)
+        setTpl(t)
+        setTplSource(r.source || '-')
+        fillTplForm(t)
+      })
+      .catch((e: unknown) => {
+        const err = e as { response?: { data?: { error?: string } } }
+        message.error(err.response?.data?.error || '加载结算单模板失败')
+      })
+  }
+
+  useEffect(() => {
+    loadTpl()
+  }, [])
+
+  const saveTpl = async (vals: Record<string, string>) => {
+    setTplBusy(true)
+    try {
+      const subs = String(vals.subjects || '')
+        .split(/[\/、,，]/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const next = normalizeSettleTpl({ ...tpl, ...vals, subjects: subs })
+      const r = await saveSettleTemplate(next)
+      const t = normalizeSettleTpl(r.template)
+      setTpl(t)
+      setTplSource('file')
+      fillTplForm(t)
+      message.success('结算单模板已保存（独立文件，不影响业务数据）')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '保存失败（仅老板/店长可改）')
+    } finally {
+      setTplBusy(false)
+    }
+  }
+
+  const resetTpl = async () => {
+    setTplBusy(true)
+    try {
+      const r = await saveSettleTemplate(DEFAULT_SETTLE_TPL)
+      const t = normalizeSettleTpl(r.template)
+      setTpl(t)
+      setTplSource('default')
+      fillTplForm(t)
+      message.success('已恢复默认模板（不影响采购单/库存等业务数据）')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '恢复默认失败')
+    } finally {
+      setTplBusy(false)
+    }
+  }
+
   return (
+    <div>
     <Card
       title="系统配置"
       loading={loading}
@@ -134,5 +208,82 @@ export default function SystemConfigPage() {
         </Tooltip>
       </Form>
     </Card>
+
+    <Card
+      title="结算单模板"
+      style={{ marginTop: 16 }}
+      extra={
+        <Space>
+          <Typography.Text type="secondary">来源 {tplSource}</Typography.Text>
+          <Button size="small" onClick={loadTpl}>
+            刷新
+          </Button>
+        </Space>
+      }
+    >
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="结算单是只读输出层。模板存于服务端独立文件（bff/data/settle_template.json），不进业务库、不走审批队列；保存即刻生效，恢复默认也不会动采购单/库存等业务数据。"
+      />
+      <Form form={tplForm} layout="vertical" style={{ maxWidth: 560 }} onFinish={saveTpl}>
+        <Form.Item name="title" label="单据标题">
+          <Input placeholder="进货付款审批单" />
+        </Form.Item>
+        <Form.Item name="restName" label="抬头单位名称">
+          <Input placeholder="留空则回落餐厅名" />
+        </Form.Item>
+        <Form.Item name="addr" label="地址">
+          <Input />
+        </Form.Item>
+        <Form.Item name="tel" label="电话">
+          <Input />
+        </Form.Item>
+        <Form.Item name="taxNo" label="税号">
+          <Input />
+        </Form.Item>
+        <Form.Item name="usePurpose" label="支出用途（默认）">
+          <Input placeholder="采购货款" />
+        </Form.Item>
+        <Form.Item name="payeeName" label="收款单位">
+          <Input />
+        </Form.Item>
+        <Form.Item name="payeeBank" label="开户行">
+          <Input />
+        </Form.Item>
+        <Form.Item name="payeeAccount" label="银行账号">
+          <Input />
+        </Form.Item>
+        <Form.Item
+          name="subjects"
+          label="签字栏"
+          tooltip="用 / 、 , ，任一分隔，如 经办人/审核人/审批人"
+        >
+          <Input placeholder="经办人/审核人/审批人" />
+        </Form.Item>
+        <Form.Item name="footer" label="页脚">
+          <Input.TextArea rows={2} />
+        </Form.Item>
+        <Space>
+          <Tooltip title={canWrite ? undefined : noWriteTip}>
+            <Button type="primary" htmlType="submit" loading={tplBusy} disabled={!canWrite}>
+              保存模板
+            </Button>
+          </Tooltip>
+          <Popconfirm
+            title="恢复默认结算单模板？（不影响采购单/库存等业务数据）"
+            onConfirm={resetTpl}
+            okText="恢复"
+            cancelText="取消"
+          >
+            <Button disabled={!canWrite} loading={tplBusy}>
+              恢复默认
+            </Button>
+          </Popconfirm>
+        </Space>
+      </Form>
+    </Card>
+    </div>
   )
 }

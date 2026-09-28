@@ -395,6 +395,8 @@ export interface IngItem {
   name: string
   cat?: string
   unit?: string
+  /** 采购单位（结算单「单位」列用，旧版 ing.buy） */
+  buy?: string
   /** 当前库存量 */
   stock?: number
   /** 安全库存线（可能为 0） */
@@ -405,6 +407,35 @@ export interface IngItem {
   avg?: number
   on?: boolean
   _u?: string
+}
+
+/* ---------------- 结算单（进货付款审批单） ---------------- */
+
+/** 结算单模板：字段与旧版 DEF_SETTLE_TPL（旧 HTML:2088-2095）逐一对齐 */
+export interface SettleTemplate {
+  /** 单据标题，如「进货付款审批单」 */
+  title: string
+  /** 抬头单位名称；留空时回落餐厅名 */
+  restName: string
+  addr: string
+  tel: string
+  taxNo: string
+  /** 支出用途默认值 */
+  usePurpose: string
+  payeeName: string
+  payeeBank: string
+  payeeAccount: string
+  /** 签字栏，如 ['经办人','审核人','审批人'] */
+  subjects: string[]
+  footer: string
+}
+
+/** GET /api/settle/template */
+export interface SettleTemplateResp {
+  ok?: boolean
+  template: SettleTemplate
+  /** 'file' = 来自 bff/data/settle_template.json；'default' = 未配置，用默认 */
+  source?: 'file' | 'default'
 }
 
 /** 进货/采购单行 */

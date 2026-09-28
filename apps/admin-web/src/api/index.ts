@@ -20,6 +20,8 @@ import type {
   RecvAcceptRecord,
   RecvAcceptResp,
   ReportDaily,
+  SettleTemplate,
+  SettleTemplateResp,
   Snapshot,
   StaffModuleResp,
   WorkorderResp,
@@ -329,5 +331,22 @@ export async function fetchFoodsafe(): Promise<FoodsafeResp> {
 /** GET /api/app/release — 安装包元信息（版本/大小/哈希/局域网地址） */
 export async function fetchAppRelease(): Promise<AppRelease> {
   const { data } = await client.get<AppRelease>('/app/release')
+  return data
+}
+
+/* ---------------- 结算单模板（只读输出层的配置） ---------------- */
+
+/** GET /api/settle/template */
+export async function fetchSettleTemplate(): Promise<SettleTemplateResp> {
+  const { data } = await client.get<SettleTemplateResp>('/settle/template')
+  return data
+}
+
+/**
+ * PUT /api/settle/template — 仅老板/店长。
+ * 注意：模板是「只读输出层」的配置，不进业务库、不走审批队列。
+ */
+export async function saveSettleTemplate(tpl: SettleTemplate): Promise<SettleTemplateResp> {
+  const { data } = await client.put<SettleTemplateResp>('/settle/template', { template: tpl })
   return data
 }
