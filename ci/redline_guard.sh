@@ -46,6 +46,29 @@ else
   echo "OK: 图片仅内存传递"
 fi
 
+echo "== R14 迁移功能清单（替代式迁移必须逐项标注状态）=="
+# 规范见 docs/迁移颗粒度规范.md：以「页面/模块」为单位宣称完成 = 静默丢失功能的入口。
+# 要求 docs/迁移基线/*.md 中每个 FP 行都带四态之一，未标注即失败。
+if [ -d docs/迁移基线 ]; then
+  BASE_FILES=$(ls docs/迁移基线/*.md 2>/dev/null || true)
+  if [ -z "$BASE_FILES" ]; then
+    echo "OK: 尚未建立迁移基线（未启动替代式迁移）"
+  else
+    for bf in $BASE_FILES; do
+      TOTAL=$(grep -c '^|[[:space:]]*FP-' "$bf" || true)
+      MARKED=$(grep '^|[[:space:]]*FP-' "$bf" | grep -c -E '已移植|等价替代|待补|废弃' || true)
+      if [ "${TOTAL:-0}" != "${MARKED:-0}" ]; then
+        echo "FAIL: $bf 存在未标注状态的功能点（已标注 ${MARKED:-0}/${TOTAL:-0}）"
+        FAIL=1
+      else
+        echo "OK: $bf 全部 ${TOTAL:-0} 项已标注状态"
+      fi
+    done
+  fi
+else
+  echo "OK: 无迁移基线目录"
+fi
+
 if [ "$FAIL" -eq 0 ]; then
   echo "== 红线守卫全部通过 =="
 else
