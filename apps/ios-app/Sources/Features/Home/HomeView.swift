@@ -40,6 +40,27 @@ struct HomeView: View {
                 Button("刷新") {
                     // TODO: model.dispatch(HomeIntent.Refresh())
                 }
+
+                // SI 收件箱入口（与 Android 今日页 SI 卡一致）
+                NavigationLink(destination: InboxView()) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SI 超级经营助理")
+                                .font(.headline)
+                                .foregroundColor(.pwTxt)
+                            Text("需拍板 / 执行中 / 预警 / 通知")
+                                .font(.caption)
+                                .foregroundColor(.pwSub)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.pwSub)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.pwCard)
+                    .cornerRadius(PWRadius.medium)
+                }
             }
             .padding(16)
             .background(Color.pwBg.ignoresSafeArea())

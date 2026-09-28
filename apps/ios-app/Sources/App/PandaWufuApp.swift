@@ -29,7 +29,7 @@ struct RootTabView: View {
                     .tabItem { Label("进销存", systemImage: "shippingbox") }
                     .tag(1)
                 ChatView()
-                    .tabItem { Text("AI") }   // 中间位，图标由悬浮渐变按钮承载
+                    .tabItem { Text("SI") }   // 中间位，图标由悬浮渐变按钮承载
                     .tag(2)
                 KitchenView()
                     .tabItem { Label("厨房", systemImage: "fork.knife") }
