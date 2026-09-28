@@ -301,6 +301,37 @@
   - 全部清单为 AI 抽取，**未经人工复核**，按规范 §2.2 复核签字后才算正式基线
 - 回档方案: 删除 `docs/迁移基线/FP-{采购管理,原料库存,菜品配方,销售收银,结构测算,外接比价,经营概览,设置}.md` 并还原附录 A 表格
 
+## [2026-09-28] T5 - 进货入库单据闭环：结算单全家桶 + 补付（FP-RECV-04/05/06/07、FP-SET-18/19）
+
+- 背景: 结算是老板每天要用的单据，但新版 `bff/routes/` 内 `settle|结算|补付` **零命中**——
+  既打不出结算单，也收不回欠款。这是替代模式下最直接的业务闭环缺口
+- 决策（4 个决策点，已确认）:
+  1. **D1 客户端生成**：BFF 保持零依赖，结算单的 打印 / CSV / 电子版 HTML / PDF 全部在 admin-web 生成
+  2. **D2 = 完整移植旧版零依赖 PDF**：`Canvas` 光栅化 → JPEG → PDF 字节流（对应旧 HTML:2231-2485 约 255 行）
+  3. **D3 BFF 独立文件**：模板存 `bff/data/settle_template.json`，走 `GET/PUT /api/settle/template`，**不碰业务库** → 记录为 `ADR-003`
+  4. **D4 无 zip**：批量导出 = **连续 PDF**（单一文件、逐张分页）+ **合并 CSV**（旧版亦无 zip，确认非需求）
+- 影响范围:
+  | 层 | 文件 |
+  |---|---|
+  | BFF 新增 | `bff/routes/settle.js`（模板读/写，仅老板/店长可写 + 审计）、`bff/server.js` ROUTES 注册、`bff/data/settle_template.json` |
+  | BFF 算法 | `bff/lib/algorithms/inventory.js` 新增 `applyRecvPay` + `registry.js` 注册 `recv.pay` + `recv_pay.test.js` |
+  | admin-web 新增 | `pages/inventory/settle/{template,data,html,pdf,export}.ts`、`settle/{SettleModal,SettleBatchModal}.tsx`、`pages/inventory/PayModal.tsx` |
+  | admin-web 改动 | `InboundPage.tsx`（行内「结算单」+ 工具条「批量结算单」+ 补付入口）、`SystemConfigPage.tsx`（结算单模板卡片）、`api/{index,types}.ts` |
+- 落地的 FP: FP-RECV-04（行内结算单）/ 05（批量生成）/ 06（模板配置）/ 07（补付）、FP-SET-18 / 19（模板配置与恢复默认）
+  → 基线随之 **38/113 → 46/105**（含 T4 的 2 项）；`scripts/gen-debt-table.ps1` 同步重算，无汇总漂移
+- AI避坑提示:
+  - **红线 ④**：结算单是**只读输出层**，全程不写 DB；唯一的写是把「模板」写进独立文件，
+    且**不进** `/api/actions` 队列（模板不是业务事实，不参与 rev/合并/快照）
+  - **红线 ③**：补付必须走「`/api/actions` 入队 + 审批确认」，服务端强制校验 `0 < amount ≤ 欠款 + 0.01`，**不得直写库**
+  - **算法写完 ≠ 能用**：`recv.pay` 不注册进 `registry.js`，会被消费器判 `need-manual` **静默驳回**
+  - **模板字段是注入面**：字段会进入 HTML/PDF 输出，一律经 `esc()` 转义
+  - **PDF 是自写引擎**：无第三方依赖，门禁只证明「不崩、类型对」，**版面正确性未做人工开箱比对**
+  - FP-RECV-06 与 FP-SET-18 是**同一实现的重复登记**，不要算成两项工作量
+  - 全角空格（U+3000）进模板串/JSX 会触发 ESLint `no-irregular-whitespace`，用 `\u3000` 转义
+- 回档方案: 删除 `bff/routes/settle.js` 及其 `ROUTES` 注册、`pages/inventory/settle/` 目录与 3 个弹窗，
+  还原 `InboundPage.tsx` / `SystemConfigPage.tsx` / `api/{index,types}.ts`；
+  删除 `bff/data/settle_template.json` 即回落默认模板（**不影响任何业务数据**）
+
 ## [2026-09-28] T4 - 进货入库只读项补齐（FP-RECV-10 / FP-RECV-11）
 
 - 背景: T2/T3 只清点了欠账，尚未真正补上任何功能。按「只读 > 写操作、老板每日必用 > 偶尔使用」
