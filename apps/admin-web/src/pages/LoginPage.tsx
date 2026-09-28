@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Card, Form, Input, Typography, message } from 'antd'
+import { Button, Card, Form, Input, Space, Typography, message } from 'antd'
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
 import { login as apiLogin } from '../api'
 import { getDeviceFp } from '../utils/device'
@@ -13,18 +13,29 @@ interface LoginForm {
   password: string
 }
 
+/** 一键登录：岗位 → 真实门店账号（局域网联调，密码统一默认） */
+const QUICK_LOGIN_ACCOUNTS: { label: string; account: string }[] = [
+  { label: '老板', account: 'boss' },
+  { label: '店长', account: 'manager' },
+  { label: '收银', account: 'cashier' },
+  { label: '厨房', account: 'kitchen' },
+  { label: '财务', account: 'finance' },
+  { label: '只读', account: 'newbie' },
+]
+const QUICK_LOGIN_PASSWORD = 'wufu123'
+
 export default function LoginPage() {
   const navigate = useNavigate()
   const login = useAuthStore((s) => s.login)
   const [loading, setLoading] = useState(false)
 
-  const onFinish = async (values: LoginForm) => {
+  const doLogin = async (account: string, password: string) => {
     setLoading(true)
     const deviceFp = getDeviceFp()
     try {
       const resp = await apiLogin({
-        account: values.account,
-        password: values.password,
+        account,
+        password,
         device_fp: deviceFp,
       })
       if (!resp.ok || !resp.token) {
@@ -34,7 +45,7 @@ export default function LoginPage() {
       login({
         token: resp.token,
         role: resp.role,
-        account: values.account,
+        account,
         expiresAt: resp.expires_at,
         storeId: resp.store_id ?? null,
         storeName: resp.store_name ?? null,
@@ -50,6 +61,8 @@ export default function LoginPage() {
       setLoading(false)
     }
   }
+
+  const onFinish = (values: LoginForm) => doLogin(values.account, values.password)
 
   return (
     <div
@@ -84,6 +97,23 @@ export default function LoginPage() {
             </Button>
           </Form.Item>
         </Form>
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            一键登录（真实岗位账号 · 局域网联调，密码 {QUICK_LOGIN_PASSWORD}）
+          </Typography.Text>
+          <Space wrap style={{ marginTop: 8 }}>
+            {QUICK_LOGIN_ACCOUNTS.map((q) => (
+              <Button
+                key={q.account}
+                size="small"
+                disabled={loading}
+                onClick={() => doLogin(q.account, QUICK_LOGIN_PASSWORD)}
+              >
+                {q.label}
+              </Button>
+            ))}
+          </Space>
+        </div>
       </Card>
     </div>
   )

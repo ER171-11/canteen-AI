@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import {
   Button,
   Card,
@@ -363,7 +364,7 @@ export default function InboundPage() {
           <Empty description="暂无进货单，货到了请在店内系统或后续审批流新建 JH 进货单" />
         ) : (
           <Table<InventoryDoc>
-            rowKey={(r, i) => String(r.id ?? r.no ?? i)}
+            rowKey={rk}
             columns={columns}
             dataSource={filtered}
             loading={loading}
@@ -388,7 +389,7 @@ export default function InboundPage() {
           <Empty description="该单暂无逐项验收记录" />
         ) : (
           <Table<RecvAcceptRecord>
-            rowKey={(_, i) => String(i)}
+            rowKey={rk}
             size="small"
             columns={acceptCols}
             dataSource={drawerAccepts}
@@ -432,7 +433,7 @@ export default function InboundPage() {
         open={acceptOpen}
         onCancel={() => setAcceptOpen(false)}
         confirmLoading={busy}
-        destroyOnClose
+        destroyOnHidden
         onOk={async () => {
           const v = await form.validateFields()
           setBusy(true)

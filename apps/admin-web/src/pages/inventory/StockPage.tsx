@@ -226,7 +226,7 @@ export default function StockPage() {
             setBusy(false)
           }
         }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item name="id" hidden>

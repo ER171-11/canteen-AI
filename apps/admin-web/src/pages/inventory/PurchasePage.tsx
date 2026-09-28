@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import { Card, Empty, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { Link } from 'react-router-dom'
@@ -154,7 +155,7 @@ export default function PurchasePage() {
           />
         ) : (
           <Table<InventoryDoc>
-            rowKey={(r, i) => String(r.id ?? r.no ?? i)}
+            rowKey={rk}
             columns={columns}
             dataSource={filtered}
             loading={loading}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import { Card, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchFoodsafe } from '../../api'
@@ -66,7 +67,7 @@ export default function LicensesPage() {
       {isMock && <MockAlert endpoint="/api/modules/foodsafe" />}
       <Card title="证照台账（健康证 &lt;7 天标红）">
         <Table<CertItem>
-          rowKey={(r, i) => String(`${certType(r)}-${certName(r)}-${i}`)}
+          rowKey={rk}
           columns={columns}
           dataSource={rows}
           loading={loading}

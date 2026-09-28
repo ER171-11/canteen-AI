@@ -281,7 +281,7 @@ export default function TablesPage() {
         onCancel={() => setEditOpen(false)}
         onOk={saveMaster}
         confirmLoading={busy}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item name="id" hidden>

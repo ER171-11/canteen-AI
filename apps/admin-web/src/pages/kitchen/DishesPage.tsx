@@ -228,7 +228,7 @@ export default function DishesPage() {
           )
           setEditOpen(false)
         }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item name="id" hidden>
@@ -278,7 +278,7 @@ export default function DishesPage() {
           )
           setPriceOpen(false)
         }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={priceForm} layout="vertical">
           <Form.Item label="当前售价">

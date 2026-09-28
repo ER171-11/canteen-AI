@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import { Card, Col, Progress, Row, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchModulesStaff } from '../../api'
@@ -74,7 +75,7 @@ export default function PerformancePage() {
         <Col xs={24} lg={14}>
           <Card title="绩效 TOP">
             <Table<PerfItem>
-              rowKey={(r, i) => String(`${nameOf(r)}-${i}`)}
+              rowKey={rk}
               columns={pCols}
               dataSource={perf}
               loading={loading}
@@ -86,7 +87,7 @@ export default function PerformancePage() {
         <Col xs={24} lg={10}>
           <Card title="培训进度">
             <Table<TrainItem>
-              rowKey={(r, i) => String(`${nameOf(r)}-${r.course}-${i}`)}
+              rowKey={rk}
               columns={tCols}
               dataSource={train}
               loading={loading}

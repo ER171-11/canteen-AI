@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import {
   Alert,
   Button,
@@ -152,7 +153,16 @@ export default function RecipesPage() {
       name: r?.name || '',
       color: r?.color || '红',
       filling: r?.filling || '',
-      face_main: typeof r?.face_main === 'string' ? r.face_main : '',
+      face_main:
+        typeof r?.face_main === 'string'
+          ? r.face_main
+          : Array.isArray(r?.face_main)
+            ? r.face_main
+                .map((e) =>
+                  typeof e === 'string' ? e : String((e as Record<string, unknown>).name ?? e),
+                )
+                .join('、')
+            : '',
       price: undefined,
       cost: undefined,
       ensure_ings: true,
@@ -341,7 +351,7 @@ export default function RecipesPage() {
               {costCard && (costCard.bom_lines?.length ?? 0) > 0 && (
                 <Table
                   size="small"
-                  rowKey={(r, i) => `${r.name}-${i}`}
+                  rowKey={rk}
                   dataSource={costCard.bom_lines}
                   pagination={false}
                   style={{ marginBottom: 16 }}
@@ -424,7 +434,7 @@ export default function RecipesPage() {
         onCancel={() => setEditOpen(false)}
         confirmLoading={busy}
         width={720}
-        destroyOnClose
+        destroyOnHidden
         onOk={async () => {
           const v = await form.validateFields()
           setBusy(true)

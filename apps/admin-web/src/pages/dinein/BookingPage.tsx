@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import {
   Button,
   Card,
@@ -207,7 +208,7 @@ export default function BookingPage() {
         <Row gutter={16}>
           <Col xs={24} lg={14}>
             <Table<BookingItem>
-              rowKey={(r, i) => String(r.id ?? `${guest(r)}-${r.time}-${i}`)}
+              rowKey={rk}
               title={() => `预订 · ${date.format('YYYY-MM-DD')} · rev=${rev ?? '-'}`}
               columns={bCols}
               dataSource={bookings}
@@ -218,7 +219,7 @@ export default function BookingPage() {
           </Col>
           <Col xs={24} lg={10}>
             <Table<QueueItem>
-              rowKey={(r, i) => String(r.queue_no ?? r.no ?? i)}
+              rowKey={rk}
               title={() => '当前排队'}
               columns={qCols}
               dataSource={queue}
@@ -235,7 +236,7 @@ export default function BookingPage() {
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         confirmLoading={busy}
-        destroyOnClose
+        destroyOnHidden
         onOk={async () => {
           const v = await form.validateFields()
           const ok = await runAction(

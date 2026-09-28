@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import { Card, Empty, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchSnapshot } from '../../api'
@@ -133,7 +134,7 @@ export default function LedgerPage() {
           <Empty description="暂无库存流水。流水由进货单、销售与盘点重放生成" />
         ) : (
           <Table<StockLogItem>
-            rowKey={(r, i) => String(r.seq ?? `${r.date}-${r.ing}-${i}`)}
+            rowKey={rk}
             columns={columns}
             dataSource={filtered.slice(0, 400)}
             loading={loading}

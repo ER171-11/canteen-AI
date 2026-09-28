@@ -298,7 +298,7 @@ export default function WorkorderPage() {
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         confirmLoading={busy}
-        destroyOnClose
+        destroyOnHidden
         onOk={async () => {
           const v = await form.validateFields()
           setBusy(true)

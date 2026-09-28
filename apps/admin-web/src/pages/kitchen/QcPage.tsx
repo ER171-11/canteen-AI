@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import {
   Alert,
   Card,
@@ -201,7 +202,7 @@ export default function QcPage() {
               />
             )}
             <Table<YieldAlert>
-              rowKey={(r, i) => String(r.workorder_id ?? r.id ?? r.sku_id ?? i)}
+              rowKey={rk}
               columns={yieldColumns}
               dataSource={yieldAlerts}
               loading={loading}

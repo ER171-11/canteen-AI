@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import {
   AutoComplete,
   Button,
@@ -109,7 +110,7 @@ export default function AttendancePage() {
         }
       >
         <Table<ClockItem>
-          rowKey={(r, i) => String(`${staffName(r)}-${r.ts ?? r.time}-${i}`)}
+          rowKey={rk}
           columns={columns}
           dataSource={rows}
           loading={loading}
@@ -122,7 +123,7 @@ export default function AttendancePage() {
         open={open}
         onCancel={() => setOpen(false)}
         confirmLoading={busy}
-        destroyOnClose
+        destroyOnHidden
         onOk={async () => {
           const v = await form.validateFields()
           setBusy(true)

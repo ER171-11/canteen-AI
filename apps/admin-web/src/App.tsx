@@ -10,6 +10,7 @@ import ModuleBrowsePage from './pages/ModuleBrowsePage'
 import WeeklyReportPage from './pages/ops/WeeklyReportPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import SystemConfigPage from './pages/SystemConfigPage'
+import AppReleasePage from './pages/AppReleasePage'
 import DishesPage from './pages/kitchen/DishesPage'
 import RecipesPage from './pages/kitchen/RecipesPage'
 import SopPage from './pages/kitchen/SopPage'
@@ -44,7 +45,7 @@ function HomeRedirect() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="platform/actions" element={<ActionsPage />} />
           <Route path="platform/org" element={<OrgPage />} />
           <Route path="platform/system" element={<SystemConfigPage />} />
+          <Route path="platform/app-release" element={<AppReleasePage />} />
 
           {/* 菜品厨房 */}
           <Route path="kitchen/dishes" element={<DishesPage />} />

@@ -258,7 +258,8 @@ export interface RecipeItem {
   /** 五色：red/black/yellow/green/purple 或 红/黑/黄/绿/紫 */
   color: string
   filling?: string
-  face_main?: BomEntry[]
+  /** 后端可能下发数组，也可能因 UI 保存把 face_main 落成纯字符串 */
+  face_main?: BomEntry[] | string
   main?: BomEntry[]
   aux?: BomEntry[]
   seasoning?: BomEntry[]
@@ -865,4 +866,24 @@ export interface AuditItem {
   role?: string
   status: number
   dt_ms?: number
+}
+
+/** GET /api/app/release — Android 安装包分发包元信息（供「App 下载」页） */
+export interface AppRelease {
+  ok: boolean
+  available: boolean
+  applicationId?: string | null
+  versionName?: string | null
+  versionCode?: number | null
+  minSdk?: number | null
+  variant?: string | null
+  file?: string | null
+  size?: number | null
+  sizeText?: string | null
+  sha256?: string | null
+  builtAt?: string | null
+  downloadPath?: string
+  lan?: { port?: number; ips?: string[]; urls?: string[] }
+  note?: string | null
+  error?: string | null
 }

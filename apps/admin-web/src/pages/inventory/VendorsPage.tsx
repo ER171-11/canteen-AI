@@ -196,7 +196,7 @@ export default function VendorsPage() {
             setBusy(false)
           }
         }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item name="ing" label="原料" rules={[{ required: true }]}>

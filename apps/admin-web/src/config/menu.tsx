@@ -129,6 +129,7 @@ export const MENU: MenuGroup[] = [
       { path: '/platform/actions', title: '审批中心' },
       { path: '/platform/org', title: '门店岗位账号' },
       { path: '/platform/system', title: '系统配置' },
+      { path: '/platform/app-release', title: 'App 下载' },
       { path: '/platform/ai-audit', title: 'AI审计' },
       { path: '/platform/audit-log', title: '审计日志' },
     ],

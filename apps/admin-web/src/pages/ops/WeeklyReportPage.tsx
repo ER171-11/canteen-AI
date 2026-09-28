@@ -429,7 +429,7 @@ export default function WeeklyReportPage() {
         open={!!priceRow}
         onCancel={() => setPriceRow(null)}
         confirmLoading={busy}
-        destroyOnClose
+        destroyOnHidden
         onOk={async () => {
           const v = await priceForm.validateFields()
           const row = priceRow

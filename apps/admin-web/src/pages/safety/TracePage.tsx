@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import { Card, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchFoodsafe } from '../../api'
@@ -66,7 +67,7 @@ export default function TracePage() {
           溯源批次由供应商入库同步，后台只读展示；纠错请走进货/留样相关写操作。
         </Typography.Paragraph>
         <Table<TraceItem>
-          rowKey={(r, i) => String(r.batch_no ?? r.batch ?? i)}
+          rowKey={rk}
           columns={columns}
           dataSource={rows}
           loading={loading}

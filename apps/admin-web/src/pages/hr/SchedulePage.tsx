@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { rk } from '../../utils/rowKey'
 import {
   AutoComplete,
   Button,
@@ -112,7 +113,7 @@ export default function SchedulePage() {
         }
       >
         <Table<ShiftItem>
-          rowKey={(r, i) => String(r.id ?? `${staffName(r)}-${r.date}-${i}`)}
+          rowKey={rk}
           columns={columns}
           dataSource={rows}
           loading={loading}
@@ -125,7 +126,7 @@ export default function SchedulePage() {
         open={open}
         onCancel={() => setOpen(false)}
         confirmLoading={busy}
-        destroyOnClose
+        destroyOnHidden
         onOk={async () => {
           const v = await form.validateFields()
           setBusy(true)

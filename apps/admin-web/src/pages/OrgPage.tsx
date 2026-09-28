@@ -360,7 +360,7 @@ export default function OrgPage() {
             message.error(err.response?.data?.error || '失败')
           }
         }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={userForm} layout="vertical">
           <Form.Item name="account" hidden>
@@ -405,7 +405,7 @@ export default function OrgPage() {
             message.error(err.response?.data?.error || '失败')
           }
         }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={posForm} layout="vertical">
           <Form.Item name="name" label="岗位名">

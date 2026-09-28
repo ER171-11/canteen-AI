@@ -5,6 +5,7 @@ import type {
   ActionItem,
   ActionStatus,
   AnalysisResp,
+  AppRelease,
   BookingResp,
   Dish,
   FoodsafeResp,
@@ -320,5 +321,13 @@ export async function fetchBooking(date: string): Promise<BookingResp> {
 /** GET /api/modules/foodsafe */
 export async function fetchFoodsafe(): Promise<FoodsafeResp> {
   const { data } = await client.get<FoodsafeResp>('/modules/foodsafe')
+  return data
+}
+
+/* ---------------- App 分发包（局域网下载） ---------------- */
+
+/** GET /api/app/release — 安装包元信息（版本/大小/哈希/局域网地址） */
+export async function fetchAppRelease(): Promise<AppRelease> {
+  const { data } = await client.get<AppRelease>('/app/release')
   return data
 }

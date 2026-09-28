@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { rk } from '../utils/rowKey'
 import {
   Alert,
   AutoComplete,
@@ -1146,7 +1147,7 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
         </Space>
       )}
       <Table
-        rowKey={(r, i) => String(r.id ?? r.member_id ?? r.code ?? r.trace_id ?? r.device ?? i)}
+        rowKey={rk}
         loading={loading}
         dataSource={rows}
         columns={columns}
@@ -1157,7 +1158,7 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
         <div style={{ marginTop: 24 }}>
           <Typography.Title level={5}>{cfg.secondary.title}</Typography.Title>
           <Table
-            rowKey={(r, i) => String(r.id ?? r.name ?? i)}
+            rowKey={rk}
             loading={loading}
             dataSource={secondaryRows}
             columns={cfg.secondary.columns}
@@ -1169,7 +1170,7 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
         <div style={{ marginTop: 24 }}>
           <Typography.Title level={5}>{cfg.tertiary.title}</Typography.Title>
           <Table
-            rowKey={(r, i) => String(r.id ?? r.name ?? i)}
+            rowKey={rk}
             loading={loading}
             dataSource={tertiaryRows}
             columns={tertiaryColumns}
@@ -1182,7 +1183,7 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
         open={!!formAction}
         onCancel={() => setFormAction(null)}
         confirmLoading={busy}
-        destroyOnClose
+        destroyOnHidden
         onOk={async () => {
           const values = await writeForm.validateFields()
           if (formAction) await submitAction(formAction, values)
@@ -1207,7 +1208,7 @@ export default function ModuleBrowsePage({ routeKey }: { routeKey: string }) {
         open={!!priceRow}
         onCancel={() => setPriceRow(null)}
         confirmLoading={busy}
-        destroyOnClose
+        destroyOnHidden
         onOk={async () => {
           const v = await priceForm.validateFields()
           const row = priceRow
