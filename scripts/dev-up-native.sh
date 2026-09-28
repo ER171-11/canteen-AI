@@ -65,9 +65,9 @@ echo "==> 4) 推送快照（Node pusher 一次）"
 BFF_TOKEN="$TOKEN" node bff/store-node/pusher.js --once --store-url http://127.0.0.1:8765 \
   --bff-url http://127.0.0.1:8787 --token "$TOKEN" --db "$STORE_DB" | tail -3
 
-echo "==> 5) consumer 常驻（Node，5s）"
+echo "==> 5) consumer 常驻（Node，5s，token 失效自动续期）"
 start_bg consumer \
-  "cd '$ROOT' && BFF_TOKEN='$TOKEN' node bff/store-node/consumer.js --interval 5 --store-url http://127.0.0.1:8765 --bff-url http://127.0.0.1:8787 --token '$TOKEN' --db '$STORE_DB'" \
+  "cd '$ROOT' && BFF_TOKEN='$TOKEN' BFF_ACCOUNT='${BFF_ACCOUNT:-boss}' BFF_PASSWORD='${BFF_PASSWORD:-wufu123}' node bff/store-node/consumer.js --interval 5 --store-url http://127.0.0.1:8765 --bff-url http://127.0.0.1:8787 --token '$TOKEN' --account '${BFF_ACCOUNT:-boss}' --password '${BFF_PASSWORD:-wufu123}' --db '$STORE_DB'" \
   /tmp/canteen-consumer.log
 
 echo "==> 6) pusher 常驻（Node，60s）"
