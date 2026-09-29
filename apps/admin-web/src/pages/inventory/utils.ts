@@ -25,6 +25,19 @@ export function suggestRestockQty(ing: IngItem): number {
   return Math.ceil((line - cur) * 100) / 100
 }
 
+/** 数字格式化（对齐旧版 fmt(n,d=2)：null/非数显示「—」，千分位） */
+export function fmtNum(n: number | null | undefined, d = 2): string {
+  return n == null || !Number.isFinite(n)
+    ? '—'
+    : Number(n).toLocaleString('zh-CN', { minimumFractionDigits: d, maximumFractionDigits: d })
+}
+
+/** 库存总值（对齐旧版 stockValue()：Σ 当前库存 × 均价，保留 2 位） */
+export function stockValue(ings: IngItem[]): number {
+  const sum = ings.reduce((a, g) => a + (Number(g.stock) || 0) * (Number(g.avg) || 0), 0)
+  return Math.round((sum + Number.EPSILON) * 100) / 100
+}
+
 export function docPaid(doc: InventoryDoc): number {
   return (doc.payments ?? []).reduce((a, p) => a + (Number(p.amount) || 0), 0)
 }

@@ -6,6 +6,14 @@ body,
   height: 100%;
 }
 
+/* 原料库存表行样式（对齐旧版 HTML:71-72：停用行降透明度、低于安全库存行标红） */
+.ing-off-row > td {
+  opacity: 0.45;
+}
+.ing-neg-row > td {
+  color: #e8584a;
+}
+
 /* AI 强调渐变文字（品牌标识 / 登录标题） */
 .ai-gradient-text {
   background: linear-gradient(135deg, #f48fb1 0%, #9b6bbf 100%);

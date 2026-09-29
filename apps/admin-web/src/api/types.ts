@@ -498,14 +498,21 @@ export interface IngItem {
   unit?: string
   /** 采购单位（结算单「单位」列用，旧版 ing.buy） */
   buy?: string
+  /** 包规（如「25kg/袋」，旧版 ing.pack） */
+  pack?: string
   /** 当前库存量 */
   stock?: number
   /** 安全库存线（可能为 0） */
   safe?: number
   /** 估算日均消耗（安全线兜底用，快照可能无此字段） */
   est?: number
-  /** 均价 */
+  /** 均价（库存单位口径） */
   avg?: number
+  /** 换算率：1 采购单位 = conv 库存单位（旧版 ing.conv，缺省 1） */
+  conv?: number
+  /** 最近一次进货价（元/采购单位，重建库存时回写；无进货记录为 0/缺失） */
+  last?: number | null
+  /** 是否启用（false = 停用，不参与补货/告急统计） */
   on?: boolean
   _u?: string
 }

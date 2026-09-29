@@ -7,8 +7,8 @@ import type {
 
 /** 原料库存 mock（/api/snapshot/latest 不可用兜底） */
 export const MOCK_INGS: IngItem[] = [
-  { id: 'I-m1', name: '火龙果汁', cat: '色源类', unit: 'kg', stock: 1.2, safe: 3, est: 1.5, avg: 28, on: true },
-  { id: 'I-m2', name: '高筋面粉', cat: '主食类', unit: 'kg', stock: 48, safe: 20, est: 10, avg: 4.2, on: true },
+  { id: 'I-m1', name: '火龙果汁', cat: '色源类', unit: 'kg', stock: 1.2, safe: 3, est: 1.5, avg: 28, conv: 1, last: 28, on: true },
+  { id: 'I-m2', name: '高筋面粉', cat: '主食类', unit: 'kg', buy: '袋', pack: '25kg/袋', stock: 48, safe: 20, est: 10, avg: 4.2, conv: 25, last: 4.5, on: true },
   { id: 'I-m3', name: '菠菜汁', cat: '色源类', unit: 'kg', stock: 1.8, safe: 3, est: 1.5, avg: 22, on: true },
   { id: 'I-m4', name: '墨鱼汁', cat: '色源类', unit: 'kg', stock: 0.5, safe: 2, est: 1, avg: 65, on: true },
   { id: 'I-m5', name: '猪肉馅', cat: '肉类', unit: 'kg', stock: 15, safe: 10, est: 5, avg: 18, on: true },

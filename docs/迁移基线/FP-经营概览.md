@@ -18,7 +18,7 @@
 | FP-DASH-04 | 查看「未收欠款（累计）」KPI | HTML:1248、`saleDebt()` 汇总 | 无。admin-web 仅进货单侧「有欠款」标签（`InboundPage.tsx`:260），无客户挂账维度 | ⬜ 待补 | 读类；与 FP-DASH-13/14 同批 |
 | FP-DASH-05 | 查看「销售毛利率」KPI（含成本副标） | HTML:1249 `gm=(recv-cost)/recv` | 无实际数据：仅前端 MOCK 有 `gross_margin`（`DashboardPage.tsx`:30）；BFF 真实 kpis 无该字段（report.js:338-345） | ⬜ 待补 | 读类；**MOCK 掩盖缺口**，需在 BFF 侧出真实毛利率 |
 | FP-DASH-06 | 查看「采购应付（本期）」KPI | HTML:1243/1250 `DB.recv` 本期 payable 汇总 | 无。report.js 无 payable 聚合；进货单页仅有单据级金额 | ⬜ 待补 | 读类；低成本，可先补 |
-| FP-DASH-07 | 查看「库存总值」KPI | HTML:1244/1251 `stockValue()` | 无（`StockPage.tsx` 为列表无总值；report.js kpis 无） | ⬜ 待补 | 读类；只读聚合，**建议先补** |
+| FP-DASH-07 | 查看「库存总值」KPI | HTML:1244/1251 `stockValue()` | 看板仍无该 KPI（`DashboardPage.tsx` 与 report.js kpis 均无）；`stockValue()` 已在原料库存页落地（`StockPage.tsx`:233-243、`LedgerPage.tsx`:161），**本 KPI 仍需在经营看板补** | ⬜ 待补 | 读类；只读聚合，**建议先补**；2026-09-29 复核：聚合函数已就位 |
 | FP-DASH-08 | 查看「折扣/抹零（本期）」KPI | HTML:1241/1252 | 无（report.js 无 discount 聚合） | ⬜ 待补 | 读类 |
 | FP-DASH-09 | 查看「低库存预警」KPI（种数） | HTML:1253 `lowStocks()`、空态文案 :1285 | `DashboardPage.tsx`:388-425 预警卡 + `bff/routes/report.js`:257 真实生成「库存告急 N 项」 | ⬆️ 已移植 | 验证：打开经营看板 → 预警卡出现「库存告急 N 项：…」 |
 | FP-DASH-10 | 每日应收 vs 实收 14 天双柱图（含当日新增欠款红点） | HTML:1258-1278 `#chartDaily` SVG、:207-211 图例 | 无。新版仅有「时段热力（迷你）」今日分时段订单（`DashboardPage.tsx`:311-340），口径不同 | ⬜ 待补 | 读类；需 14 天应收/实收双序列数据 |

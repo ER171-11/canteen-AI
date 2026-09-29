@@ -7,6 +7,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Radio,
   Row,
   Space,
   Statistic,
@@ -19,7 +20,7 @@ import { fetchSnapshot, submitConfirmedAction } from '../../api'
 import type { IngItem } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
 import { MOCK_INGS } from './mock'
-import { safetyLine, stockStatus } from './utils'
+import { fmtNum, safetyLine, stockStatus, stockValue } from './utils'
 import { COLORS } from '../../theme'
 
 type IngRow = IngItem & {
@@ -29,7 +30,6 @@ type IngRow = IngItem & {
   moq?: string | number
   sup?: string
   spec?: string
-  conv?: number
 }
 
 export default function StockPage() {
@@ -39,6 +39,8 @@ export default function StockPage() {
   const [busy, setBusy] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [current, setCurrent] = useState<IngRow | null>(null)
+  const [q, setQ] = useState('')
+  const [cat, setCat] = useState('')
   const [form] = Form.useForm()
 
   const load = useCallback(() => {
@@ -64,12 +66,24 @@ export default function StockPage() {
     let critical = 0
     let low = 0
     for (const ing of items) {
+      // 停用原料不参与告急/偏低统计（对齐旧版 lowStocks() 的 g.on 过滤）
+      if (ing.on === false) continue
       const s = stockStatus(ing).text
       if (s === '告急') critical += 1
       else if (s === '偏低') low += 1
     }
-    return { total: items.length, critical, low }
+    return { total: items.length, critical, low, value: stockValue(items) }
   }, [items])
+
+  const cats = useMemo(
+    () => Array.from(new Set(items.map((g) => g.cat).filter(Boolean))) as string[],
+    [items],
+  )
+
+  const filtered = useMemo(() => {
+    const kw = q.trim()
+    return items.filter((g) => (!cat || g.cat === cat) && (!kw || (g.name ?? '').includes(kw)))
+  }, [items, cat, q])
 
   const openEdit = (r?: IngRow) => {
     setCurrent(r || null)
@@ -88,8 +102,9 @@ export default function StockPage() {
             safe: safetyLine(r) || r.safe,
             est: r.est,
             conv: r.conv || 1,
+            on: r.on !== false,
           }
-        : { unit: '斤', buy: '斤', pack: '斤', conv: 1, safe: 0 },
+        : { unit: '斤', buy: '斤', pack: '斤', conv: 1, safe: 0, on: true },
     )
     setEditOpen(true)
   }
@@ -119,6 +134,15 @@ export default function StockPage() {
       render: (v) => v || '-',
     },
     {
+      title: '换算率',
+      key: 'conv',
+      width: 120,
+      render: (_, r) =>
+        r.conv == null || r.conv === 1
+          ? '—'
+          : `1 ${r.buy || r.pack || ''} = ${r.conv} ${r.unit || ''}`,
+    },
+    {
       title: '当前量',
       key: 'stock',
       width: 90,
@@ -132,6 +156,27 @@ export default function StockPage() {
       width: 80,
       align: 'right',
       render: (_, r) => safetyLine(r) || '-',
+    },
+    {
+      title: '库存均价',
+      key: 'avg',
+      width: 110,
+      align: 'right',
+      render: (_, r) => `${fmtNum(r.avg)} 元/${r.unit || '单位'}`,
+    },
+    {
+      title: '最近采购价',
+      key: 'last',
+      width: 120,
+      align: 'right',
+      render: (_, r) => (r.last ? `${fmtNum(r.last)} 元/${r.buy || '单位'}` : '—'),
+    },
+    {
+      title: '库存总值',
+      key: 'val',
+      width: 110,
+      align: 'right',
+      render: (_, r) => `${fmtNum((Number(r.stock) || 0) * (Number(r.avg) || 0))} 元`,
     },
     {
       title: '状态',
@@ -149,6 +194,12 @@ export default function StockPage() {
       },
     },
     {
+      title: '启用',
+      key: 'on',
+      width: 80,
+      render: (_, r) => (r.on === false ? <Tag>停用</Tag> : <Tag color={COLORS.green}>启用</Tag>),
+    },
+    {
       title: '操作',
       key: 'act',
       width: 80,
@@ -164,19 +215,30 @@ export default function StockPage() {
     <div>
       {isMock && <MockAlert endpoint="/api/snapshot/latest · data.ings" />}
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}>
+        <Col span={6}>
           <Card>
             <Statistic title="原料数" value={stats.total} />
           </Card>
         </Col>
-        <Col span={8}>
+        <Col span={6}>
           <Card>
             <Statistic title="告急" value={stats.critical} valueStyle={{ color: COLORS.red }} />
           </Card>
         </Col>
-        <Col span={8}>
+        <Col span={6}>
           <Card>
             <Statistic title="偏低" value={stats.low} valueStyle={{ color: COLORS.yellow }} />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="库存总值"
+              value={stats.value}
+              precision={2}
+              suffix="元"
+              valueStyle={{ color: COLORS.primary }}
+            />
           </Card>
         </Col>
       </Row>
@@ -191,14 +253,37 @@ export default function StockPage() {
           </Space>
         }
       >
-        <Table<IngRow>
-          rowKey="id"
-          columns={columns}
-          dataSource={items}
-          loading={loading}
-          pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 项` }}
-          size="small"
-        />
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap size={8}>
+            <Input
+              allowClear
+              placeholder="搜索原料名称…"
+              style={{ width: 200 }}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <Space wrap size={4}>
+              <Tag.CheckableTag checked={cat === ''} onChange={() => setCat('')}>
+                全部分类
+              </Tag.CheckableTag>
+              {cats.map((c) => (
+                <Tag.CheckableTag key={c} checked={cat === c} onChange={() => setCat(c)}>
+                  {c}
+                </Tag.CheckableTag>
+              ))}
+            </Space>
+          </Space>
+          <Table<IngRow>
+            rowKey="id"
+            columns={columns}
+            dataSource={filtered}
+            loading={loading}
+            scroll={{ x: 'max-content' }}
+            rowClassName={(r) => (r.on === false ? 'ing-off-row' : '')}
+            pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 项` }}
+            size="small"
+          />
+        </Space>
       </Card>
 
       <Modal
@@ -271,6 +356,14 @@ export default function StockPage() {
             </Form.Item>
             <Form.Item name="est" label="日耗" style={{ flex: 1 }}>
               <InputNumber min={0} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="on" label="是否启用" style={{ width: 150 }}>
+              <Radio.Group
+                options={[
+                  { label: '启用', value: true },
+                  { label: '停用', value: false },
+                ]}
+              />
             </Form.Item>
           </Space>
         </Form>

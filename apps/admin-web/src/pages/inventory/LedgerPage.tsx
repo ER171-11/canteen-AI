@@ -5,7 +5,8 @@ import type { ColumnsType } from 'antd/es/table'
 import { fetchSnapshot } from '../../api'
 import type { IngItem, StockLogItem } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
-import { MOCK_LOGS } from './mock'
+import { MOCK_INGS, MOCK_LOGS } from './mock'
+import { fmtNum, stockValue } from './utils'
 import { COLORS } from '../../theme'
 
 const TYPE_COLOR: Record<string, string> = {
@@ -34,6 +35,7 @@ export default function LedgerPage() {
       })
       .catch(() => {
         setLogs(MOCK_LOGS)
+        setIngs(MOCK_INGS)
         setIsMock(true)
       })
       .finally(() => setLoading(false))
@@ -59,6 +61,50 @@ export default function LedgerPage() {
       return sa.localeCompare(sb)
     })
   }, [logs, ingFilter, typeFilter])
+
+  // 库存现值：按「当前库存 × 均价」倒序（对齐旧版 renderStock() 的排序与列）
+  const stockCur = useMemo(
+    () =>
+      [...ings].sort(
+        (a, b) =>
+          (Number(b.stock) || 0) * (Number(b.avg) || 0) -
+          (Number(a.stock) || 0) * (Number(a.avg) || 0),
+      ),
+    [ings],
+  )
+
+  const valueColumns: ColumnsType<IngItem> = [
+    {
+      title: '原料',
+      key: 'name',
+      render: (_, r) => (
+        <>
+          {r.name} <span style={{ color: '#999', fontSize: 12 }}>[{r.cat ?? '-'}]</span>
+        </>
+      ),
+    },
+    {
+      title: '当前库存',
+      key: 'stock',
+      width: 120,
+      align: 'right',
+      render: (_, r) => `${fmtNum(r.stock, 2)} ${r.unit ?? ''}`,
+    },
+    {
+      title: '均价',
+      key: 'avg',
+      width: 100,
+      align: 'right',
+      render: (_, r) => fmtNum(r.avg),
+    },
+    {
+      title: '库存总值',
+      key: 'val',
+      width: 120,
+      align: 'right',
+      render: (_, r) => fmtNum((Number(r.stock) || 0) * (Number(r.avg) || 0)),
+    },
+  ]
 
   const columns: ColumnsType<StockLogItem> = [
     { title: '日期', dataIndex: 'date', width: 110, render: (v, r) => v ?? r.t ?? '-' },
@@ -107,6 +153,26 @@ export default function LedgerPage() {
   return (
     <div>
       {isMock && <MockAlert endpoint="/api/snapshot/latest · data.logs" />}
+      <Card
+        title="库存现值"
+        style={{ marginBottom: 16 }}
+        extra={
+          <span style={{ color: '#888', fontSize: 12 }}>
+            {`库存总值：${fmtNum(stockValue(ings))} 元 · 共 ${ings.length} 种原料`}
+          </span>
+        }
+      >
+        <Table<IngItem>
+          rowKey="id"
+          columns={valueColumns}
+          dataSource={stockCur}
+          loading={loading}
+          size="small"
+          pagination={false}
+          scroll={{ y: 320 }}
+          rowClassName={(r) => ((r.stock ?? 0) < (r.safe ?? 0) ? 'ing-neg-row' : '')}
+        />
+      </Card>
       <Card
         title="库存流水"
         extra={
