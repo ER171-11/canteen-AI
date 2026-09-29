@@ -46,6 +46,8 @@ import SettleModal from './settle/SettleModal'
 import SettleBatchModal from './settle/SettleBatchModal'
 import PayModal from './PayModal'
 import RecvFormModal from './RecvFormModal'
+import RecvImportModal from './RecvImportModal'
+import { downloadRecvTemplate } from './recvTemplate'
 import { DEFAULT_SETTLE_TPL, loadSettleTpl } from './settle/template'
 import { exportSettlePdf } from './settle/pdf'
 import type { SettleOpts } from './settle/html'
@@ -127,6 +129,8 @@ export default function InboundPage() {
   /* FP-RECV-08 编辑进货单：走 recv.update 审批队列，不直写库 */
   const [editDoc, setEditDoc] = useState<InventoryDoc | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  /* FP-RECV-02 批量导入：预览（只读）→ 提交只投一个 recv.import 动作 */
+  const [importOpen, setImportOpen] = useState(false)
 
   const load = useCallback((d: Dayjs) => {
     setLoading(true)
@@ -580,6 +584,14 @@ export default function InboundPage() {
             <Button disabled={!filtered.length} onClick={() => setSettleBatchOpen(true)}>
               批量结算单
             </Button>
+            {/* FP-RECV-03 下载导入模板（只读：客户端生成 CSV，零写库） */}
+            <Button onClick={downloadRecvTemplate}>下载导入模板</Button>
+            {/* FP-RECV-02 批量导入：预览只读 → 提交投 recv.import（走审批队列，确认前零变化） */}
+            <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
+              <Button disabled={!canWrite || isMock} onClick={() => setImportOpen(true)}>
+                批量导入
+              </Button>
+            </Tooltip>
             {/* FP-RECV-01 新建进货单：只投 recv.inbound 建议动作，确认前不改账面 */}
             <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
               <Button
@@ -806,6 +818,13 @@ export default function InboundPage() {
         suppliers={suppliers}
         orders={orders}
         onClose={() => setEditOpen(false)}
+        onQueued={() => load(acceptDate)}
+      />
+
+      {/* FP-RECV-02 批量导入：预览零写，整批只投一个 recv.import 动作 */}
+      <RecvImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
         onQueued={() => load(acceptDate)}
       />
     </div>

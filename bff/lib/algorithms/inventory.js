@@ -11,6 +11,7 @@
  *   recv.inbound                      → applyRecvInbound（含 Node 超集：paid / method / po / line.recvQty）
  *   recv.accept                       → insertRecvAccept
  *   recv.pay                          → applyRecvPay（补付 / 欠款清收）
+ *   recv.import                       → applyRecvImport（批量导入，批末统一 rebuildStock 一次）
  *   stock.count                       → applyStockCount + insertStockCount
  *   order.mark                        → applyOrderMark
  *   vendor.upsert                     → upsertVendor
@@ -795,6 +796,99 @@ function applyRecvVoid(data, payload, ctx) {
     + '库存按台账自动回退，原单保留可查）；' + rb;
 }
 
+/* ---------- recv.import（批量导入） ---------- */
+
+/**
+ * recv.import：批量导入进货单（审批队列执行）。
+ *
+ * 移植旧版 commitRecvImport（HTML:3650-3671）：
+ *   逐张单据按 applyRecvInbound 的同一口径生成 JH 单（id / no / lines / payable / payments /
+ *   method / status），push 进 data.recv，供应商名字并入 data.suppliers，
+ *   **批末统一 rebuildStock 一次**（ADR-004 §2.4：避免 N 次全量重算）。
+ *
+ * 红线：
+ *   · 本函数是**唯一的执行器**，前置的解析/预览全在 lib/recv_import.js（纯计算、零写）；
+ *     云端只在预览通过后才投这一个动作 → 批内原子（整批成功或整批失败）。
+ *   · 明细非法（数量 ≤0 / 单价非数字 / 单价 <0 / 无原料名）**直接 throw 拒绝**，
+ *     不静默跳过（红线⑥）——预览层已经过滤过，执行期再出错说明数据被改过，必须留失败痕迹。
+ *   · **不代建原料**：与应用层安全项一致（批量自动建档会把错误的单位/分类写进主数据，且不可撤销）。
+ *   · 无用依赖：不做 N 次 rebuildStock，也不会绕过 /api/actions 直写。
+ *
+ * @param {object} data 业务数据快照
+ * @param {object} payload { docs:[{supplier,date,note,lines:[{ingId,name,qty,price,unit}]}], markPaid }
+ */
+function applyRecvImport(data, payload) {
+  if (data.recv === undefined || data.recv === null) data.recv = [];
+  if (!Array.isArray(data.recv)) throw new Error('data.recv 不是数组');
+  const recv = data.recv;
+  const docs = Array.isArray(payload && payload.docs) ? payload.docs : [];
+  if (!docs.length) throw new Error('recv.import 缺 docs（空批次已拒绝，未改动账面）');
+  const markPaid = !!(payload && payload.markPaid);
+  let newDoc = 0;
+  let newLine = 0;
+  let total = 0;
+
+  for (const d of docs) {
+    const doc = d || {};
+    const date = String(doc.date || today());
+    const supplier = String(doc.supplier || '').trim() || '未指定供应商';
+    const src = Array.isArray(doc.lines) ? doc.lines : [];
+    const lines = [];
+    for (const it of src) {
+      if (!it) continue;
+      const name = String(it.name || '').trim();
+      if (!name) throw new Error('recv.import 明细缺原料名（该批次整体拒绝）');
+      const qty = toFloat(it.qty || 0);
+      const price = toFloat(it.price || 0);
+      if (!(qty > 0)) throw new Error('recv.import 明细数量需 > 0：' + name);
+      if (!isFinite(price) || price < 0) throw new Error('recv.import 单价非法（需 ≥ 0 的数字）：' + name);
+      const line = {
+        ing: it.ingId || it.ing_id || it.ing,
+        name: name,
+        qty: qty,
+        price: price,
+        conv: 1,
+        amount: Math.round(qty * price * 100) / 100,
+        unitCost: price
+      };
+      /* 实收量：与 recv.inbound 同口径——只登记、不参与计价 */
+      if (it.recvQty !== undefined && it.recvQty !== null && it.recvQty !== '') {
+        line.recvQty = toFloat(it.recvQty);
+      }
+      lines.push(line);
+    }
+    if (!lines.length) throw new Error('recv.import 单据无有效明细行（供应商：' + supplier + '）');
+    const payable = Math.round(lines.reduce((a, l) => a + l.amount, 0) * 100) / 100;
+    const sameDay = recv.filter((p) => p && p.date === date).length;
+    const inbound = {
+      id: uid('R', 10),
+      no: 'JH' + String(date).replace(/-/g, '') + '-' + String(sameDay + 1).padStart(2, '0'),
+      date: date,
+      supplier: supplier,
+      lines: lines,
+      payable: payable,
+      /* 旧版「按应付全额登记付款」勾选项（HTML:3633 #recvPaidFlag → :3663）， ledger 语义不变 */
+      payments: (markPaid && payable > 0) ? [{ amount: payable, date: date, method: '现金/转账' }] : [],
+      note: String(doc.note || '').trim() || '【批量导入】',
+      method: '现金/转账',
+      status: '已入库'
+    };
+    recv.push(inbound);
+    total = Math.round((total + payable) * 100) / 100;
+    newDoc += 1;
+    newLine += lines.length;
+    /* 供应商名单补齐（旧版 :3666 DB.suppliers 去重追加，列表筛选下拉依赖它） */
+    const names = arr(data.suppliers).map((s) => String(s == null ? '' : s).trim()).filter(Boolean);
+    if (names.indexOf(supplier) < 0) names.push(supplier);
+    data.suppliers = names;
+  }
+
+  /* 批末统一重算一次台账（O(单据数 + 库存行数)，而非 O(N × 库存行数)） */
+  const rb = rebuildStock(data);
+  return 'recv.import 导入 ' + newDoc + ' 张进货单（' + newLine + ' 行，应付合计 ' + pf(total) + '）'
+    + (markPaid ? '，已按应付全额登记付款' : '，默认挂账（可后续补付）') + '；' + rb;
+}
+
 /* ---------- stock.count ---------- */
 
 /**
@@ -1115,6 +1209,7 @@ module.exports = {
   applyRecvPay,
   applyRecvUpdate,
   applyRecvVoid,
+  applyRecvImport,
   applyStockCount,
   insertStockCount,
   applyOrderMark,

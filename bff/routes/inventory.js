@@ -1,6 +1,6 @@
 'use strict';
 /*
- * routes/inventory.js — 进销存只读建议 + 食材按标准验收
+ * routes/inventory.js — 进销存只读建议 + 食材按标准验收 + 进货单批量导入预览
  *   GET /api/inventory/restock-suggest
  *     优先用原料 est（日耗）估算「还能撑几天」，按断货紧迫排序；
  *     有 data.plans 最新建议行时并入；无 est 时回退安全线补差。
@@ -8,9 +8,14 @@
  *     附带 spec_req（验收标准规格，采购员照着买）。
  *   GET /api/inventory/accept-standards  验收标准库
  *   GET /api/inventory/recv-accept?date= 逐项验收记录
+ *   POST /api/inventory/recv/import/preview  进货单批量导入预览（FP-RECV-02）
+ *     入参 {fileName, contentBase64}（兼容 {bytes}），支持 .xlsx / 伪 .xls(html 表格) / .csv / .json。
+ *     **红线：本端点只读**——解析在 lib/recv_import.js（纯计算），此处不写文件、不写快照、不入队；
+ *     写只在用户点「确认导入」时由前端投**一个** recv.import 动作走去 /api/actions。
  */
 const { loadSnapshot } = require('./snapshot');
 const { listStandards, specReqFor } = require('../lib/accept_standards');
+const { previewImport } = require('../lib/recv_import');
 
 function num(v, d) {
   const n = parseFloat(v);
@@ -211,7 +216,52 @@ function buildRecvAccept(snap, date) {
   return items;
 }
 
+/** 上传体上限：8MB（与 lib/recv_import.js previewImport 内的上限同口径） */
+const MAX_UPLOAD = 8 * 1024 * 1024;
+
+/**
+ * FP-RECV-02 进货单批量导入 · 预览（纯计算、零写）
+ * 失败一律走 400 + 明确 error 文案（由前端展示），不静默吞掉任何一行。
+ */
+async function handleRecvImportPreview(req, res, ctx) {
+  if (req.method !== 'POST') {
+    ctx.sendJSON(res, 405, { ok: false, error: 'method not allowed' });
+    return true;
+  }
+  const { buf, tooLarge } = await ctx.readBody(req, MAX_UPLOAD);
+  if (tooLarge) {
+    ctx.sendJSON(res, 413, {
+      ok: false,
+      error: '文件过大：上限 8MB，请拆分后再导入'
+    });
+    return true;
+  }
+  let body = null;
+  try {
+    body = JSON.parse(String(buf || '').toString('utf8'));
+  } catch (e) {
+    body = null;
+  }
+  if (!body || typeof body !== 'object' || (!body.contentBase64 && !body.text)) {
+    ctx.sendJSON(res, 400, { ok: false, error: '缺少 contentBase64（文件内容）' });
+    return true;
+  }
+  const snap = loadSnapshot();
+  const ings = (snap && snap.data && Array.isArray(snap.data.ings)) ? snap.data.ings : [];
+  const input = {
+    fileName: String(body.fileName || 'import.csv'),
+    contentBase64: body.contentBase64,
+    bytes: body.text ? Buffer.from(String(body.text), 'utf8') : null
+  };
+  const out = previewImport(input, ings);
+  ctx.sendJSON(res, out.ok ? 200 : 400, out);
+  return true;
+}
+
 async function handle(req, res, ctx, pathname) {
+  if (pathname === '/api/inventory/recv/import/preview') {
+    return handleRecvImportPreview(req, res, ctx);
+  }
   if (req.method !== 'GET') return false;
 
   if (pathname === '/api/inventory/restock-suggest') {

@@ -32,6 +32,8 @@ registerAll({
   /* 编辑/作废：做成建议动作走审批队列，不直写库；作废只留痕、不物理删除 */
   'recv.update': (ctx, data, payload) => inv.applyRecvUpdate(data, payload),
   'recv.void': (ctx, data, payload) => inv.applyRecvVoid(data, payload, ctx),
+  /* 批量导入：预览在 lib/recv_import.js（纯计算、零写），这里只接「提交」——整批一个动作（ADR-004 §2.4） */
+  'recv.import': (ctx, data, payload) => inv.applyRecvImport(data, payload),
   /* 补付 / 欠款清收：不登记 type 会被消费器判 need-manual 驳回（consumer.js:9） */
   'recv.pay': (ctx, data, payload) => inv.applyRecvPay(data, payload),
   'stock.count': (ctx, data, payload) => inv.applyStockCount(data, payload, ctx),
