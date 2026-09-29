@@ -5,7 +5,10 @@
  *   GET  /api/actions?status=待执行         → 列表
  *   POST /api/actions {type, payload, operator}
  *        → 入队 {id, status:"queued", rev:当前快照rev, created_at, trace_id}
- *        幂等：type+payload+operator 哈希防重，重复提交返回已有 id（dedup:true）
+ *        幂等（两级，均返回已有 id + dedup:true）：
+ *          ① 队列内：同 type+payload+operator 且仍在 OPEN（queued/待执行）→ 复用同一动作
+ *          ② 事后：同指纹的动作**已执行**且在 EXECUTED_DEDUP_MS 窗口内 → 复用该已执行动作
+ *             （dedup_of:"executed"）——防「连点两下 / 客户端重投 / 网络重试」产生两条动作、两笔入库
  *   POST /api/actions/{id}/confirm {operator, rev}
  *        → queued→待执行；rev 与当前快照 rev 不符 409
  *   GET|POST /api/actions/{id}/status       → {status, executed_at, error?}
@@ -24,6 +27,13 @@ const siAudit = require('../lib/si_audit');
 const FILE = 'actions_queue.json';
 const EXPIRE_MS = 24 * 3600 * 1000;
 const OPEN_STATES = ['queued', '待执行'];
+/*
+ * 事后幂等窗口：同一指纹的动作「已执行」之后，在此窗口内再次提交视为**同一次操作**，复用原动作不新建。
+ * 取值权衡：太短挡不住重投；太长会把「同一操作人过一会儿确实想再做一次同样的写操作」误判成重复。
+ * 5 分钟足够覆盖连点、超时重试、客户端/队列消息重投，而「同一 payload 逐字节相同」的独立操作在此窗口内极罕见。
+ * 仅对「已执行」生效：已驳回/已过期/已回滚都允许重新发起（驳回后重申请是正常诉求）。
+ */
+const EXECUTED_DEDUP_MS = 5 * 60 * 1000;
 
 function loadQueue() {
   const q = store.readJSON(FILE, []);
@@ -52,15 +62,39 @@ function hashOf(type, payload, operator) {
     .digest('hex');
 }
 
-// 入队（幂等）：返回 {action, dedup}
+// 动作终态时刻（已执行动作以 executed_at 为准）
+function finishedAtMs(a) {
+  const t = new Date(a.executed_at || a.updated_at || a.created_at).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+/* 事后幂等：同一次操作在「已执行」后又被提交（连点两下 / 重投）→ 返回那条已执行动作，不再新建 */
+function findExecutedDup(q, hash, nowMs) {
+  let hit = null;
+  for (const a of q) {
+    if (a.hash !== hash || a.status !== '已执行') continue;
+    const t = finishedAtMs(a);
+    if (nowMs - t > EXECUTED_DEDUP_MS) continue;
+    if (!hit || t > finishedAtMs(hit)) hit = a;
+  }
+  return hit;
+}
+
+// 入队（幂等）：返回 {action, dedup, dedup_of}
 function enqueue(type, payload, operator, traceId, meta) {
   const q = loadQueue();
-  sweep(q);
+  const dirty = sweep(q);            // 过期清扫的变更必须落盘（否则复投会命中一条「应已过期」的动作）
+  const flush = () => { if (dirty) saveQueue(q); };
   const hash = hashOf(type, payload, operator);
   const exist = q.find((a) => a.hash === hash && OPEN_STATES.indexOf(a.status) >= 0);
   if (exist) {
-    if (sweep(q)) saveQueue(q);
-    return { action: exist, dedup: true };
+    flush();
+    return { action: exist, dedup: true, dedup_of: 'open' };
+  }
+  const done = findExecutedDup(q, hash, Date.now());
+  if (done) {
+    flush();
+    return { action: done, dedup: true, dedup_of: 'executed' };
   }
   const snap = loadSnapshot();
   const now = new Date().toISOString();
@@ -231,7 +265,7 @@ async function handle(req, res, ctx, pathname) {
       return true;
     }
     const operator = body.operator || ctx.auth.account || ctx.auth.role;
-    const { action, dedup } = enqueue(body.type, body.payload, operator, ctx.traceId, {
+    const { action, dedup, dedup_of: dupOf } = enqueue(body.type, body.payload, operator, ctx.traceId, {
       origin: body.origin,
       policy_id: body.policy_id,
       tier: body.tier,
@@ -247,6 +281,7 @@ async function handle(req, res, ctx, pathname) {
       created_at: action.created_at,
       trace_id: action.trace_id,
       dedup,
+      dedup_of: dupOf || null,
       auto_executed: auto.auto === true,
       policy_id: auto.policy_id || null,
       auto_reason: auto.reason || null

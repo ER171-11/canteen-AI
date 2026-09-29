@@ -13,6 +13,10 @@
  *   · 红线②-a：请求体带图片 base64 一律 400 驳回，绝不接收图片本体
  *   · RBAC：无 actions.write 不得签发上传 URL
  *
+ * 覆盖 routes/actions.js：
+ *   · 入队两级幂等：OPEN 复用同一动作；「已执行」后窗口内复投复用原动作（连点两下不产生两条待审批）
+ *   · 已驳回 不参与事后幂等（驳回后可重新发起）
+ *
  * 运行：node routes/run-tests.js
  */
 const os = require('os');
@@ -282,6 +286,70 @@ async function testQcInboxAlerts(ok) {
   ok('buildInbox 品控告警带 created_at 供前端排序', !!view.alerts.filter((a) => a.kind === 'qc_fail')[0].created_at);
 }
 
+/**
+ * actions 入队两级幂等 —— 现场高频投诉「连点两下 = 两条待审批 = 两笔入库」的回归防线。
+ *   ① OPEN（queued/待执行）：同 type+payload+operator → 复用同一 id
+ *   ② 已执行后 5 分钟窗口内复投 → 复用该已执行动作（dedup_of:"executed"），不新建
+ *   ③ 窗口外复投 → 正常新建（不把"过一会儿确实想再做一次同样的写"永久屏蔽）
+ *   ④ 已驳回 不参与事后幂等 → 可重新发起
+ */
+async function testActionsDedup(ok) {
+  const actions = require('./actions');
+  const store = require('../lib/store');
+  const operator = '店长';
+  const post = async (p, pathname) => {
+    const res = {};
+    await actions.handle(
+      { method: 'POST', __body: JSON.stringify(p == null ? {} : p) },
+      res, mkMediaCtx('店长'), pathname || '/api/actions',
+    );
+    return res;
+  };
+
+  /* ① 首次入队 + 队列内幂等 */
+  const body = { type: 'stock.replenish', payload: { sku: 'flour', qty: 10 }, operator };
+  const first = await post(body);
+  ok('actions 首次入队 queued（dedup=false）',
+    first.code === 200 && first.body.status === 'queued' && first.body.dedup === false, first.body);
+  const id1 = first.body.id;
+
+  const dupOpen = await post(body);
+  ok('队列内幂等：OPEN 期间重复提交 → 复用同一 id（dedup_of=open）',
+    dupOpen.body.id === id1 && dupOpen.body.dedup === true && dupOpen.body.dedup_of === 'open', dupOpen.body);
+
+  /* 模拟店内消费器回调：动作进入「已执行」 */
+  const exec = await post({ result: { ok: true, new_rev: 99 } }, '/api/actions/' + id1 + '/execute');
+  ok('消费器回调 → 已执行（via=store）', exec.code === 200 && exec.body.status === '已执行', exec.body);
+
+  /* ② 连点两下的真凶场景：已执行之后又点了一次 */
+  const again = await post(body);
+  ok('已执行后复投 → 复用同一 id（dedup_of=executed，status 已执行）',
+    again.body.id === id1 && again.body.dedup === true
+    && again.body.dedup_of === 'executed' && again.body.status === '已执行', again.body);
+  const q1 = store.readJSON('actions_queue.json', []);
+  ok('连点两下后队列仍只有 1 条动作', q1.length === 1, q1.length);
+  ok('审批中心不会出现重复待审批（queued 计数为 0）',
+    q1.filter((a) => a.status === 'queued').length === 0);
+
+  /* ③ 窗口外：把已执行时刻推到 6 分钟前（> EXECUTED_DEDUP_MS=5min），复投应正常新建 */
+  const q2 = store.readJSON('actions_queue.json', []);
+  q2[0].executed_at = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+  store.writeJSON('actions_queue.json', q2);
+  const later = await post(body);
+  ok('窗口（5 分钟）外复投 → 正常新建（不是永久去重）',
+    later.body.dedup === false && later.body.id !== id1 && later.body.status === 'queued', later.body);
+
+  /* ④ 已驳回 不参与事后幂等 */
+  const body2 = { type: 'stock.replenish', payload: { sku: 'sugar', qty: 5 }, operator };
+  const rej = await post(body2);
+  const idRej = rej.body.id;
+  const rejOut = await post({ reason: '数量不对' }, '/api/actions/' + idRej + '/reject');
+  ok('管理端驳回 → 已驳回', rejOut.code === 200 && rejOut.body.status === '已驳回', rejOut.body);
+  const retry = await post(body2);
+  ok('已驳回后重新发起 → 正常新建（驳回不锁死）',
+    retry.body.dedup === false && retry.body.id !== idRej, retry.body);
+}
+
 async function main() {
   let fail = 0;
   const ok = (name, cond, extra) => {
@@ -349,6 +417,7 @@ async function main() {
   await testQcMedia(ok);
   await testInspectionBoardRoute(ok);
   await testQcInboxAlerts(ok);
+  await testActionsDedup(ok);
 
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(fail ? '== routes 测试失败 ' + fail + ' 项 ==' : '== routes 测试全部通过 ==');

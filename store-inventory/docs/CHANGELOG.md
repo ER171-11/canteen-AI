@@ -765,4 +765,36 @@
   e2e 全程使用临时目录，回退后无需清理。
 - 后续: **阶段 7（T9 iOS 工程化决策 + T10 文档收尾）**；`writeback-e2e` job 与其余 job 一样**未在真实 CI 跑过**（本机领先 `origin/main` 7 个提交未推送，§7 首项仍敞开）。
 
+---
+
+## [2026-09-29] T7 收口 - 事后幂等：连点两下不再产生两条动作（`ADR-006`）
+
+- 背景: 阶段 6 的 e2e 把「连点两下 = 两条待审批 = 两笔入库」写成可复现断言，现场也确有该投诉：
+  动作一旦「已执行」，同一 payload 再提交就会**新建一条 queued**（队列原有幂等只覆盖 OPEN 状态）。
+- 决策: 见 `docs/decisions/ADR-006-写操作幂等边界.md`（**实现同步补记**，顺序本应先文档后代码，已如实标记）。
+  - `bff/routes/actions.js` 增加第二级（事后）幂等：同 `type+payload+operator` 指纹的动作在「已执行」后
+    **5 分钟窗口内**（`EXECUTED_DEDUP_MS`，以 `executed_at` 为基准）再次提交 → **复用该动作**，返回
+    `{ id: 原 id, dedup: true, dedup_of: "executed", status: "已执行" }`，**不新建**。
+  - **只对「已执行」生效**：已驳回/已过期/已回滚均可重新发起（驳回后重新申请是正常诉求）。
+  - **不做永久去重**：窗口外一律正常新建，避免把「同一原料过一会儿确实要再补同样数量」永久屏蔽。
+  - 顺带修正：入队路径 `sweep()` 的变更结果原先被丢弃（过期清扫不落盘），现保留并在提前返回前落盘。
+- 交付: `bff/routes/actions.js`（`EXECUTED_DEDUP_MS:36` / `findExecutedDup:72` / `enqueue:84` / 响应 `dedup_of:284`）；
+  `bff/routes/run-tests.js` 新增 `testActionsDedup()` **9 条断言**；`scripts/e2e-writeback.js` 第 12 步由「登记已知边界」改为「断言已收口」，
+  e2e 断言数 **47 → 50**；新增 `docs/decisions/ADR-006-写操作幂等边界.md`。
+- 验证（实际跑过）: `node bff/routes/run-tests.js` 全绿（含「窗口外正常新建」「已驳回可重新发起」两条负向断言）；
+  `cd bff && npm test` **exit 0**（算法 14/14、store-node 4/4、seed 9/9、recv.import 7/7 + 10/10、routes 全通过）；
+  `node scripts/e2e-writeback.js` → **WRITEBACK E2E OK，50 条断言全绿**（连点两下后审批中心总条数仍为 1、无新增 queued、店内零写入）；
+  `scripts/lint-zero-dep.js` 通过；`ci/redline_guard.ps1` 全部通过。
+- 影响面: `bff/routes/actions.js`、`bff/routes/run-tests.js`、`scripts/e2e-writeback.js`、`docs/decisions/ADR-006-写操作幂等边界.md`、
+  `docs/下一步任务清单_2026-09-28.md`（§7.1 第 5 项关闭、§8.2.6 新增 6.11）、`docs/进度看板.html`、本文件。
+  **无 DB 迁移、无前端改动、无依赖变更。**
+- AI 坑（留给后续）:
+  - **窗口不能开大**：指纹是 payload 逐字节哈希，`stock.replenish {sku, qty}` 这类「看着一样但确实是第二次」的操作很常见，
+    窗口越大误判越多；5 分钟是「覆盖重试、不覆盖业务重复」的折中，要调先看 `ADR-006` §2.2。
+  - **指纹含 operator**：`operator` 取 `body.operator || 账号`，前端两次请求一次传一次不传就会哈希不同 → 幂等不命中
+    （属前端一致性问题，服务端未兜底）。
+  - **payload 换单号即失效**：前端若各自生成单号/时间戳，两次点击 payload 天然不同 → 服务端事后幂等挡不住，
+    需前端幂等键（`request_id`，**未做**，见 ADR-006 §7）。
+- 回档方案: `git revert` 本提交即回到「已执行后复投会新建动作」的旧行为；无数据迁移，历史动作不受影响（`hash` 字段本就存在）。
+- 后续: **阶段 7（T9 iOS 工程化决策 + T10 文档收尾）**；本次改动仍**未推送**，CI 未复跑，`writeback-e2e` job 仍记「未验证」。
 
