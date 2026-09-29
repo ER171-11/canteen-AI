@@ -238,6 +238,9 @@ fun FrontHallScreen(onOpen: (String) -> Unit) {
             )
         }
 
+        // —— 桌态看板（B 块：四项汇总 + 网格四态 + 待清排序超时）——
+        TableBoardSection(tables = tables, rev = invState.rev)
+
         // —— 可视化管道（流程优先，口径真实）——
         val readyCount = kitState.boardTables.sumOf { it.ready }
         val payable = tables.count { (it.amount ?: 0.0) > 0 }

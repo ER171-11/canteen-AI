@@ -168,8 +168,88 @@ function ridSuffix(rid) {
 /* ---------- qc.record / qc.pass / plate.pass ---------- */
 
 /**
+ * 缺陷项归一：数组 → JSON 字符串。
+ * 空值（undefined/null/''）与空数组视为「未提供」，返回 null，避免产生空缺陷行。
+ * 也接受 "裂纹, 开口" 这类分隔字符串。
+ */
+function normDefectItems(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const list = Array.isArray(v) ? v : String(v).split(/[,，、;；]/);
+  const out = list.map((x) => String(x == null ? '' : x).trim()).filter(Boolean);
+  return out.length ? JSON.stringify(out) : null;
+}
+
+/** 取第一个非空文本（主字段为空时回落别名），全空返回 null */
+function firstText(primary, alias) {
+  for (const v of [primary, alias]) {
+    if (v === undefined || v === null) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+/** 取第一个可解析为有限数值的值（conf 为 0 时也应写入） */
+function firstNum(primary, alias) {
+  for (const v of [primary, alias]) {
+    if (v === undefined || v === null || v === '') continue;
+    const n = num(v, null);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+/** 缺陷项：defect_items 优先，为空时回落 defects 别名 */
+function firstDefects(primary, alias) {
+  for (const v of [primary, alias]) {
+    const s = normDefectItems(v);
+    if (s !== null) return s;
+  }
+  return null;
+}
+
+/**
+ * 品控拍照识别扩展字段（A 块）：缺陷项 / 工序环节 / 责任人 / 照片引用 / 判定依据。
+ *
+ * 只在 payload 实际提供该字段时写入对应列 —— 历史只传 6 字段的调用方
+ * （含 ops.test.js 里以 Python queue_consumer.py 为基准的平价对拍）落库行
+ * 保持逐列一致，不会凭空多出 NULL 列导致对拍失败。
+ */
+function applyQcExtras(row, payload) {
+  const items = firstDefects(payload.defect_items, payload.defects);
+  if (items !== null) row.defect_items = items;
+
+  const stage = firstText(payload.stage, payload.step);
+  if (stage !== null) row.stage = stage;
+
+  const operator = firstText(payload.operator, null);
+  if (operator !== null) row.operator = operator;
+
+  const photoUrl = firstText(payload.photo_url, payload.photoUrl);
+  if (photoUrl !== null) row.photo_url = photoUrl;
+
+  const photoKey = firstText(payload.photo_key, payload.photoKey);
+  if (photoKey !== null) row.photo_key = photoKey;
+
+  const conf = firstNum(payload.conf, payload.confidence);
+  if (conf !== null) row.conf = conf;
+
+  const manual = payload.manual_review;
+  if (manual !== undefined && manual !== null && manual !== '') row.manual_review = truthy(manual) ? 1 : 0;
+
+  const station = firstText(payload.station, payload.point);
+  if (station !== null) row.station = station;
+
+  const storeId = firstText(payload.store_id, payload.storeId);
+  if (storeId !== null) row.store_id = storeId;
+
+  return row;
+}
+
+/**
  * qc.record：插入本地 qc_records 表，返回 rowid。
  * pass ∈ (1, True, "1", "合格") → 1，否则 0。
+ * 扩展字段见 applyQcExtras（迁移 003 加列）；未提供的列不写入。
  */
 function insertQcRecord(ctx, data, payload) {
   const row = {
@@ -180,8 +260,31 @@ function insertQcRecord(ctx, data, payload) {
     ts: payload.ts || nowIso(),
     source: payload.source || 'auto'
   };
+  applyQcExtras(row, payload);
   const rid = persist(ctx, data, 'qc_records', row);
   return 'qc_records rowid=' + (rid === null ? '-' : rid);
+}
+
+/* ---------- qc.force_pass ---------- */
+
+/**
+ * qc.force_pass：不合格工单强制放行留痕（A 块）。
+ * 必须填写原因并指明工单，记录操作人与时刻；缺任一项直接驳回（抛错 = 动作被拒）。
+ */
+function insertQcForcePass(ctx, data, payload) {
+  const wid = payload.workorder_id;
+  if (wid === undefined || wid === null || wid === '') throw new Error('强制放行缺少 workorder_id');
+  const reason = String(payload.reason === null || payload.reason === undefined ? '' : payload.reason).trim();
+  if (!reason) throw new Error('强制放行必须填写原因');
+  const row = {
+    workorder_id: pt(wid),
+    reason: reason,
+    operator: pt(payload.operator),
+    ts: payload.ts || nowIso(),
+    source: payload.source || 'manual'
+  };
+  const rid = persist(ctx, data, 'qc_force_pass', row);
+  return 'qc_force_pass rowid=' + (rid === null ? '-' : rid);
 }
 
 /* ---------- queue.serve ---------- */
@@ -1129,6 +1232,8 @@ function insertFinSplit(ctx, data, payload, approve) {
 
 module.exports = {
   insertQcRecord,
+  insertQcForcePass,
+  persist,
   applyQueueServe,
   insertQueueServe,
   insertLossReport,

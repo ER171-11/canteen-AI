@@ -258,7 +258,13 @@ data class WorkordersResponse(
     fun revText(): String = rev.asRevText()
 }
 
-/** GET /api/kitchen/qc?date= —— BFF 未公布 item 结构，宽松建模，补契约后收紧 */
+/**
+ * GET /api/kitchen/qc?date= —— BFF 未公布 item 结构，宽松建模，补契约后收紧。
+ *
+ * A 块新增字段（`bff/routes/kitchen.js` 以 Object.assign 透传 qc_records 全列）：
+ * 缺陷项 / 工序环节 / 责任人 / 照片引用 / 置信度 / 人工复核标记 / 工位。
+ * photoUrl 为空表示对象存储未配置或直传失败，UI 必须标注「图片不可用」而不是留白。
+ */
 @Serializable
 data class QcRecordDto(
     val id: String? = null,
@@ -270,8 +276,43 @@ data class QcRecordDto(
     val rate: Double? = null,
     val note: String? = null,
     val inspector: String? = null,
-    val ts: String? = null
-)
+    val ts: String? = null,
+    /** 工单号，不合格时用于锁定对应出品工单 */
+    @SerialName("workorder_id") val workorderId: String? = null,
+    /** 是否合格；null=未判定 */
+    val pass: JsonElement? = null,
+    val conf: Double? = null,
+    @SerialName("manual_review") val manualReview: Boolean = false,
+    /** 缺陷项，落库为 JSON 字符串，这里保持原始元素由映射层解析 */
+    @SerialName("defect_items") val defectItems: JsonElement? = null,
+    /** 所属工序环节 */
+    val stage: String? = null,
+    val operator: String? = null,
+    val station: String? = null,
+    @SerialName("photo_key") val photoKey: String? = null,
+    @SerialName("photo_url") val photoUrl: String? = null
+) {
+    /** pass 列可能是 1/0、true/false 或 "合格"，统一归一 */
+    fun passed(): Boolean? = when {
+        pass == null || pass is JsonNull -> null
+        else -> {
+            val t = pass.toString().trim().trim('"')
+            when {
+                t == "1" || t.equals("true", true) || t == "合格" -> true
+                t == "0" || t.equals("false", true) || t == "不合格" -> false
+                else -> null
+            }
+        }
+    }
+
+    /** 判定三态，驱动判定卡配色（绿/红/橙） */
+    fun level(): QcVerdictLevel = when {
+        manualReview -> QcVerdictLevel.REVIEW
+        passed() == true -> QcVerdictLevel.PASS
+        passed() == false -> QcVerdictLevel.FAIL
+        else -> QcVerdictLevel.REVIEW
+    }
+}
 
 @Serializable
 data class QcResponse(

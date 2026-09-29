@@ -15,6 +15,9 @@ import type {
   LoginRequest,
   LoginResponse,
   QcRecord,
+  QcMediaStatus,
+  SopVideo,
+  InspectionBoardResp,
   RecipeDetailResp,
   RecipesResp,
   RecvAcceptRecord,
@@ -284,6 +287,42 @@ export async function fetchKitchenQc(date: string): Promise<ListResp<QcRecord>> 
 export async function fetchKitchenBoard(date: string): Promise<KitchenBoardResp> {
   const { data } = await client.get<KitchenBoardResp>('/kitchen/board', {
     params: { date },
+  })
+  return data
+}
+
+/** GET /api/qc/media/status — 品控图片是否可用 */
+export async function fetchQcMediaStatus(): Promise<QcMediaStatus> {
+  const { data } = await client.get<QcMediaStatus>('/qc/media/status')
+  return data
+}
+
+/** GET /api/kitchen/sop-videos?sku_id= */
+export async function fetchSopVideos(skuId?: string): Promise<SopVideo[]> {
+  const { data } = await client.get<{ ok: boolean; items: SopVideo[] }>(
+    '/kitchen/sop-videos',
+    { params: skuId ? { sku_id: skuId } : undefined },
+  )
+  return data.items ?? []
+}
+
+/** POST /api/kitchen/sop-videos — 绑定视频教材 URL（不收视频字节） */
+export async function postSopVideo(body: {
+  sku_id: string
+  title: string
+  video_url: string
+}): Promise<{ ok: boolean; item?: SopVideo; error?: string }> {
+  const { data } = await client.post('/kitchen/sop-videos', body)
+  return data
+}
+
+/** GET /api/modules/inspection?date=&board= */
+export async function fetchInspectionBoard(params?: {
+  date?: string
+  board?: string
+}): Promise<InspectionBoardResp> {
+  const { data } = await client.get<InspectionBoardResp>('/modules/inspection', {
+    params: params && Object.keys(params).length ? params : undefined,
   })
   return data
 }

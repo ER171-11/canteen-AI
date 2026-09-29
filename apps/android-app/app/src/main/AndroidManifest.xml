@@ -39,5 +39,21 @@
             android:name=".push.SiPushJobService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!--
+          D 块「水印相机」：系统相机 ActivityResultContracts.TakePicture() 需要一个可写的
+          content:// Uri 落原图，这里用 FileProvider 把 filesDir/photos 下的私有文件
+          授权给相机应用写入。authority 用 ${applicationId} 派生，避免多 flavor 冲突；
+          exported=false + grantUriPermissions=true 即「仅本次授权、不对外开放」。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

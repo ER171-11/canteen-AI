@@ -7,6 +7,12 @@
  *   · RBAC：只读角色不得写
  *   · 红线：模板不得污染 snapshot.json（结算单是只读输出层）
  *
+ * 覆盖 routes/qc_media.js（A 块品控照片通道）：
+ *   · 未配置对象存储时降级（configured:false），品控主流程不中断
+ *   · 配置后签发 PUT/GET 预签名 URL（SigV4 无需 SDK）
+ *   · 红线②-a：请求体带图片 base64 一律 400 驳回，绝不接收图片本体
+ *   · RBAC：无 actions.write 不得签发上传 URL
+ *
  * 运行：node routes/run-tests.js
  */
 const os = require('os');
@@ -17,6 +23,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bff-routes-'));
 process.env.BFF_DATA_DIR = dir;
 
 const settle = require('./settle');
+const qcMedia = require('./qc_media');
 
 function mkctx(role) {
   return {
@@ -28,6 +35,251 @@ function mkctx(role) {
     },
     readBody: async (req) => ({ buf: Buffer.from(String(req.__body || '{}'), 'utf8') }),
   };
+}
+
+/** 品控/巡检只读与媒体端点需要 ctx.storeId / ctx.query，这里给最小可用桩 */
+function mkMediaCtx(role, queryStr) {
+  const c = mkctx(role);
+  c.storeId = 'ST001';
+  c.query = new URLSearchParams(queryStr || '');
+  return c;
+}
+
+async function testQcMedia(ok) {
+  /* 1) 未配置对象存储：必须降级而非报错 */
+  const noEnv = ['OSS_ENDPOINT', 'OSS_BUCKET', 'OSS_AK', 'OSS_SK'];
+  const saved = {};
+  noEnv.forEach((n) => { saved[n] = process.env[n]; delete process.env[n]; });
+
+  let res = {};
+  await qcMedia.handle({ method: 'GET' }, res, mkMediaCtx('店长'), '/api/qc/media/status');
+  ok('qc_media.status 未配置返回 200 + configured=false',
+    res.code === 200 && res.body.configured === false, res.body);
+  ok('qc_media.status 列出缺失环境变量（4 项）',
+    Array.isArray(res.body.missing) && res.body.missing.length === 4, res.body.missing);
+  ok('qc_media.status 绝不回传密钥', JSON.stringify(res.body).indexOf('sk=') < 0);
+
+  res = {};
+  await qcMedia.handle(
+    { method: 'POST', __body: JSON.stringify({ workorder_id: 1 }) },
+    res, mkMediaCtx('店长'), '/api/qc/media/presign',
+  );
+  ok('qc_media.presign 未配置时降级 200 + objstore_not_configured',
+    res.code === 200 && res.body.configured === false
+    && res.body.code === 'objstore_not_configured', res.body);
+  ok('qc_media.presign 降级时给出提示文案', typeof res.body.hint === 'string');
+
+  /* 2) 红线：图片载荷一律驳回 */
+  res = {};
+  await qcMedia.handle(
+    { method: 'POST', __body: JSON.stringify({ workorder_id: 1, image_base64: 'data:image/jpeg;base64,AAAA' }) },
+    res, mkMediaCtx('店长'), '/api/qc/media/presign',
+  );
+  ok('qc_media.presign 拒收图片 base64（400 image_payload_rejected）',
+    res.code === 400 && res.body.code === 'image_payload_rejected', res.body);
+
+  res = {};
+  await qcMedia.handle(
+    { method: 'POST', __body: JSON.stringify({ workorder_id: 1, photo_base64: 'AAAA' }) },
+    res, mkMediaCtx('店长'), '/api/qc/media/presign',
+  );
+  ok('qc_media.presign 拒收 photo_base64', res.code === 400, res.body);
+
+  ok('hasImagePayload 忽略空字符串字段',
+    qcMedia.hasImagePayload({ image_base64: '   ' }) === false);
+  ok('hasImagePayload 命中非空图片字段',
+    qcMedia.hasImagePayload({ image: 'AAAA' }) === true);
+
+  /* 3) 配置对象存储后：签发预签名 URL */
+  process.env.OSS_ENDPOINT = 'https://oss-cn-hangzhou.aliyuncs.com';
+  process.env.OSS_BUCKET = 'pandawufu-qc';
+  process.env.OSS_AK = 'AKID-TEST-ONLY';
+  process.env.OSS_SK = 'SECRET-TEST-ONLY';
+  process.env.OSS_REGION = 'cn-hangzhou';
+  process.env.OSS_SERVICE = 'oss';
+
+  res = {};
+  await qcMedia.handle({ method: 'GET' }, res, mkMediaCtx('店长'), '/api/qc/media/status');
+  ok('qc_media.status 配置后 configured=true 且不回传 AK/SK',
+    res.code === 200 && res.body.configured === true
+    && JSON.stringify(res.body).indexOf('SECRET-TEST-ONLY') < 0, res.body);
+
+  res = {};
+  await qcMedia.handle(
+    { method: 'POST', __body: JSON.stringify({ workorder_id: 88, ext: 'jpg', content_type: 'image/jpeg' }) },
+    res, mkMediaCtx('店长'), '/api/qc/media/presign',
+  );
+  ok('qc_media.presign 签发 PUT 上传 URL', res.code === 200 && res.body.method === 'PUT', res.body);
+  ok('qc_media.presign 对象键落在 qc/{门店}/{日期}/ 前缀下',
+    /^qc\/ST001\/\d{4}-\d{2}-\d{2}\/88-\d+-[0-9a-f]{6}\.jpg$/.test(res.body.key || ''), res.body.key);
+  ok('qc_media.presign 上传 URL 含 SigV4 签名参数',
+    /X-Amz-Algorithm=AWS4-HMAC-SHA256/.test(res.body.upload_url || '')
+    && /X-Amz-Signature=[0-9a-f]{64}/.test(res.body.upload_url || ''), res.body.upload_url);
+  ok('qc_media.presign 返回 upload 头与过期秒数',
+    res.body.headers && res.body.headers['Content-Type'] === 'image/jpeg'
+    && res.body.expires_in > 0, res.body.headers);
+  ok('qc_media.presign 未配 OSS_PUBLIC_BASE 时 photo_url 为空（走 GET 预签名读图）',
+    res.body.photo_url === null && res.body.public_base === false, res.body);
+
+  const key = res.body.key;
+
+  /* 4) 批量换取读取 URL（后台看大图） */
+  res = {};
+  await qcMedia.handle(
+    { method: 'POST', __body: JSON.stringify({ keys: [key, '../etc/passwd', ''] }) },
+    res, mkMediaCtx('店长'), '/api/qc/media/sign',
+  );
+  ok('qc_media.sign 返回 GET 预签名 URL', res.code === 200 && res.body.count === 1, res.body);
+  ok('qc_media.sign 读取 URL 为 GET 且带签名',
+    res.body.items[0].url.indexOf('X-Amz-Signature=') > 0
+    && /X-Amz-Algorithm=AWS4-HMAC-SHA256/.test(res.body.items[0].url), res.body.items[0]);
+  ok('qc_media.sign 丢弃路径穿越键', res.body.skipped === 2, res.body);
+
+  /* 5) RBAC：无 actions.write 不得签发上传 URL */
+  res = {};
+  await qcMedia.handle(
+    { method: 'POST', __body: JSON.stringify({ workorder_id: 9 }) },
+    res, mkMediaCtx('只读'), '/api/qc/media/presign',
+  );
+  ok('qc_media.presign 只读角色被拒 403', res.code === 403, res.body);
+
+  /* 6) 非本路由不接管 */
+  const other = {};
+  const took = await qcMedia.handle({ method: 'POST' }, other, mkMediaCtx('店长'), '/api/other');
+  ok('qc_media 非本路由不接管', took === false);
+
+  /* 7) 未知子路径必须显式 404，不静默吞掉 */
+  res = {};
+  await qcMedia.handle({ method: 'GET' }, res, mkMediaCtx('店长'), '/api/qc/media/nope');
+  ok('qc_media 未知子路径 404', res.code === 404, res.body);
+
+  /* 8) 配置后 presign 必须要求 workorder_id */
+  res = {};
+  await qcMedia.handle(
+    { method: 'POST', __body: JSON.stringify({ ext: 'jpg' }) },
+    res, mkMediaCtx('店长'), '/api/qc/media/presign',
+  );
+  ok('qc_media.presign 缺 workorder_id 返回 400', res.code === 400, res.body);
+
+  /* 回收环境变量，避免污染同进程后续用例 */
+  noEnv.forEach((n) => { delete process.env[n]; });
+  Object.keys(saved).forEach((n) => { if (saved[n] !== undefined) process.env[n] = saved[n]; });
+}
+
+/**
+ * 巡检统筹看板只读端点（C/D 块后台）。
+ * 红线：只读、无写路径；输出里不得出现任何图片字段（巡检照片只存手机本地）。
+ */
+async function testInspectionBoardRoute(ok) {
+  const modules = require('./modules');
+
+  // 无快照：必须空开 200 + hint，而不是整页「加载失败」
+  let res = {};
+  await modules.handle({ method: 'GET' }, res, mkMediaCtx('店长'), '/api/modules/inspection');
+  ok('modules.inspection 无快照空开 200 + no_snapshot',
+    res.code === 200 && res.body.ok === true && res.body.hint === 'no_snapshot', res.body && res.body.hint);
+  ok('modules.inspection 无快照仍回满 50 个节点主数据',
+    Array.isArray(res.body.nodes) && res.body.nodes.length === 50, res.body.nodes && res.body.nodes.length);
+  ok('modules.inspection 无快照 summary.done=0', res.body.summary.done === 0, res.body.summary);
+
+  // 打入快照：含 3 条巡检记录（其中 1 条未拍照）
+  fs.writeFileSync(path.join(dir, 'snapshot.json'), JSON.stringify({
+    rev: 7,
+    generated_at: '2026-09-29T23:30:00',
+    size: 1,
+    data: {},
+    ext: {
+      inspection_records: [
+        { node_id: 'K01', board: '后厨', date: '2026-09-29', done: 1, photo_taken: 1, operator: '王师傅', ts: '2026-09-29T21:00:00' },
+        { node_id: 'K02', board: '后厨', date: '2026-09-29', done: 0, photo_taken: 0, operator: '王师傅', ts: '2026-09-29T21:02:00' },
+        { node_id: 'F11', board: '前厅', date: '2026-09-29', done: 1, photo_taken: 1, every30: 1, round: 42, operator: '小刘', ts: '2026-09-29T21:05:00' }
+      ],
+      inspection_assignments: [{ board: '后厨', operator: '王师傅' }]
+    }
+  }), 'utf8');
+
+  res = {};
+  await modules.handle({ method: 'GET' }, res, mkMediaCtx('店长', 'date=2026-09-29'), '/api/modules/inspection');
+  ok('modules.inspection 读快照聚合完成率',
+    res.code === 200 && res.body.summary.done === 2 && res.body.summary.total === 50, res.body.summary);
+  ok('modules.inspection rev 透传（前端可判断数据新旧）', res.body.rev === 7, res.body.rev);
+  ok('modules.inspection 板块完成率三项齐全',
+    Array.isArray(res.body.boards) && res.body.boards.length === 3
+    && res.body.boards[0].rate === 5, res.body.boards);
+  ok('modules.inspection 漏项清单含未拍照节点',
+    res.body.boards.filter((b) => b.board === '后厨')[0].missing
+      .some((m) => m.node_id === 'K02' && m.photo_taken === false));
+  ok('modules.inspection 输出绝不含图片字段',
+    JSON.stringify(res.body).indexOf('photo_url') < 0
+    && JSON.stringify(res.body).indexOf('base64') < 0);
+  ok('modules.inspection 带 updated_at 供前端标注数据时间',
+    typeof res.body.updated_at === 'string' && res.body.updated_at.length >= 10);
+
+  // 筛选：点位维度
+  res = {};
+  await modules.handle({ method: 'GET' }, res, mkMediaCtx('店长', 'date=2026-09-29&node_id=F11'), '/api/modules/inspection');
+  ok('modules.inspection 按点位筛选只回该点位记录', res.body.records.length === 1, res.body.records.length);
+
+  // 只读红线：非 GET 不接管
+  const other = {};
+  const tookPost = await modules.handle({ method: 'POST' }, other, mkMediaCtx('店长'), '/api/modules/inspection');
+  ok('modules.inspection 非 GET 不接管（只读）', tookPost === false);
+
+  const other2 = {};
+  const took = await modules.handle({ method: 'GET' }, other2, mkMediaCtx('店长'), '/api/other');
+  ok('modules 非本路由不接管', took === false);
+}
+
+/**
+ * A 块品控不合格 → 收件箱 alerts（admin-web 经 SSE 实时看到大图与判定依据）。
+ * 红线：只透传 photo_key / photo_url 引用，图片本体绝不进 BFF。
+ */
+async function testQcInboxAlerts(ok) {
+  const inbox = require('./inbox');
+  const snap = {
+    rev: 9,
+    generated_at: '2026-09-29T20:40:00',
+    data: {},
+    ext: {
+      recipes: [{ sku_id: 'SKU-WF-HONG', name: '五福红饺' }],
+      qc_records: [
+        { id: 31, workorder_id: 12, sku_id: 'SKU-WF-HONG', pass: 0, ts: '2026-09-29T20:30:00',
+          defect_items: '["裂纹","开口"]', stage: '捏褶', operator: '张三', station: '后厨-捏褶台',
+          conf: 63.4, manual_review: 1, photo_url: null, photo_key: 'qc/ST001/2026-09-29/12-a1b2c3.jpg' },
+        { id: 32, workorder_id: 13, sku_id: 'SKU-WF-HONG', pass: 1, ts: '2026-09-29T20:35:00' },
+        { id: 33, workorder_id: 14, sku_id: 'SKU-UNKNOWN', pass: '不合格', ts: '2026-09-29T20:38:00',
+          defects: ['色泽偏差', '重量偏差'] }
+      ]
+    }
+  };
+
+  const alerts = inbox.qcAlerts(snap);
+  ok('qcAlerts 只收不合格记录（合格记录不计入）', alerts.length === 2, alerts.length);
+  ok('qcAlerts 按时间倒序（最新在前）', alerts[0].id.indexOf('qc_33') === 0, alerts.map((a) => a.id));
+  ok('qcAlerts 标题带菜品名', alerts[1].title === '品控不合格 · 五福红饺', alerts[1].title);
+  ok('qcAlerts 未关联菜品回落 sku_id', alerts[0].title === '品控不合格 · SKU-UNKNOWN', alerts[0].title);
+  ok('qcAlerts 解析 JSON 字符串缺陷项', alerts[1].defects.join('/') === '裂纹/开口', alerts[1].defects);
+  ok('qcAlerts 解析别名 defects 数组', alerts[0].defects.join('/') === '色泽偏差/重量偏差', alerts[0].defects);
+  ok('qcAlerts 摘要含环节/责任人/点位/置信度',
+    ['环节:捏褶', '责任人:张三', '点位:后厨-捏褶台', '置信度:63.4']
+      .every((s) => alerts[1].summary.indexOf(s) >= 0), alerts[1].summary);
+  ok('qcAlerts 透传大图对象键供 admin-web 换预签名 URL',
+    alerts[1].photo_key === 'qc/ST001/2026-09-29/12-a1b2c3.jpg', alerts[1].photo_key);
+  ok('qcAlerts 标注待人工复核', alerts[1].manual_review === true && alerts[0].manual_review === false);
+  ok('qcAlerts 归入 alerts 组且路由指向厨房品控页',
+    alerts.every((a) => a.group === 'alerts' && a.route === 'kitchen'));
+  ok('qcAlerts 绝不携带图片本体（无 base64/data uri）',
+    JSON.stringify(alerts).indexOf('base64') < 0 && JSON.stringify(alerts).indexOf('data:image') < 0);
+
+  // 空快照不报错
+  ok('qcAlerts 无快照返回空数组', inbox.qcAlerts(null).length === 0);
+  ok('qcAlerts 无 qc_records 返回空数组', inbox.qcAlerts({ ext: {} }).length === 0);
+
+  // 端到端：buildInbox 把品控不合格并入 alerts 计数与指纹（SSE 才会推增量）
+  const view = inbox.buildInbox(snap);
+  ok('buildInbox 把品控不合格并入 alerts', view.alerts.some((a) => a.kind === 'qc_fail'), view.counts);
+  ok('buildInbox counts 计入品控告警', view.counts.alerts >= 2, view.counts);
+  ok('buildInbox 品控告警带 created_at 供前端排序', !!view.alerts.filter((a) => a.kind === 'qc_fail')[0].created_at);
 }
 
 async function main() {
@@ -93,6 +345,10 @@ async function main() {
   ok('非本路由不接管', took === false);
 
   ok('未创建 snapshot.json（不碰业务库）', !fs.existsSync(path.join(dir, 'snapshot.json')));
+
+  await testQcMedia(ok);
+  await testInspectionBoardRoute(ok);
+  await testQcInboxAlerts(ok);
 
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(fail ? '== routes 测试失败 ' + fail + ' 项 ==' : '== routes 测试全部通过 ==');

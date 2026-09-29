@@ -13,15 +13,15 @@ kmp-shared/
 └── src/
     ├── commonMain/kotlin/com/pandawufu/shared/
     │   ├── Platform.kt               # expect AppDispatchers / platformLogD
-    │   ├── model/                    # DTO + FiveColor（五福色值与寓意）
+    │   ├── model/                    # DTO + FiveColor（含 QcMediaDtos / InspectionDtos）
     │   ├── network/                  # BffClient（Ktor，Bearer 注入）/ SseClient（流式）
-    │   ├── repository/               # Health/Snapshot/Report/Action/Kimi Repository
-    │   ├── viewmodel/HomeViewModel.kt# MVI 样例（state + intent）
+    │   ├── repository/               # Health/Snapshot/Report/Action/Kimi/QcMedia/Inspection Repository
+    │   ├── viewmodel/                # HomeViewModel（MVI 样例）/ QcMediaViewModel / InspectionViewModel
     │   ├── redline/                  # ConfirmGateway（写操作唯一入口）/ RedlineGuard（rev 过期检测）
     │   └── pos/UndoStack.kt          # POS 并拆单撤销栈状态机
     ├── commonMain/sqldelight/.../PandaWufuDb.sq   # undo_stack + draft_todo
     ├── androidMain/  iosMain/        # expect/actual 平台实现
-    └── commonTest/                   # ConfirmGateway / UndoStack 单测
+    └── commonTest/                   # ConfirmGateway / UndoStack / StockPolicy / KitchenViewModel 单测
 ```
 
 ## 与两端的关系
@@ -44,6 +44,15 @@ kmp-shared/
    gradle :kmp-shared:linkDebugFrameworkIosSimulatorArm64   # macOS 上产出 Shared.framework
    ```
    （或用 Android Studio 打开 `kmp-shared/` 直接 Sync & Build。）
+
+## 现场管理能力（2026-09-29）
+
+为移动端「现场管理」四块能力新增（详见 `docs/现场管理四块能力_架构设计.md`、`docs/decisions/ADR-005-现场管理媒体与写回边界.md`）：
+
+- **品控（A）**：`QcMediaRepository` 提供 `status`/`presign`/`sign`（对象存储通道，图片不落盘）；`QcMediaViewModel` 承载判定与动作入队。
+- **巡检（C）**：`InspectionRepository` 拉取看板并提交记录；`InspectionViewModel` 管理分板块进度与 30 分钟轮次。
+- DTO：`model/QcMediaDtos.kt`（`QcVerdictDto` / `QcVerdictLevel` / `SopVideoDto` …）、`model/InspectionDtos.kt`；`QcRecordDto` 扩展缺陷/环节/责任人/照片引用字段。
+- 两端约定不变：所有写操作仍经 `ConfirmGateway`（`qc.record` / `qc.force_pass` / `inspection.record` / `inspection.assign`）。
 
 ## 红线规则（不可违反）
 

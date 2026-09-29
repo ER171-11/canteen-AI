@@ -672,3 +672,46 @@
 - 后续: **阶段 6（T7 写回闭环端到端自动化验证）**：覆盖 `recv.inbound / update / void / import` 的「UI → 入队 → 审批 → 消费器 → 库存」闭环；
   其后 T8 的 CI 远端仍属**未验证**（仓库无 remote），以及 §7.1 的 4 项人工签收（含红线①裁定）。
 
+---
+
+## [2026-09-29] 现场管理 - 移动端四块能力（A 品控 / B 桌态 / C 巡检 / D 水印相机）
+
+- 背景: 让「现场」真正闭环——后厨出锅拍照判品控、前厅一眼看桌态、闭店按 50 节点拍照巡检、照片带水印可追溯。
+  四块能力都要处理照片，必须在既有两条红线内落地（红线①图片不落盘/不入库；红线②写操作唯一入口 `/api/actions`）。
+- 决策留痕: 新增 **`ADR-005-现场管理媒体与写回边界`**；模块设计见 **`docs/现场管理四块能力_架构设计.md`**（含 Mermaid 时序与接口契约）。
+- 交付:
+  - **A 品控**: 拍照 → 端侧水印 → `POST /api/kimi/vision` 识别 → 绿/红/橙判定；不合格经 `qc.record` 落库并锁定工单，厨师长可 `qc.force_pass`（**原因必填**）留痕放行；
+    原图**直传对象存储**，BFF 只签 URL（`qc_media` 三端点），DB 只存 `photo_url`/`photo_key`。后台 `QcPage` 新增**不合格大图** + SSE 实时刷新 + 「图片不可用」降级提示。
+  - **B 桌态**: 前厅 `TableBoardSection` —— 四态汇总条、网格桌位卡、待清台按等待时长排序并超时高亮、更新时间标注。
+  - **C 巡检**: `inspection_nodes.js` 50 节点主数据 + `inspection.js` 完成度/30 分钟轮次 + `inspection_board.js` 看板聚合，端点为 `GET /api/modules/inspection`；
+    Android `InspectionScreen` 分板块巡检、进度环、卫生间 30 分钟提醒、本地台账。**照片只存手机本地**，服务器只记状态。
+  - **D 水印相机**: `WatermarkCamera`/`WatermarkCapture` 端侧 Canvas 合成（门店+时间+点位+责任人），原图落 `filesDir/photos/raw`、成品 `photos/wm`，
+    经 `FileProvider`（`AndroidManifest.xml:49-57`）授权；`PhotoStore` 本地台账带容量上限。
+  - 附带：SOP 视频教材绑定 `GET/POST /api/kitchen/sop-videos`（只存 video_url 引用，不收视频字节）。
+- 红线（本次未改）:
+  - 红线①：图片 base64 只用内存、响应后销毁。`qc_media.hasImagePayload`（`qc_media.js:47`）主动拒收 base64（400 + 留痕）；
+    `inspection.hasImagePayload`（`inspection.js:74`）遇图片载荷**丢弃并置 `photo_local_only=1`**。品控图片直传对象存储，巡检图片不上云。
+  - 红线②：品控/巡检的全部写操作注册为动作（`qc.record`/`qc.pass`/`qc.force_pass`/`inspection.record`/`inspection.assign`），经 `ConfirmGateway` 两段式入队；**未新增任何直接写库路由**。
+  - 零依赖：预签名自研手写 AWS SigV4（`bff/lib/objstore.js`），不引入 AWS/OSS SDK。
+  - 迁移 003/004 **只加列/建表**，不改既有列。
+- 测试:
+  - 新增 `bff/lib/algorithms/qc_media.test.js`（品控扩展字段归一 + 强制放行留痕）、`bff/lib/algorithms/inspection.test.js`（记录/轮次/看板 + `qc.force_pass` 注册）。
+  - `bff/routes/run-tests.js` 增加 `qc_media` 三端点与 `inspection` 端点用例。
+  - ⚠️ 缺口：`/api/kitchen/sop-videos` **无测试覆盖**（四块能力中唯一）。
+- 验证（实际跑过）:
+  - `node bff/lib/algorithms/run-tests.js` → **PASS**（含 qc 扩展字段与 `qc.force_pass` 用例）。
+  - `node bff/routes/run-tests.js` → **exit 0**（含 qc_media 三端点、inspection 端点）。
+  - `node scripts/lint-zero-dep.js` → **通过**。
+  - `cd apps/admin-web && node_modules/.bin/tsc --noEmit` → **exit 0**（三页编译）。
+  - 未跑（环境所限）：`ci/redline_guard.sh`（Windows 无 bash，需类 Unix 环境）、`kmp-build`（无 JDK）、`playwright` 可视化（无运行中的 web 服务）。
+- 影响面: `bff/`（`lib/objstore.js`、`lib/inspection*.js`、`lib/algorithms/{ops,registry,inspection*}`、`routes/{qc_media,sop_media,modules,kitchen}`、`server.js`）、
+  `store-inventory/migrations/{003,004}`、`kmp-shared/`（DTO/仓库/VM/BffClient）、`apps/android-app/`（media/features/UI）、`apps/admin-web/`（三页 + API + 菜单/路由）、
+  `docs/decisions/ADR-005-*.md`、`docs/现场管理四块能力_架构设计.md`。**无依赖变更。**
+- AI 坑（留给后续）:
+  - **别放宽 `qc_media`/`inspection` 的图片守卫**：那是红线①的唯一代码闸门；为「省一次直传」而放行 base64 会同时踩红线与 `redline_guard`。
+  - **改大页面用小步替换**：本次编辑 `QcPage.tsx` 时一次 `replace` 曾连带删掉 `<Table>` 与闭合标签，必须即时回读核对（`tsc --noEmit` 是便宜的兜底）。
+  - **巡检 `done` 依赖端侧 `photo_taken`**：服务端拿不到照片（照片不上云），无法内容校验，是信任终端的既知边界，勿在文档里写成「已核验」。
+- 后续: 为 `/api/kitchen/sop-videos` 补测试；按需为品控大图做「URL 过期自动重签」优化；`kmp-build` / `redline_guard` 需在类 Unix + JDK 环境复跑确认。
+
+
+

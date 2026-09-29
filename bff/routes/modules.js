@@ -12,10 +12,15 @@
  *   GET /api/modules/analysis        → {ok, trend[], heatmap[], matrix[], efficiency{}}
  *        data.sales 非空 → 真实聚合（按日营收趋势 / 时段×星期热力 / 波士顿矩阵 / 效率）；
  *        sales 为空 → {mock:true, ...} 演示数据（取自原型 docs/熊猫五福App原型.html p-m-analysis）
+ *   GET /api/modules/inspection?date=&board=&operator=&node_id=
+ *                                  → {ok, date, summary, boards[], nodes[], records[], every30}
+ *        闭店巡检统筹看板（C/D 块）：从 ext.inspection_records / inspection_assignments 聚合。
+ *        巡检照片只存手机本地，故此处**不含任何图片字段**，只有「有没有拍、谁拍的、几点拍的」。
  * 非 GET 一律交外层 404。无快照：各模块空开 200 + hint=no_snapshot（分析可回 mock），
  * 避免 App 整页「加载失败」（与厨房/进销 restock-suggest 一致）。
  */
 const { loadSnapshot } = require('./snapshot');
+const { buildBoard } = require('../lib/inspection_board');
 
 const NO_SNAP_HINT = 'no_snapshot';
 const NO_SNAP_MSG = '店内快照未接通 · 本页可空开浏览，推送快照后刷新看真数';
@@ -1523,6 +1528,20 @@ async function handle(req, res, ctx, pathname) {
       serves,
       insight: bookingInsight(ext, snap ? snap.data : {}, date)
     }));
+    return true;
+  }
+
+  // GET /api/modules/inspection?date=&board=&operator=&node_id=
+  // 闭店巡检统筹看板（C/D 块）：板块完成率 + 漏项清单 + 历史台账 + 30 分钟轮次缺口
+  if (pathname === '/api/modules/inspection') {
+    const q = (ctx.query.get('date') || '').trim();
+    ctx.sendJSON(res, 200, Object.assign(base, buildBoard(ext, {
+      date: /^\d{4}-\d{2}-\d{2}$/.test(q) ? q : todayStr(),
+      board: (ctx.query.get('board') || '').trim(),
+      operator: (ctx.query.get('operator') || '').trim(),
+      node_id: (ctx.query.get('node_id') || '').trim(),
+      limit: ctx.query.get('limit')
+    })));
     return true;
   }
 

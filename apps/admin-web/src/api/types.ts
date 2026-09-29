@@ -320,7 +320,7 @@ export interface YieldAlert {
   [k: string]: unknown
 }
 
-/** GET /api/kitchen/qc?date= → items 元素 */
+/** GET /api/kitchen/qc?date= → items 元素（A 块扩展字段） */
 export interface QcRecord {
   id: string
   workorder_id?: string
@@ -329,6 +329,107 @@ export interface QcRecord {
   pass: boolean
   ts?: string
   source?: string
+  /** A 块新增：结论文案 / 缺陷项 / 工序环节 / 责任人 / 照片引用 */
+  name?: string
+  check_type?: string
+  result?: string
+  note?: string
+  inspector?: string
+  rate?: number
+  stage?: string
+  operator?: string
+  station?: string
+  /** 缺陷项：后端以 JSON 字符串或数组形式下发，前端统一按 unknown 解析 */
+  defect_items?: unknown
+  conf?: number
+  manual_review?: boolean
+  photo_url?: string
+  photo_key?: string
+}
+
+/** GET /api/qc/media/status — 品控图片可用性（未配置对象存储时标注「图片不可用」） */
+export interface QcMediaStatus {
+  ok: boolean
+  configured: boolean
+  missing?: string[]
+  host?: string
+  bucket?: string
+  region?: string
+  service?: string
+  path_style?: boolean
+  public_base?: boolean
+  expire_sec?: number
+}
+
+/** 强制放行记录（qc.force_pass 入队，按需落库） */
+export interface QcForcePass {
+  id?: string
+  workorder_id: string
+  sku_id?: string
+  reason: string
+  operator?: string
+  ts?: string
+}
+
+/** SOP 视频教材（后台绑定 video_url，不收视频字节） */
+export interface SopVideo {
+  id: string
+  sku_id: string
+  title: string
+  video_url: string
+  ts?: string
+}
+
+/** GET /api/modules/inspection → 巡检统筹看板 */
+export interface InspectionBoardResp {
+  ok: boolean
+  date?: string
+  updated_at?: string
+  summary?: InspectionSummary
+  boards: InspectionBoardProgress[]
+  nodes: InspectionNode[]
+  groups?: string[]
+  records?: InspectionRecord[]
+  every30?: InspectionEvery30
+  hint?: string
+  message?: string
+}
+
+export interface InspectionSummary {
+  total: number
+  done: number
+  rate: number
+}
+
+export interface InspectionBoardProgress {
+  board: string
+  total: number
+  done: number
+  rate: number
+  missing: string[]
+}
+
+export interface InspectionNode {
+  id: string
+  board: string
+  name: string
+  node_group?: string
+  every30: boolean
+}
+
+export interface InspectionRecord {
+  node_id: string
+  operator?: string
+  ts?: string
+  done: boolean
+  round?: number
+}
+
+export interface InspectionEvery30 {
+  window_min: number
+  rounds_total: number
+  rounds_done: number
+  rounds_missing: string[]
 }
 
 /** GET /api/kitchen/board?date= → items 元素（按五色分组） */

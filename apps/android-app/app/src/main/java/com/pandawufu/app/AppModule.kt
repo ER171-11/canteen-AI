@@ -37,6 +37,10 @@ import com.pandawufu.shared.repository.SnapshotRepository
 import com.pandawufu.shared.repository.SnapshotRepositoryImpl
 import com.pandawufu.shared.repository.SiRepository
 import com.pandawufu.shared.repository.SiRepositoryImpl
+import com.pandawufu.shared.repository.QcMediaRepository
+import com.pandawufu.shared.repository.QcMediaRepositoryImpl
+import com.pandawufu.shared.repository.InspectionRepository
+import com.pandawufu.shared.repository.InspectionRepositoryImpl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -128,6 +132,10 @@ object AppModule {
         private set
     lateinit var siRepository: SiRepository
         private set
+    lateinit var qcMediaRepository: QcMediaRepository
+        private set
+    lateinit var inspectionRepository: InspectionRepository
+        private set
 
     fun init(context: Context) {
         if (initialized) return
@@ -153,6 +161,8 @@ object AppModule {
         modulesRepository = CachingModulesRepository(ModulesRepositoryImpl(bffClient), offlineCache, bffClient)
         agentRepository = AgentRepositoryImpl(bffClient, sseClient)
         siRepository = SiRepositoryImpl(bffClient)
+        qcMediaRepository = QcMediaRepositoryImpl(bffClient)
+        inspectionRepository = InspectionRepositoryImpl(bffClient)
 
         ConfirmGateway.init(actionRepository)
         syncEngine = SyncEngine(
@@ -221,6 +231,7 @@ object AppModule {
         route == "m/org" || route == "m/restaurant" -> "org"
         route == "inventory" || route.startsWith("inventory/") -> "inventory"
         route == "kitchen" -> "kitchen"
+        route == "m/inspection" -> "inspection"
         else -> null
     }
 

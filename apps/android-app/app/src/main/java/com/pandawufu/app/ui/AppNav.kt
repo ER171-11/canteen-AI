@@ -120,6 +120,8 @@ object Routes {
     const val M_ORG = "m/org"
     /** 我的餐厅：门店资料 / 桌台 / 经营偏好聚合配置 */
     const val M_RESTAURANT = "m/restaurant"
+    /** 闭店巡检：50 节点拍照验证（C 块） */
+    const val M_INSPECTION = "m/inspection"
 
     /** 前厅子模块：底栏高亮「前厅」而非「我的」 */
     val frontChildRoutes = setOf(M_POS, M_BOOKING, M_TAKEOUT, M_VIP, M_REVIEW)
@@ -378,6 +380,9 @@ fun AppNav(modifier: Modifier = Modifier) {
                             RestaurantSettingsScreen(
                                 onOpen = { route -> navController.navigate(route) }
                             )
+                        }
+                        composable(Routes.M_INSPECTION) {
+                            com.pandawufu.app.features.inspection.InspectionScreen()
                         }
                     }
                 }

@@ -8,6 +8,12 @@
  *   POST /api/push/register     → {token, platform} 登记设备（后台轮询/未来 FCM）
  *
  * 红线：只读聚合 + 标记通知已读；绝不改快照/不入写队列。
+ *
+ * A 块「AI 品控识别」：不合格出品必须第一时间出现在老板/店长眼前，
+ * 因此 qcAlerts() 把 ext.qc_records 里 pass=0 的记录归入 alerts，
+ * 带上照片对象键与判定依据（缺陷项/工序环节/责任人/置信度），
+ * 由 /api/inbox/stream（SSE）实时推给 admin-web 看大图。
+ * 注意：这里只透传 photo_key / photo_url **引用**，图片本体不进 BFF。
  */
 const store = require('../lib/store');
 const push = require('../lib/push');
@@ -62,9 +68,78 @@ function humanType(type) {
     'config.update': '门店配置变更待确认',
     'recv.inbound': '入库待确认',
     'order.mark': '采购单状态待确认',
-    'loss.report': '报损单待确认'
+    'loss.report': '报损单待确认',
+    'qc.record': '品控判定待确认',
+    'qc.force_pass': '品控不合格强制放行待确认'
   };
   return map[type] || ('动作待确认 · ' + type);
+}
+
+/* ---------- A 块：品控不合格待办 ---------- */
+
+const QC_ALERT_LIMIT = 30;
+
+function truthyPass(v) {
+  return v === 1 || v === true || v === '1' || v === '合格';
+}
+
+/** defect_items 落库是 JSON 字符串，这里解析成数组供前端直接渲染 */
+function parseDefects(v) {
+  if (Array.isArray(v)) return v.map((x) => String(x)).filter(Boolean);
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  if (!s) return [];
+  try {
+    const j = JSON.parse(s);
+    if (Array.isArray(j)) return j.map((x) => String(x)).filter(Boolean);
+  } catch (e) { /* 非 JSON：按分隔符兜底 */ }
+  return s.split(/[,，、;；]/).map((x) => x.trim()).filter(Boolean);
+}
+
+/** 品控不合格记录 → alerts 条目（带大图引用与判定依据，供 admin-web 点开核对） */
+function qcAlerts(snap) {
+  const ext = (snap && snap.ext && typeof snap.ext === 'object') ? snap.ext : {};
+  const recipes = {};
+  arr(ext.recipes).forEach((r) => {
+    if (r && r.sku_id != null) recipes[String(r.sku_id)] = r;
+  });
+  const nameOf = (q) => {
+    const r = recipes[String(q.sku_id)];
+    return (r && (r.name || r.title)) || (q.sku_id != null ? String(q.sku_id) : '未关联菜品');
+  };
+
+  return arr(ext.qc_records)
+    .filter((q) => q && !truthyPass(q.pass))
+    .sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')))
+    .slice(0, QC_ALERT_LIMIT)
+    .map((q, i) => {
+      const defects = parseDefects(q.defect_items !== undefined ? q.defect_items : q.defects);
+      const bits = defects.slice(0, 4);
+      if (q.stage) bits.push('环节:' + q.stage);
+      if (q.operator) bits.push('责任人:' + q.operator);
+      if (q.station) bits.push('点位:' + q.station);
+      if (q.conf !== undefined && q.conf !== null) bits.push('置信度:' + q.conf);
+      return {
+        id: 'qc_' + (q.id !== undefined && q.id !== null ? q.id : i) + '_' + String(q.ts || '').slice(11, 19),
+        group: 'alerts',
+        level: 'warn',
+        kind: 'qc_fail',
+        title: '品控不合格 · ' + nameOf(q),
+        summary: bits.length ? bits.join(' · ') : '未标注缺陷项，请人工复核',
+        route: 'kitchen',
+        workorder_id: q.workorder_id !== undefined ? q.workorder_id : null,
+        sku_id: q.sku_id !== undefined ? q.sku_id : null,
+        defects: defects,
+        stage: q.stage || null,
+        operator: q.operator || null,
+        station: q.station || null,
+        conf: q.conf !== undefined ? q.conf : null,
+        manual_review: q.manual_review === 1 || q.manual_review === true,
+        photo_url: q.photo_url || null,
+        photo_key: q.photo_key || null,
+        ts: q.ts || null,
+        created_at: q.ts || null
+      };
+    });
 }
 
 function summarizePayload(p) {
@@ -96,6 +171,7 @@ function buildInbox(snap) {
       }));
     } catch (e) { alerts = []; }
   }
+  alerts = alerts.concat(qcAlerts(snap));
 
   const feed = push.feed().filter((x) => !x.read).map((x) => ({
     id: x.id,
@@ -190,4 +266,4 @@ async function handle(req, res, ctx, pathname) {
   return false;
 }
 
-module.exports = { handle, buildInbox, routeForType };
+module.exports = { handle, buildInbox, routeForType, qcAlerts };

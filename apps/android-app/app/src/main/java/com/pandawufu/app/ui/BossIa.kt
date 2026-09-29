@@ -555,6 +555,23 @@ object BossIa {
             actionTypes = listOf("equipment.maintain")
         ),
         Module(
+            label = "闭店巡检",
+            group = "人与合规",
+            route = "m/inspection",
+            gridSub = "50 节点·拍照留证",
+            oneLiner = "门窗/煤气/冰箱/电源/卫生间等 50 节点拍照巡检",
+            pills = listOf("后厨", "前厅", "仓库"),
+            leaves = mapOf(
+                "后厨" to listOf("灶台/冰箱柜门/地沟", "每点拍照留证"),
+                "前厅" to listOf("门窗/电源/水龙头", "漏项清单"),
+                "仓库" to listOf("门锁/消防", "30 分钟卫生间签到")
+            ),
+            bossAsk = "今天 50 个巡检点都拍了吗？漏了哪个？",
+            keywords = "巡检 闭店 安全 拍照 留证 门窗 煤气 冰箱 卫生间",
+            iconBgArgb = 0xFFE3EDF7,
+            actionTypes = listOf("inspection.record", "inspection.assign")
+        ),
+        Module(
             label = "经营分析",
             group = "店与报表",
             route = "m/analysis",

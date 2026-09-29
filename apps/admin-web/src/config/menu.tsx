@@ -108,6 +108,7 @@ export const MENU: MenuGroup[] = [
       { path: '/safety/trace', title: '溯源批次' },
       { path: '/safety/sample', title: '留样消毒' },
       { path: '/safety/devices', title: '设备维保能耗' },
+      { path: '/safety/inspection', title: '巡检统筹' },
     ],
   },
   {
@@ -146,6 +147,7 @@ const ROUTE_MAP: Record<string, string> = {
   'm/booking': '/dinein/booking',
   'm/vip': '/member/birthday',
   'm/equipment': '/safety/devices',
+  'm/inspection': '/safety/inspection',
   'm/pos': '/dinein/tables',
   'm/loss': '/inventory/loss',
   'm/review': '/dinein/reviews',

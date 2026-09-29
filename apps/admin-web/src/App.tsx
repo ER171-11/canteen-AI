@@ -29,6 +29,7 @@ import AttendancePage from './pages/hr/AttendancePage'
 import PerformancePage from './pages/hr/PerformancePage'
 import LicensesPage from './pages/safety/LicensesPage'
 import TracePage from './pages/safety/TracePage'
+import InspectionBoardPage from './pages/safety/InspectionBoardPage'
 
 /** 路由守卫：未登录跳 /login */
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -106,6 +107,7 @@ export default function App() {
           <Route path="safety/trace" element={<TracePage />} />
           <Route path="safety/sample" element={<ModuleBrowsePage routeKey="safety/sample" />} />
           <Route path="safety/devices" element={<ModuleBrowsePage routeKey="safety/devices" />} />
+          <Route path="safety/inspection" element={<InspectionBoardPage />} />
 
           {/* 财务 */}
           <Route path="finance/invoice" element={<ModuleBrowsePage routeKey="finance/invoice" />} />

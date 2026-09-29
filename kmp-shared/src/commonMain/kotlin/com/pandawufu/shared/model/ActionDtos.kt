@@ -8,11 +8,14 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 
 /**
@@ -266,3 +269,21 @@ data class OrgResetPasswordResponse(
 fun Map<String, String>.toJsonObject(): JsonObject = buildJsonObject {
     forEach { (k, v) -> put(k, v) }
 }
+
+/**
+ * 动作队列 payload 序列化：`explicitNulls = false` 让值为 null 的字段直接缺席。
+ *
+ * 这一点对 A 块很关键：BFF 的 `applyQcExtras` 只在 payload 真的提供了某列时才写库，
+ * 所以「照片没上传成功」必须是**不下发 photo_url**，而不是下发 `photo_url: null`，
+ * 否则会把已有照片引用覆盖成空。
+ */
+@PublishedApi
+internal val payloadJson = Json {
+    encodeDefaults = false
+    explicitNulls = false
+    ignoreUnknownKeys = true
+}
+
+/** 任意 @Serializable DTO → 动作 payload */
+inline fun <reified T> toPayload(value: T): JsonObject =
+    payloadJson.encodeToJsonElement(value).jsonObject

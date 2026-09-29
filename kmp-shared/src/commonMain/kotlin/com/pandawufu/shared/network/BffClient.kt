@@ -6,6 +6,7 @@ import io.ktor.client.call.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
+import io.ktor.http.content.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 
@@ -441,4 +442,81 @@ class BffClient(
     /** POST /api/si/missions/tick — 手动推进一轮值守 */
     suspend fun siTickMissions(): MissionTickDto =
         http.post("$baseUrl/api/si/missions/tick") { auth() }.body()
+
+    /* ---------- A 块：品控照片媒体通道（图片直传对象存储，不经 BFF） ---------- */
+
+    /** GET /api/qc/media/status — 对象存储是否可用，UI 据此决定是否标注「图片不可用」 */
+    suspend fun qcMediaStatus(): QcMediaStatusDto =
+        http.get("$baseUrl/api/qc/media/status") { auth() }.body()
+
+    /**
+     * POST /api/qc/media/presign — 取直传上传 URL。
+     * 注意：请求体**不能**带任何图片字段，否则 BFF 直接 400 image_payload_rejected。
+     */
+    suspend fun qcMediaPresign(req: QcPresignRequest): QcPresignResponse =
+        http.post("$baseUrl/api/qc/media/presign") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(req)
+        }.body()
+
+    /** POST /api/qc/media/sign — 把对象键批量换成带签名的临时读图 URL */
+    suspend fun qcMediaSign(req: QcSignRequest): QcSignResponse =
+        http.post("$baseUrl/api/qc/media/sign") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(req)
+        }.body()
+
+    /**
+     * 把端侧压缩后的 JPEG 直传到 BFF 签发的预签名 PUT 地址。
+     *
+     * 这是全项目唯一不带 `/api/` 前缀、也**不注入 Bearer** 的请求：
+     * 预签名本身就等价于一次性凭证，且对象存储不认识 BFF 的 token。
+     * BFF 只签名 host 头，故 Content-Type 必须由调用方按签发时的约定原样发出。
+     *
+     * @return true 表示对象已落存储；false 由调用方降级（photo_url 留空 + 标注「图片不可用」）
+     */
+    suspend fun uploadToPresignedUrl(
+        url: String,
+        bytes: ByteArray,
+        contentType: String = "image/jpeg"
+    ): Boolean {
+        if (url.isBlank() || bytes.isEmpty()) return false
+        val resp = http.put(url) {
+            contentType(ContentType.parse(contentType))
+            setBody(ByteArrayContent(bytes, ContentType.parse(contentType)))
+        }
+        return resp.status.isSuccess()
+    }
+
+    /* ---------- C、D 块：闭店巡检 ---------- */
+
+    /**
+     * GET /api/modules/inspection — 巡检统筹看板。
+     * nodes 是 BFF 内置的 50 个标准节点主数据（App 只读）；
+     * boards[].missing 是当场漏项清单；records 是历史台账。
+     */
+    suspend fun inspectionBoard(
+        date: String? = null,
+        board: String? = null,
+        operator: String? = null,
+        nodeId: String? = null
+    ): InspectionBoardResponse =
+        http.get("$baseUrl/api/modules/inspection") {
+            auth()
+            if (!date.isNullOrBlank()) parameter("date", date)
+            if (!board.isNullOrBlank()) parameter("board", board)
+            if (!operator.isNullOrBlank()) parameter("operator", operator)
+            if (!nodeId.isNullOrBlank()) parameter("node_id", nodeId)
+        }.body()
+
+    /* ---------- SOP 视频教材（C 块后台，App 只读播放） ---------- */
+
+    /** GET /api/kitchen/sop-videos — 菜品视频教材列表（未部署时 items 为空） */
+    suspend fun sopVideos(skuId: String? = null): SopVideoListDto =
+        http.get("$baseUrl/api/kitchen/sop-videos") {
+            auth()
+            if (!skuId.isNullOrBlank()) parameter("sku_id", skuId)
+        }.body()
 }

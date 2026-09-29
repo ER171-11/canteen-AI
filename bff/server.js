@@ -71,7 +71,9 @@ const ROUTES = [
   require('./routes/kitchen'),
   require('./routes/modules'),
   require('./routes/app_release'),
-  require('./routes/settle')
+  require('./routes/settle'),
+  require('./routes/qc_media'),
+  require('./routes/sop_media')
 ];
 
 // 默认绑 0.0.0.0：允许同一局域网设备访问（App 安装包下载 / 管理后台联调）。

@@ -75,7 +75,8 @@ function makeStore() {
 /* ---------- Python 侧执行器 ---------- */
 function pySetupSql() {
   return `
-CREATE TABLE IF NOT EXISTS qc_records (id INTEGER PRIMARY KEY AUTOINCREMENT, workorder_id, sku_id, sample_weight, pass INT, ts, source);
+CREATE TABLE IF NOT EXISTS qc_records (id INTEGER PRIMARY KEY AUTOINCREMENT, workorder_id, sku_id, sample_weight, pass INT, ts, source, defect_items, stage, operator, photo_url, photo_key, conf REAL, manual_review INT DEFAULT 0, station, store_id);
+CREATE TABLE IF NOT EXISTS qc_force_pass (id INTEGER PRIMARY KEY AUTOINCREMENT, workorder_id, reason, operator, ts, source);
 CREATE TABLE IF NOT EXISTS queue_serves (id INTEGER PRIMARY KEY AUTOINCREMENT, date, action, item, qty REAL, note, queue_no, wait_eta_min INT, queue_count INT, ts, source);
 CREATE TABLE IF NOT EXISTS loss_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, date, ing_name, qty, reason, reporter, status, source);
 CREATE TABLE IF NOT EXISTS fs_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, date, meal, dish, weight_g, keeper, kept_at, source);

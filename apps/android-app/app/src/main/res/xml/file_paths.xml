@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  水印相机落盘路径（D 块）。
+  只暴露应用私有目录，绝不开放外部存储：
+    · photos/raw     系统相机 TakePicture() 写原图的落点
+    · photos/wm      合成水印后的成品（品控上传 / 巡检本地台账读取的对象）
+  两张目录都在 filesDir 下，卸载应用即清除，无需任何存储权限。
+-->
+<paths>
+    <files-path
+        name="photos_raw"
+        path="photos/raw/" />
+    <files-path
+        name="photos_wm"
+        path="photos/wm/" />
+</paths>
