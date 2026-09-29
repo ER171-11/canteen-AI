@@ -451,3 +451,47 @@
   不影响任何业务代码与数据）；KMP 若降级为「源码储备」，只删 `kmp-build` job，不动 `kmp-shared` 源码
 - 后续: 推送后看首次 CI → 回填 §5.2 → 才算 T8 收口；之后才能开 T6（写类功能，门禁不可信时不安全）
 
+## [2026-09-29] T8-CI1 - 首次 CI 实跑结果回填与两处失败修复
+
+- 背景: T8 修复后仓库首次配置 remote 并推送（`https://github.com/ER171-11/canteen-AI.git`），
+  Actions 首次实跑（run `36513641681`，sha `daf5466`）：**6 成功 / 2 失败**。
+  6 个绿 job（含 `admin-web-build` 的 lint+build、`debt-drift`、`lint-zero-dep`）证明 T8 修的假绿点**真修了**；
+  2 个红 job 暴露的是 T8 **没修到的**第二层问题
+- 失败 1 —— `kmp-build`（7s 即挂）: `./gradlew: Permission denied`。
+  根因是 `apps/android-app/gradlew` 的 git 模式为 **100644**（Windows 提交丢失可执行位）。
+  **教训：T8 把必挂归因于「kmp-shared 不是 Gradle 根」只对了一半**——改经 android-app 根工程构建后，
+  没有可执行位照样挂。修法：`git update-index --chmod=+x` 提交为 100755
+- 失败 2 —— `store-node`（seed 4 个测试失败），两层根因：
+  1. `testlib.copyDb()` 无条件 `copyFileSync(SRC_DB)`，而基座库不入 VCS（`.gitignore *.db`），
+     CI 缺失即 ENOENT——与 `testutil.copyBaseDb()` 的「按 migrations 重建」回退**口径不一致**
+     （T8 只修了 testutil 一侧，testlib 侧漏了）
+  2. `testutil.buildFreshDb()` 只跑业务 migrations，**不含存储层 schema**（docs/snapshots 由店内节点
+     `Store` 自举），legacy Python 脚本读 docs 拿到 None 直接崩
+     （`'NoneType' object has no attribute 'get'` / `no such table: docs`）
+  修法：`copyDb` 补 `SEED_BASE_DB` 覆盖 + 缺失重建回退；`buildFreshDb` 末尾按生产同口径
+  `new Store(dst)` + `put(0, {}, 'SEED-TEST-BOOTSTRAP')` 自举
+  （红线 ①：db.js 是哈希基线保护文件，**只调用不改写**）
+- 夹具依赖显式化（替代「静默跳过判成功」的另一极——**为凑绿灯改断言**同样禁止）:
+  - `migrate_from_zip.test`：zip 夹具约 166MB 不入 VCS → 缺失时显式 SKIP「ZIP 解析 / 全量集成」，
+    **纯函数差分（migrate/merge/summarize）仍真实执行**
+  - `seed_recipe_links.test`：断言按真实经营数据校准（dishAlias ≥5、SKU-WF-* 恰好 9 个），
+    空库上结构性不成立 → 整体显式 SKIP
+  - `run-tests.js`：汇总拆 passed / skipped(显式) / failed，SKIP 单列、**不计入通过**，退出码只看 failed
+- 验证: `SEED_BASE_DB` 指向不存在路径模拟 CI = 8/9 + 1 显式 SKIP（exit 0）；真实基座 = 9/9（exit 0）；
+  gradlew 模式 `git ls-files -s` = 100755。**macOS 侧的 Gradle 实跑仍未验证**——第二次 CI 结论出来前，
+  `kmp-build`/`store-node` 记「修复待验证」，不得记「通过」
+- 影响范围: `apps/android-app/gradlew`（仅模式位）、`bff/store-node/seed/{testlib,testutil,run-tests}.js`、
+  `bff/store-node/seed/{migrate_from_zip,seed_recipe_links}.test.js`；未触碰受保护哈希文件与业务逻辑
+- AI避坑提示:
+  - **Windows 上提交的 shell 脚本默认丢可执行位**：凡 CI 里 `./xxx.sh|gradlew` 直接执行的文件，
+    提交后用 `git ls-files -s` 核对模式；补位用 `git update-index --chmod=+x`（Windows 本地 chmod 无效）
+  - **「回退重建」必须与生产自举同口径**：migrations 只是业务 schema，存储层 schema 在 Store 里；
+    两处基座构造逻辑（testutil / testlib）口径必须一致，否则「本地绿、CI 红」
+  - 修 CI 红灯时先分清「测试写错」还是「夹具结构性缺失」：前者改测试，后者**显式 SKIP + 单列汇报**，
+    两条路都不得静默
+- 回档方案: `git revert e04d58b`（gradlew 回到 100644、seed 回到 CI 必挂形态——只在需要对照时使用）；
+  文档回填独立成提交，可单独还原
+- 后续: 推送后看第二次 CI → `kmp-build`/`store-node` 转 ✅ 则 T8 收口、可开阶段 2（T6-A）；
+  若 `kmp-build` 仍挂则降级「源码储备·不编译」并在 `docs/运行保障层.md` §5.3 留痕
+
+
