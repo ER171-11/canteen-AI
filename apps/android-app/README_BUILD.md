@@ -10,12 +10,12 @@
 | Kotlin | 2.1.21 |
 | Compose | `org.jetbrains.kotlin.plugin.compose` + BOM 2024.12.01 |
 | 仓库 | 阿里云 google/central 镜像 + 官方兜底 |
-| aapt2 | `android.aapt2FromMavenOverride` → liuai `toolchain/aapt2-qemu/aapt2` |
+| aapt2 | 仅 arm64 Linux 需要 `android.aapt2FromMavenOverride` → liuai `toolchain/aapt2-qemu/aapt2`（Windows x86-64 已移除该行） |
 | Wrapper | Gradle 8.13 |
 
 本仓额外保留 KMP `:shared`（`../../kmp-shared`），SQLDelight 为 `app.cash.sqldelight` 2.0.2。
 
-## 冒烟（已通过）
+## 冒烟（已通过 · Linux arm64）
 
 ```bash
 cd apps/android-app
@@ -24,6 +24,45 @@ env -u LD_PRELOAD ./gradlew :app:assembleDebug --no-daemon
 ```
 
 APK：`app/build/outputs/apk/debug/app-debug.apk`（约 18MB）
+
+## Windows 本机（2026-09-29 补充）
+
+### 前置（缺一不可）
+
+| 依赖 | 本机现状 | 要求 |
+|---|---|---|
+| Android SDK（platform-35 / build-tools / platform-tools） | **没有**（`ANDROID_HOME` 为空，常见路径均不存在） | 装 Android Studio 或 cmdline-tools |
+| JDK | 仅 `C:\Program Files\Java\jdk-14.0.2` | **AGP 8.13 要求 JDK 17+**，可用 Android Studio 自带 JBR |
+| `local.properties` | 已改为 Windows 写法 | `sdk.dir` 必须指向真实存在的 SDK 目录 |
+
+已改动项：
+- `local.properties`：`sdk.dir=C:/Users/mingyzhikui/AppData/Local/Android/Sdk`（正斜杠，避免 `.properties` 的反斜杠转义坑）
+- `gradle.properties`：注释掉 `android.aapt2FromMavenOverride`（那是 arm64 Linux 的 qemu 包装器）
+
+### 构建
+
+```powershell
+cd apps\android-app
+.\gradlew.bat :app:assembleDebug --no-daemon
+```
+
+产物：`app\build\outputs\apk\debug\app-debug.apk`
+
+### 模拟器跑通链路（推荐，一台电脑就够）
+
+1. 仓库根目录双击「启动测试.cmd」把 BFF 起到 8787；
+2. `local.properties` 里 `bff.base.url=http://10.0.2.2:8787`（AVD 内 10.0.2.2 = 宿主机回环）；
+3. `adb install -r app\build\outputs\apk\debug\app-debug.apk`；
+4. App 登录 `boss / wufu123`。
+
+### 真机（先确认 `adb devices` 能看到设备）
+
+- **USB**：`adb reverse tcp:8787 tcp:8787`，并把 `bff.base.url` 改成 `http://127.0.0.1:8787` 重新打包；
+- **Wi-Fi**：改成电脑局域网 IP（本机当前 `http://192.168.1.19:8787`），手机与电脑同网段，并放行 Windows 防火墙 8787 入站。
+
+### 注意：仓库里的旧 APK 在本机不可直接用
+
+`app/build/outputs/apk/debug/app-debug.apk` 是 Linux 机产物，`BuildConfig.BFF_BASE_URL` 已在编译期固化为 `http://192.168.1.22:8787`（本机 WLAN 是 192.168.1.19）。该值**运行时无法修改**，只能重新打包，或把电脑 IP 改成恰好 192.168.1.22。
 
 ## 联调 BFF
 
