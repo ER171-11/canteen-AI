@@ -757,14 +757,17 @@ function applyRecvUpdate(data, payload) {
 /**
  * recv.void：作废进货单（审批队列执行）。
  *
- * 红线：只改 status='已作废' 并记操作人/时间/原因，**绝不 DELETE**
+ * 红线：只改 status='已作废' 并记操作人/时间/rev，**绝不 DELETE**
  *   （旧版 delRecv HTML:1676 物理删除不得照搬——删除即丢审计，且无法回滚）。
  * 库存不在此处直接重建：标记作废后，rebuildStock 会按 stock.js 的过滤规则跳过
  *   status 含「作废」/void 的单，故原本计入的库存与均价自动回退，
  *   效果等价于旧版「删除后重建台账」且**不丢审计、可回查**。
  * 幂等：已作废直接跳过。
+ *
+ * @param {object} ctx 队列上下文 { rev, traceId, now }（consumer.js:294），用于留痕 rev/链路
  */
-function applyRecvVoid(data, payload) {
+function applyRecvVoid(data, payload, ctx) {
+  const c = ctx || {};
   if (!Array.isArray(data.recv)) throw new Error('data.recv 不是数组');
   const rid = payload.id != null ? String(payload.id)
     : (payload.recv_id != null ? String(payload.recv_id) : '');
@@ -775,14 +778,21 @@ function applyRecvVoid(data, payload) {
   if (st0.indexOf('作废') >= 0 || st0.indexOf('void') >= 0) {
     return 'recv.void ' + (doc.no || rid) + ' 已作废（跳过）';
   }
+  const operator = payload.operator || 'QUEUE';
   doc.status = '已作废';
-  doc.void_operator = payload.operator || 'QUEUE';
-  doc.void_at = payload.ts || nowIso();
+  doc.void_operator = operator;
+  /* 作废时刻优先取队列 ctx.now（与审计时间线一致），否则回落到本机时间 */
+  doc.void_at = payload.ts || c.now || nowIso();
+  /* 记 rev：作废旧单的台账版本，便于审计定位「在哪个版本被作废」 */
+  if (c.rev !== undefined && c.rev !== null) doc.void_rev = c.rev;
+  if (c.traceId) doc.void_trace = c.traceId;
   if (payload.reason != null) doc.void_reason = String(payload.reason);
-  doc.note = (doc.note || '') + ' 【已作废·' + (payload.operator || 'QUEUE') + '】';
+  doc.note = (doc.note || '') + ' 【已作废·' + operator + '】';
   /* 重建台账：作废单被 stock.js 跳过，库存/均价按剩余单据重算，原单保留可查 */
   const rb = rebuildStock(data);
-  return 'recv.void ' + (doc.no || rid) + ' → 已作废（库存按台账自动回退，原单保留可查）；' + rb;
+  const revTag = doc.void_rev !== undefined ? 'rev=' + doc.void_rev + ' ' : '';
+  return 'recv.void ' + (doc.no || rid) + ' → 已作废（' + revTag
+    + '库存按台账自动回退，原单保留可查）；' + rb;
 }
 
 /* ---------- stock.count ---------- */

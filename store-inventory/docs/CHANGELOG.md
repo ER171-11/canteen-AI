@@ -566,5 +566,43 @@
 - 后续: 阶段 3（T6-B）编辑 `recv.update` + 作废 `recv.void`（作废只置 `status='已作废'`，**不得物理删除**）；
   阶段 5 再同步 `docs/迁移基线/FP-进货入库.md` 的 FP-RECV-01 行、本文件 §2/§7 进度并刷新看板。
 
+## [2026-09-29] T6-B - 进货单编辑与作废（阶段 3 / FP-RECV-08 / FP-RECV-09）
+
+- 背景: 旧版 `openRecv` 编辑态（HTML:1642-1654）与 `delRecv`（HTML:1676）。编辑=就地替换单据字段后重建台账；
+  作废=旧版**物理删除**——Node 侧不得照搬（删了就丢审计、不可回查），改为只置 `status='已作废'` 留痕。
+- 交付（全部走 `/api/actions` 审批队列，**不直写库**）:
+  - `bff/lib/algorithms/inventory.js` 新增并导出 `applyRecvUpdate(data, payload)` / `applyRecvVoid(data, payload, ctx)`。
+  - `bff/lib/algorithms/registry.js` 注册 `recv.update` / `recv.void`（否则消费器判 `need-manual` 静默驳回）。
+  - `bff/lib/algorithms/stock.js`：`rebuildStock` 跳过 `status` 含「作废」/`void` 的进货单
+    ——作废即「不计入库存」，等价旧版「删除后重建台账」但**原单保留可查**。
+  - 前端：`RecvFormModal` 增 `editDoc` 编辑模式（预填原单、提交 `recv.update`）；`InboundPage` 行内加
+    「编辑」「作废」按钮（作废走 `Popconfirm` 二次确认 → `recv.void`）。
+- 关键约束（红线）:
+  - 作废**绝不 DELETE**：只改 `status='已作废'`，并记 `void_operator / void_at / void_rev / void_reason / void_trace`；
+    库存与均价由 `rebuildStock` 按台账自动回退。
+  - 编辑只改「有传」的字段（未传保持原值）；「实付」仅覆盖**初始**付款，历史补付（`recv.pay` 追加的带 `source/ts` 记录）保留。
+  - 超付拒绝（同 `recv.inbound` 口径）、已作废单不可编辑、空明细拒绝——均**失败可见**，不静默降级。
+- 测试: `bff/lib/algorithms/recv_update.test.js`（7 例）、`recv_void.test.js`（6 例，含 registry 注册断言与
+  「作废态不可编辑」交叉校验）。
+- 验证（实际跑过）:
+  - 门禁全绿：`bff npm test`（algo 13 套 + store-node + seed + routes）、`admin-web npm run lint`(`--max-warnings 0`)+`build`、
+    `node scripts/lint-zero-dep.js`（112 文件）、`ci/redline_guard.ps1`。
+  - **真实 HTTP 链路实证**（起隔离 BFF，临时脚本，跑完删除）：
+    `push 快照 rev=1` → `recv.update` 入队 → `GET /api/actions?status=queued` 命中 → `confirm(rev=1)` → `apply`
+    → 快照 `supplier=新供应商 / payable=140 / 库存 i1=5,i2=8 / rev=2`；
+    `recv.void` 入队 → queued 命中 → `confirm(rev=2)` → `apply` → 快照**原单仍在(1 张)** `status=已作废 / void_operator=boss /
+    void_rev=2 / 库存 i1=0`。
+- 与旧版的**已知差异**:
+  - 旧版作废=物理删除，本版=留痕作废（超集，旧单可回查）。
+  - 编辑表单「实付」只覆盖初始付款、保留补付（旧版无补付概念）。
+- 影响面: `bff/lib/algorithms/{inventory,registry,stock}.js`、`apps/admin-web/src/pages/inventory/{RecvFormModal,InboundPage}.tsx`。
+- AI 坑（留给后续）:
+  - `registry.js` 只做「副作用注册」，`has/run` 在 `./index`——测试断言注册须用 `require('./index')` 的 `has`，
+    仅 `require('./registry')` 拿不到 `has`（本次踩过）。
+  - 「算法写完 ≠ 能用」：不注册进 registry，消费器一律判 `need-manual` 静默驳回，必须补注册并加断言。
+- 回档方案: `git revert <本次提交>`——`recv.update/recv.void` 从 registry 摘除即回到「管理端无编辑/作废入口」；
+  已作废的单需人工把 `status` 改回。
+- 后续: 阶段 4（T6-C）验收/入库确认；阶段 5 再把 `docs/迁移基线/FP-进货入库.md` 的 FP-RECV-08/09 行改 🟩→⬆️ 并刷新看板。
+
 
 

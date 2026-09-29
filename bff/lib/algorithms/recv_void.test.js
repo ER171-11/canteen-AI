@@ -39,17 +39,21 @@ function ok(name, fn) {
   console.log('  PASS ' + name);
 }
 
-/* 1) 作废：status=已作废、记操作人、原单仍在、库存按剩余单据回退（五花肉 stock 归 0） */
-ok('作废：标记已作废 + 记操作人，库存自动回退（stock 10→0）', () => {
+/* 1) 作废：status=已作废、记操作人/时间/rev、原单仍在、库存按剩余单据回退（五花肉 stock 归 0） */
+ok('作废：标记已作废 + 记操作人/时间/rev，库存自动回退（stock 10→0）', () => {
   const data = mkData();
-  const msg = inv.applyRecvVoid(data, Object.assign({}, BASE));
+  const ctx = { rev: 280, traceId: 'TR-void-1', now: '2026-09-29T12:00:00Z' };
+  const msg = inv.applyRecvVoid(data, Object.assign({}, BASE), ctx);
   const d = data.recv[0];
   assert.strictEqual(d.status, '已作废');
   assert.strictEqual(d.void_operator, 'boss');
-  assert.ok(d.void_at, '应记录作废时间');
+  assert.strictEqual(d.void_at, '2026-09-29T12:00:00Z', '作废时间优先取队列 ctx.now');
+  assert.strictEqual(d.void_rev, 280, '应记录作废时的台账 rev（阶段 3 要求）');
+  assert.strictEqual(d.void_trace, 'TR-void-1');
   assert.strictEqual(d.void_reason, '录错');
   assert.strictEqual(data.recv.length, 1, '原单不得被物理删除');
   assert.strictEqual(data.ings[0].stock, 0, '作废后库存应回退（rebuildStock 跳过作废单）');
+  assert.ok(/rev=280/.test(msg), '结果串应带 rev 便于审计');
   assert.ok(/已作废/.test(msg));
 });
 
@@ -87,6 +91,18 @@ ok('作废态不可编辑（与 applyRecvUpdate 交叉校验）', () => {
     () => inv.applyRecvUpdate(data, { id: 'R1', items: [{ ing_id: 'i1', qty: 1, price: 1 }] }),
     /已作废/
   );
+});
+
+/* 6) 注册表已登记 recv.update / recv.void（否则消费器判 need-manual 静默驳回，见 T5 坑） */
+ok('registry 已注册 recv.update / recv.void，run 走注册入口', () => {
+  require('./registry'); // 副作用注册：registry.js 在 require 时 registerAll
+  const { has, run } = require('./index');
+  assert.ok(has('recv.update'), 'recv.update 未注册');
+  assert.ok(has('recv.void'), 'recv.void 未注册');
+  const data = mkData();
+  const r = run('recv.void', { rev: 7, traceId: 'TR' }, data, { id: 'R1', operator: 'boss' });
+  assert.strictEqual(r.handled, true, 'run 应命中注册项而非 need-manual');
+  assert.strictEqual(data.recv[0].void_rev, 7, 'ctx.rev 应透传到执行器');
 });
 
 console.log('[recv_void.test] PASS ' + pass + ' cases');
