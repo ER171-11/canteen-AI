@@ -31,7 +31,12 @@ if (tests.length === 0) {
   process.exit(1);
 }
 
+// 汇总口径（2026-09-29 首次 CI 后明确）：passed = 真实执行且全绿；
+// skipped = 测试自己**显式声明**的 SKIP（输出含「] SKIP」，均为夹具不在 VCS 的结构性依赖，
+// 见 migrate_from_zip.test / seed_recipe_links.test 头注释），单列展示、**不计入「通过」**；
+// failed = 崩溃 / 断言失败 / 无 PASS 标记。退出码只由 failed 决定。
 let failed = 0;
+let skipped = 0;
 for (const t of tests) {
   const full = path.join(DIR, t);
   try {
@@ -41,7 +46,10 @@ for (const t of tests) {
       maxBuffer: 64 * 1024 * 1024,
     });
     process.stdout.write(out);
-    if (!/PASS/.test(out)) {
+    if (/\] SKIP/.test(out)) {
+      skipped++;
+      console.log('SKIP(显式声明) ' + t);
+    } else if (!/PASS/.test(out)) {
       failed++;
       console.error('  (no PASS marker) ' + t);
     }
@@ -51,5 +59,9 @@ for (const t of tests) {
   }
 }
 
-console.log('\n== seed 测试: ' + (tests.length - failed) + '/' + tests.length + ' 通过 ==');
+console.log(
+  '\n== seed 测试: ' + (tests.length - failed - skipped) + '/' + tests.length + ' 通过' +
+  (skipped ? '（另 ' + skipped + ' 个显式 SKIP：夹具不在 VCS，见上方输出，不计入通过）' : '') +
+  ' =='
+);
 process.exit(failed ? 1 : 0);

@@ -41,7 +41,7 @@ function openDb(dbPath) {
   return new DatabaseSync(dbPath);
 }
 
-/** 按 migrations 目录（排序）建一份全新库。 */
+/** 按 migrations 目录（排序）建一份全新库，并按生产同口径自举存储层。 */
 function buildFreshDb(dst) {
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   const db = openDb(dst);
@@ -53,6 +53,13 @@ function buildFreshDb(dst) {
   } finally {
     db.close();
   }
+  // store-inventory/migrations 不含存储层 schema（docs/snapshots 由店内节点 Store 自举），
+  // 真实基座库里有；回退重建时必须同样建出来并写入 id=1 的空文档行，
+  // 否则 legacy Python 脚本读 docs 拿到 None 直接崩（2026-09-29 首次 CI 暴露）。
+  // 这里只**调用** Store（红线 ①：db.js 是哈希基线保护文件，只可调用不可改写）。
+  const { Store } = require('../db');
+  const store = new Store(dst);
+  store.put(0, {}, 'SEED-TEST-BOOTSTRAP');
   return dst;
 }
 

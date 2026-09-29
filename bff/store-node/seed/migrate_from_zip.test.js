@@ -162,10 +162,18 @@ function testFullIntegration() {
 }
 
 function main() {
-  testZipParity();
+  // 纯函数差分（migrate/merge/summarize）不依赖任何夹具，任何环境都真实执行。
   testPureParity();
-  testFullIntegration();
-  console.log('[migrate_from_zip.test] PASS');
+  if (lib.SRC_ZIP) {
+    testZipParity();
+    testFullIntegration();
+  } else {
+    // 夹具「餐厅系统.zip」约 166MB，不入 VCS（无 .gitignore 之外的获取渠道），CI 上结构性缺失。
+    // 这里的 SKIP 是**显式声明**的：打印在输出里，且该测试其余部分（纯函数差分）已真实执行，
+    // 不属于「静默跳过却判成功」——历史缺陷见 run-tests.js 头注释。
+    console.log('  SKIP ZIP解析/全量集成：夹具 zip 不在 VCS（166MB），仅本机存在夹具时执行');
+  }
+  console.log('[migrate_from_zip.test] PASS' + (lib.SRC_ZIP ? '' : '（部分：zip 相关 2 个子测试 SKIP）'));
 }
 
 if (require.main === module) {

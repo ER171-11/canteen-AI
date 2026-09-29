@@ -18,7 +18,12 @@ const { Store } = require('../db');
 const { runPython: execPy, pick: pickPy } = require('../../lib/_python');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
-const SRC_DB = path.join(REPO_ROOT, 'store-inventory', 'data', '餐厅系统.db');
+// 真实基座库不入 VCS（store-inventory/.gitignore 的 *.db），CI 全新检出时必然缺失。
+// copyDb() 对缺失场景回退为「按 migrations 全量重建」（与 testutil.copyBaseDb 同一口径），
+// 保证差分测试在 CI 上仍真实执行而非空跑。可用 SEED_BASE_DB 覆盖（模拟 CI 条件 / 指定其他库）。
+// 历史缺陷（2026-09-29 首次 CI 修复）：这里原本无条件 copyFileSync，基座库缺失直接 ENOENT，
+// 且与 testutil.copyBaseDb 的回退口径不一致 —— 4 个测试在 CI 整体失败。
+const SRC_DB = process.env.SEED_BASE_DB || path.join(REPO_ROOT, 'store-inventory', 'data', '餐厅系统.db');
 const SRC_ZIP = [
   path.join(REPO_ROOT, '餐厅系统.zip'),
   path.join(REPO_ROOT, 'old', 'root-assets', '餐厅系统.zip'),
@@ -30,7 +35,12 @@ function tmpdir(prefix) {
 
 function copyDb(destPath) {
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
-  fs.copyFileSync(SRC_DB, destPath);
+  if (fs.existsSync(SRC_DB)) {
+    fs.copyFileSync(SRC_DB, destPath);
+  } else {
+    // 基座库缺失（CI）：按 migrations 全量重建。懒加载避免与 testutil 形成环。
+    require('./testutil').buildFreshDb(destPath);
+  }
   return destPath;
 }
 

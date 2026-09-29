@@ -89,6 +89,15 @@ async function runScenario(label, prepare) {
 }
 
 async function main() {
+  if (!fs.existsSync(lib.SRC_DB)) {
+    // 结构性夹具依赖（2026-09-29 首次 CI 暴露）：本测试断言按真实经营数据校准
+    // （dishAlias ≥5、SKU-WF-* 恰好 9 个、rec 菜品数 >0），migrations 重建的空库上必然不成立。
+    // 真实基座库含真实经营数据，**不入 VCS**（.gitignore *.db），CI 上结构性缺失。
+    // 处理：**显式声明** SKIP（打印进输出，runner 单列 skipped，不计入「通过」），
+    // 不得静默跳过判成功，也不得为凑 CI 绿灯而改动按真实数据校准的断言。
+    console.log('[seed_recipe_links.test] SKIP：依赖店内真实基座库（含真实菜品/配方/销售数据，不入 VCS），CI 上结构性缺失');
+    return;
+  }
   const n1 = await runScenario('原样', null);
   console.log(
     '[seed_recipe_links.test] PASS(原样)  rec=' + Object.keys(n1.rec || {}).length +
