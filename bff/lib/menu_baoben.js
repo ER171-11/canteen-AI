@@ -171,6 +171,30 @@ const DEFAULT_PARAMS = {
   dishPerGuest: 1.65, days: 30, seats: 120, targetProfit: 80000
 };
 
+/**
+ * query 参数名 → DEFAULT_PARAMS 键（单一事实来源：
+ * `/api/modules/analysis` 的店参透传与 `echoParams()` 回显共用同一张表，
+ * 避免「能传不能看」或「能看不能传」的两头对不上）
+ */
+const PARAM_QUERY_MAP = {
+  area: 'area', rent_psm: 'rentPsm', prop_fee: 'propFee',
+  staff: 'staff', labor_per: 'laborPer',
+  fit: 'fit', fit_m: 'fitM', eq: 'eq', eq_m: 'eqM',
+  util_fix: 'utilFix', other: 'other',
+  bev_ratio: 'bevRatio', bev_cost: 'bevCost',
+  pack: 'pack', takeout: 'takeout', comm: 'comm', mkt: 'mkt',
+  util_var: 'utilVar', misc: 'misc', fee: 'fee',
+  dish_per_guest: 'dishPerGuest', days: 'days', seats: 'seats',
+  target_profit: 'targetProfit'
+};
+
+/** 生效店参回显：键名与 query 同名，前端可直接回填表单 */
+function echoParams(P) {
+  const out = {};
+  for (const q of Object.keys(PARAM_QUERY_MAP)) out[q] = P[PARAM_QUERY_MAP[q]];
+  return out;
+}
+
 const TYPE_META = [
   { k: '引流', name: '引流款', desc: '低价高频，降低进店门槛' },
   { k: '爆品', name: '爆品（核心）', desc: '招牌与高销，营收主力' },
@@ -212,6 +236,7 @@ function computeBaobenSummary(paramOverrides) {
   const crDish = revDish ? costDish / revDish : 0;
   const crAll = (1 - P.bevRatio) * crDish + P.bevRatio * P.bevCost;
   const varRate = crAll + P.pack + P.takeout * P.comm + P.mkt + P.utilVar + P.misc + P.fee;
+  const varOtherRate = varRate - crAll;
   const cm = 1 - varRate;
   const rent = P.area * P.rentPsm;
   const prop = P.area * P.propFee;
@@ -261,6 +286,9 @@ function computeBaobenSummary(paramOverrides) {
       name: s.n,
       k: s.k,
       day_rev: r2(dayRev),
+      // 与旧版分情景表同列（HTML:4153-4157）：日客流 = 基准客流 × 系数，月营收 = 日营收 × 月营业天数
+      guests: r2(guests * s.k),
+      month_rev: r2(dayRev * P.days),
       month_profit: profit != null ? r2(profit) : null,
       above_be: beDay != null ? dayRev >= beDay : null
     };
@@ -283,10 +311,8 @@ function computeBaobenSummary(paramOverrides) {
     brand: doc.brand || '熊猫五福餐厅',
     source: doc.source || '保本测算',
     count: act.length,
-    params: {
-      area: P.area, staff: P.staff, days: P.days, seats: P.seats,
-      dish_per_guest: P.dishPerGuest
-    },
+    // 全量生效店参回显（键名同 query，前端可回填表单；旧版此处只回显 5 项 → 见基线 FP-CALC-04/06）
+    params: echoParams(P),
     kpi: {
       day_rev: r2(revAllDay),
       day_dish_rev: r2(revDish),
@@ -305,7 +331,17 @@ function computeBaobenSummary(paramOverrides) {
       safety: safety != null ? r2(safety * 100) : null,
       rent: r2(rent),
       labor: r2(labor),
-      amort: r2(amort)
+      amort: r2(amort),
+      // 以下为成本结构图（旧版 #costChart :4118-4122）所需明细，均为既有公式的月额，无新增算法
+      prop: r2(prop),
+      util_fix: r2(P.utilFix),
+      other: r2(P.other),
+      /** 食材+酒水成本（月） */
+      cost_bev_month: r2(crAll * monthRev),
+      /** 其他变动成本（月）= 月营收 ×（变动成本率 − 综合食材成本率） */
+      var_other_month: r2(monthRev * varOtherRate),
+      /** 日均点菜份数（旧版 #vQty :3970） */
+      dish_qty: r2(qty)
     },
     types,
     scenes,
@@ -384,5 +420,6 @@ module.exports = {
   findBaobenForRecipe,
   computeBaobenSummary,
   mergeDishesWithBaoben,
-  DEFAULT_PARAMS
+  DEFAULT_PARAMS,
+  PARAM_QUERY_MAP
 };

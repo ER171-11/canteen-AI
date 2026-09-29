@@ -1571,17 +1571,22 @@ async function handle(req, res, ctx, pathname) {
     return true;
   }
 
-  // GET /api/modules/analysis（店参透传：area/staff/days/target_profit → 保本测算 paramOverrides）
+  // GET /api/modules/analysis（店参透传：PARAM_QUERY_MAP 全量 → 保本测算 paramOverrides）
+  // 只读模拟层：仅覆盖本次请求的测算入参，不落库、不影响配方/库存/菜品主数据
   if (pathname === '/api/modules/analysis') {
     const overrides = {};
     const qnum = (k) => {
-      const v = parseFloat(ctx.query.get(k));
+      const raw = ctx.query.get(k);
+      if (raw == null || raw === '') return null;
+      const v = parseFloat(raw);
       return isNaN(v) ? null : v;
     };
-    const area = qnum('area'); if (area != null) overrides.area = area;
-    const staff = qnum('staff'); if (staff != null) overrides.staff = staff;
-    const days = qnum('days'); if (days != null) overrides.days = days;
-    const tp = qnum('target_profit'); if (tp != null) overrides.targetProfit = tp;
+    let queryMap = {};
+    try { queryMap = require('../lib/menu_baoben').PARAM_QUERY_MAP || {}; } catch (e) { queryMap = {}; }
+    for (const q of Object.keys(queryMap)) {
+      const v = qnum(q);
+      if (v != null) overrides[queryMap[q]] = v;
+    }
     const hasSales = !!(snap && Array.isArray(snap.data && snap.data.sales) && snap.data.sales.length > 0);
     const a = hasSales ? realAnalysis(snap, overrides) : mockAnalysis(overrides);
     ctx.sendJSON(res, 200, Object.assign(base, {

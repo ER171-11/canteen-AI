@@ -849,3 +849,71 @@
   连带 `FP-CALC-04/05/06/16/17`）；② 采购管理 `FP-PO-15`（KPI 只读）；③ 外接比价 `FP-PRICE-01/02/03/05`
   （`ing.avg`/`ing.conv` 已确认在下发字段内）。详见任务清单 §2 T11。
 
+## [2026-09-29] T11 第二批 - 结构测算 7 项：参数全开放 + 三图两表（阶段 9）
+
+- 背景: 阶段 8 的后续建议①原文点名的就是本批——`FP-CALC-18`（后端已算 scenes 却无人渲染）是「算得出但看不见」
+  的最典型浪费，连带 `FP-CALC-04/05/06/07/16/17` 全部落在同一页（`WeeklyReportPage.tsx`），
+  符合「同页聚集」原则：**一次改动只让一个页面基线的行号失效**。
+- 决策:
+  - **参数只做「请求级覆盖」，不引入第二份本地模型**：24 项店参全部走 `GET /api/modules/analysis` 的 query，
+    后端在 `paramOverrides` 里临时覆盖 `DEFAULT_PARAMS`，**不落库、不进程内驻留**；回显由后端 `echoParams()` 出，
+    前端表单以回显为唯一来源（`useEffect` 回填），**前端不维护默认值副本**，杜绝「前端一份默认、后端一份默认」漂移。
+  - **单一映射表**：新增 `PARAM_QUERY_MAP`（query 名 → `DEFAULT_PARAMS` 键），**透传与回显共用同一张表**，
+    避免「能传不能看/能看不能传」两头对不上；`modules.js` 由 4 项硬编码改为按表循环。
+  - **后端只做加法**：`computeBaobenSummary` 未改任何既有公式分支，仅①回显全量 params（原只 5 项）、
+    ②kpi 补 6 个**既有公式的月额拆分**（`prop`/`util_fix`/`other`/`cost_bev_month`/`var_other_month`/`dish_qty`）、
+    ③scenes 补 `guests`/`month_rev`，以还原旧表列。新增中间量 `varOtherRate = varRate - crAll` 仅为拆出「其他变动成本」。
+  - **改「输入即重算」为「按参数重算」**（显式按钮 + 「参数已改，尚未重算」提示）：旧版每次 `input` 事件都全量重算，
+    新版回源是网络请求，逐键重算既浪费又不稳。**登记为主动偏离**（基线备注）。
+  - **图表不引依赖**：三张图按旧版同尺寸 SVG 重绘（viewBox 560×150 / 560×108 / 560×230），
+    零新增依赖、零 `lint-zero-dep` 风险；配色沿用旧版常量（`#3D7EA6/#D93025/#1E8E5A/#6B4C9A/#B7791F/#E8734A/…`）。
+- 交付（**后端 2 文件 + 前端 3 文件（2 新增）**）:
+  - `bff/lib/menu_baoben.js`：`PARAM_QUERY_MAP`/`echoParams()`（:179-196）、params 全量回显（:315）、
+    kpi 6 项明细（:336-344）、`varOtherRate`（:239）、scenes 补 `guests`/`month_rev`（:282-296）。
+  - `bff/routes/modules.js`：analysis 店参透传由 4 项扩到 24 项（:1574-1590），空串/null/NaN 一律忽略。
+  - `apps/admin-web/src/pages/ops/CalcParamsCard.tsx`（新增）：三组参数表单（固定成本 :26-45 / 变动成本率 :46-61
+    / 运营口径 :62-96）、未重算判定 :121-132、合计与运营回显 :148-170、恢复默认 :183-185 + 按参数重算 :186-188、
+    表单渲染 :193-228（单位用 `suffix`）。
+  - `apps/admin-web/src/pages/ops/CalcCharts.tsx`（新增）：保本图 :60-110、成本结构 8 段堆叠 :111-175、
+    客流情景曲线 :176-275、同步菜品主数据 :313-318、分情景结果表 + 保本系数/目标客流结论 :342-400。
+  - `apps/admin-web/src/pages/ops/WeeklyReportPage.tsx`：移除原 4 项 inline 店参表单（含 `paramForm`），
+    改挂 `CalcParamsCard`（onApply→`load(p)`、onReset→`load()` 不带 query）、图表区接在三、节次之后；
+    `api/index.ts` 的 `AnalysisParams` 直接复用 `BaobenParams`，`api/types.ts` 补 `BaobenParams`/`BaobenScene`
+    与 `BaobenKpi` 6 字段。
+- 验证（实际跑过）:
+  - 后端算法直算：真实库数据下 `prop/rent/be_day` 随覆盖变化；**成本结构 8 段之和 + 净利润 = 月营收**（自洽校验）；
+    `PARAM_QUERY_MAP` 24 键与回显 24 键一一对齐（无缺失键）。
+  - 接口冒烟（真起 server + 真登录 `manager`）：`?seats=100&prop_fee=5&rent_psm=80&target_profit=100000`
+    → 回显 `seats 120→100`、`prop 1600→2000`、`rent 30000→32000`、`be_day 11903.49→12051.61`，scenes 5 档带 guests/month_rev。
+  - **无头浏览器开箱（CDP 驱动本机 Edge，零安装，临时脚本已删）**：3 张图 viewBox 全部渲染；
+    分情景表 5 档有值（日客流 86/117/156/180/203 人、月营收/月利润/净利率齐全）；改「目标月利润」为 200000 →
+    请求带**全部 24 项 query**（`target_profit=200000`）且结论文案随之更新（需 1.13× 客流、日均 177 人）；
+    「恢复默认参数」→ 请求**不带任何 query**（回后端默认）；控制台 **0 报错**。
+  - `apps/admin-web`：`npm run lint`（`--max-warnings 0`）**通过**；`npm run build`（tsc + vite）**成功**。
+  - `cd bff && npm test` **exit 0**；`node scripts/lint-zero-dep.js` 通过；`ci/redline_guard.ps1` 全部通过。
+  - `scripts/gen-debt-table.ps1` → **151 项 ⬆️ 63 / ⬜ 88**（W1 28 / W2 30 / W3 23 / W4 7）；`-Check` **退出码 0**；
+    `node scripts/gen-progress-board.js` 已刷新看板（漂移校验 ok）。
+- ⚠️ 未验证项（诚实清单）:
+  1. **仅程序化验证，未经人工目视**：配色/字号/窄屏换行未与旧版逐项比对（开箱脚本只断言「渲染 + 有值 + 请求正确」）。
+  2. **只在 Edge（Chromium）验过**，未在 Firefox/WebKit 回归；`flex` 撑开的参数卡在极窄屏可能换行错位。
+  3. **百分比字段的步进是主动偏离**：旧版 pct 字段 `step=100`（等价于不可用步进），新版给 0.1/0.5 个百分点。
+  4. **成本结构图未与旧版的截图逐段对色**：段色按旧版常量抄写，但阈值文案（`w>46` 才写百分比）为抄实现的副作用，未复核。
+- 影响面: `bff/lib/menu_baoben.js`、`bff/routes/modules.js`、
+  `apps/admin-web/src/pages/ops/{WeeklyReportPage,CalcParamsCard,CalcCharts}.tsx`、`apps/admin-web/src/api/{index,types}.ts`、
+  `docs/迁移基线/{FP-结构测算,欠账总表}.md`、`docs/迁移颗粒度规范.md` 附录 A（脚本重写）、`scripts/gen-debt-table.ps1`
+  （CALC 页状态文案由「半页缺失」改为「逐菜结构表/模拟态缺失」）、`docs/进度看板.html`、本文件。
+  **无 DB 迁移、无依赖变更、未触碰红线文件（`db.js`/`merge.js` 哈希未变）。**
+- AI 坑（留给后续）:
+  - **「页面没数据」先怀疑服务不是新代码**：本批第一轮开箱时页面上 3 图、情景表全是 `—`，看着像渲染缺陷，
+    实为上一会话遗留的旧 BFF 仍占着 `8787`（新进程 `EADDRINUSE` 直接死掉，无人发现）——
+    改为另起 `BFF_PORT=8790` + 临时 vite 代理后一切正常。**开箱前先确认端口上的进程是不是自己起的那个**。
+  - **antd v5 的 `InputNumber.addonAfter` 已弃用**（控制台告警），单位改用 `suffix`；仓库里旧代码还有
+    `addonBefore`，属既有债，未一并清理。
+  - **`React.ReactNode` 这类 UMD 全局类型在本仓可用但不是好习惯**：新文件显式 `import type { ReactNode }`。
+  - **antd 会在两个汉字间插空格**（「老 板」），自动化点按钮必须做 `replace(/\s/g,'')` 归一化，否则找不到元素。
+  - 组件文件里 `export` 非组件常量会触发 `react-refresh/only-export-components` 告警，`--max-warnings 0` 直接失败
+    （`CALC_PARAM_GROUPS` 因此改为文件内常量）。
+- 回档方案: `git revert` 本提交即可；后端改动为加法式（不动既有公式与出参语义），前端为新增面板。
+- 后续: 结构测算剩 7 项，建议按「① `FP-CALC-09/10` 逐菜结构表 + 表头排序（只读、老板最想看的单菜毛利）
+  → ② `FP-CALC-11/12` 模拟态（需先出「模拟层不写库」的隔离设计）→ ③ `FP-CALC-13` 批量调价/调量」推进。
+

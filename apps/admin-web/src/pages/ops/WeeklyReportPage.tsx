@@ -24,6 +24,8 @@ import type { AnalysisResp, Dish, MatrixRow } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
 import { useAuthStore } from '../../store/auth'
 import { COLORS } from '../../theme'
+import CalcParamsCard from './CalcParamsCard'
+import CalcCharts from './CalcCharts'
 
 const QUAD_META: Record<string, { name: string; color: string }> = {
   star: { name: '明星', color: '#E8442E' },
@@ -52,7 +54,6 @@ export default function WeeklyReportPage() {
   const [busy, setBusy] = useState(false)
   const [dishMap, setDishMap] = useState<Map<string, Dish>>(new Map())
   const [priceRow, setPriceRow] = useState<MatrixRow | null>(null)
-  const [paramForm] = Form.useForm()
   const [priceForm] = Form.useForm()
 
   const load = useCallback((params?: AnalysisParams) => {
@@ -89,6 +90,7 @@ export default function WeeklyReportPage() {
   const kpi = data?.baoben_summary?.kpi ?? {}
   const types = data?.baoben_summary?.types ?? []
   const effParams = data?.baoben_summary?.params
+  const scenes = data?.baoben_summary?.scenes ?? []
 
   const quadStats = useMemo(() => {
     const acc: Record<string, { n: number; marginSum: number }> = {}
@@ -173,44 +175,13 @@ export default function WeeklyReportPage() {
           </Space>
         }
       >
-        <Form
-          form={paramForm}
-          layout="inline"
-          initialValues={{ area: 400, staff: 20, days: 30 }}
-          onFinish={(v) =>
-            load({
-              area: v.area,
-              staff: v.staff,
-              days: v.days,
-              target_profit: v.target_profit,
-            })
-          }
-        >
-          <Form.Item name="area" label="面积㎡">
-            <InputNumber min={0} style={{ width: 90 }} />
-          </Form.Item>
-          <Form.Item name="staff" label="员工数">
-            <InputNumber min={0} style={{ width: 80 }} />
-          </Form.Item>
-          <Form.Item name="days" label="营业天数">
-            <InputNumber min={1} max={31} style={{ width: 80 }} />
-          </Form.Item>
-          <Form.Item name="target_profit" label="目标利润¥">
-            <InputNumber min={0} style={{ width: 120 }} />
-          </Form.Item>
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={loading}>
-              按店参重算
-            </Button>
-          </Form.Item>
-        </Form>
-        {effParams && (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            当前生效店参：面积 {String(effParams.area ?? '-')}㎡ · 员工 {String(effParams.staff ?? '-')} ·{' '}
-            {String(effParams.days ?? '-')} 天 · 餐位 {String(effParams.seats ?? '-')}
-            （BFF 未识别 query 店参时展示静态价盘参数）
-          </Typography.Text>
-        )}
+        <CalcParamsCard
+          effParams={effParams}
+          kpi={kpi}
+          loading={loading}
+          onApply={(p) => load(p)}
+          onReset={() => load()}
+        />
 
         <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
           <Col xs={12} md={6}>
@@ -423,6 +394,20 @@ export default function WeeklyReportPage() {
           </Card>
         </Col>
       </Row>
+
+      <div style={{ marginTop: 16 }}>
+        <CalcCharts
+          scenes={scenes}
+          kpi={kpi}
+          effParams={effParams}
+          loading={loading}
+          canSync={!offline}
+          onSync={() => {
+            loadDishes()
+            load()
+          }}
+        />
+      </div>
 
       <Modal
         title={`调价 · ${priceRow?.name ?? ''}`}

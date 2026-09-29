@@ -657,6 +657,33 @@ export interface BaobenKpi {
   rent?: number
   labor?: number
   amort?: number
+  /** 物业费（月，元） */
+  prop?: number
+  /** 能耗固定部分（月，元） */
+  util_fix?: number
+  /** 其他固定费用（月，元） */
+  other?: number
+  /** 食材+酒水成本（月，元） */
+  cost_bev_month?: number
+  /** 其他变动成本（月，元） */
+  var_other_month?: number
+  /** 日均点菜份数（份） */
+  dish_qty?: number
+}
+
+/** 客流情景（爬坡/培育/当前/稳定/成熟） */
+export interface BaobenScene {
+  name?: string
+  /** 客流系数（1.00 = 当前菜品销量设定） */
+  k?: number
+  day_rev?: number
+  /** 日客流（人） */
+  guests?: number
+  /** 月营收（元） */
+  month_rev?: number
+  month_profit?: number
+  /** 日营收是否已达保本线 */
+  above_be?: boolean
 }
 
 /** 菜品类型营收/毛利占比（保本价盘口径） */
@@ -895,14 +922,44 @@ export interface AnalysisTrendRow {
   orders?: number
   gross_rate?: number
 }
+/**
+ * 生效店参回显（键名与 `/api/modules/analysis` 的 query 同名，
+ * 由 `bff/lib/menu_baoben.js` 的 PARAM_QUERY_MAP 单一定义）
+ */
+export interface BaobenParams {
+  area?: number
+  rent_psm?: number
+  prop_fee?: number
+  staff?: number
+  labor_per?: number
+  fit?: number
+  fit_m?: number
+  eq?: number
+  eq_m?: number
+  util_fix?: number
+  other?: number
+  bev_ratio?: number
+  bev_cost?: number
+  pack?: number
+  takeout?: number
+  comm?: number
+  mkt?: number
+  util_var?: number
+  misc?: number
+  fee?: number
+  dish_per_guest?: number
+  days?: number
+  seats?: number
+  target_profit?: number
+}
 export interface BaobenSummary {
   brand?: string
   source?: string
   count?: number
-  params?: Record<string, number>
+  params?: BaobenParams
   kpi?: BaobenKpi
   types?: BaobenType[]
-  scenes?: unknown[]
+  scenes?: BaobenScene[]
   advice?: string[]
 }
 export interface AnalysisForecastRestock {

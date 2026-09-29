@@ -6,6 +6,7 @@ import type {
   ActionStatus,
   AnalysisResp,
   AppRelease,
+  BaobenParams,
   BookingResp,
   Dish,
   FoodsafeResp,
@@ -138,15 +139,13 @@ export async function fetchSnapshot(): Promise<Snapshot> {
   return data
 }
 
-/** 经营分析店参（代理A逐步上线：BFF 未识别时忽略，不报错） */
-export interface AnalysisParams {
-  area?: number
-  staff?: number
-  days?: number
-  target_profit?: number
-}
+/**
+ * 经营分析店参（只读测算层，不落库）。
+ * 键名与 `bff/lib/menu_baoben.js` 的 PARAM_QUERY_MAP 一一对应；未给值的键由后端 DEFAULT_PARAMS 兜底。
+ */
+export type AnalysisParams = BaobenParams
 
-/** GET /api/modules/analysis?area=&staff=&days=&target_profit= */
+/** GET /api/modules/analysis?area=&rent_psm=&…&target_profit= */
 export async function fetchAnalysis(params?: AnalysisParams): Promise<AnalysisResp> {
   const { data } = await client.get<AnalysisResp>('/modules/analysis', {
     params: params && Object.keys(params).length ? params : undefined,
