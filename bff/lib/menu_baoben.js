@@ -349,6 +349,33 @@ function computeBaobenSummary(paramOverrides) {
   };
 }
 
+/**
+ * 逐菜结构表行（对齐旧版 `syncCalc()`：由菜品主数据 `filter(d=>d.on)` 派生，只读、绝不写回）
+ * 成本/售价沿用合并口径（店内为准，缺失回落保本价盘）；日销量取价盘估算日销（旧版「估算 q」口径）
+ * @param {Array} mergedDishes mergeDishesWithBaoben(...).dishes
+ */
+function toCalcRows(mergedDishes) {
+  const out = [];
+  for (const d of mergedDishes || []) {
+    if (!d || d.on === false) continue;
+    const nm = String(d.name == null ? '' : d.name).trim();
+    if (!nm) continue;
+    const q = d.daily_qty != null ? Number(d.daily_qty) : (d.q != null ? Number(d.q) : 0);
+    const cost = d.cost != null && isFinite(Number(d.cost)) ? Number(d.cost) : null;
+    const price = d.price != null && isFinite(Number(d.price)) ? Number(d.price) : null;
+    out.push({
+      name: nm,
+      // 类型取价盘类型 `dish_type` 优先（旧版用 `d.cat`；本店 9 个 SKU-WF-* 占位菜 `cat` 存的是饺子皮颜色）
+      cat: d.dish_type || d.cat || '常规',
+      cost: cost != null ? r2(cost) : null,
+      price: price != null ? r2(price) : null,
+      qty: isFinite(q) ? r2(q) : 0,
+      on: true
+    });
+  }
+  return out;
+}
+
 /** 快照 dishes 与保本价盘合并：有同名则挂 cat/price/cost；无 dishes 则整表生成 */
 function mergeDishesWithBaoben(dishes) {
   const doc = loadMenuBaoben();
@@ -420,6 +447,7 @@ module.exports = {
   findBaobenForRecipe,
   computeBaobenSummary,
   mergeDishesWithBaoben,
+  toCalcRows,
   DEFAULT_PARAMS,
   PARAM_QUERY_MAP
 };

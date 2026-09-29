@@ -112,10 +112,18 @@ function realAnalysis(snap, paramOverrides) {
   // 无匹配回落保本 daily_qty，再回落 est；margin 优先 recipe_cost 真成本毛利率
   let dishes = [];
   let baobenSummary = null;
+  // 逐菜结构表行（旧版 SD，只读；见基线 FP-CALC-09/10）
+  let calcRows = [];
   try {
-    const { mergeDishesWithBaoben, computeBaobenSummary } = require('../lib/menu_baoben');
+    const { mergeDishesWithBaoben, computeBaobenSummary, toCalcRows } = require('../lib/menu_baoben');
     baobenSummary = computeBaobenSummary(paramOverrides);
     const merged = mergeDishesWithBaoben(arr(data.dishes));
+    // 行集对齐旧版 syncCalc()：仅店内菜品主数据（保本价盘独有项不进食结构表）
+    const shopNames = new Set();
+    for (const d of arr(data.dishes)) {
+      if (d && d.name != null) shopNames.add(String(d.name));
+    }
+    calcRows = toCalcRows(merged.dishes.filter((d) => d && shopNames.has(String(d.name || ''))));
 
     // 近 7 日真销量聚合：sales.dish(短名) → dishAlias → 菜品 id → 份数
     const alias = (data.dishAlias && typeof data.dishAlias === 'object') ? data.dishAlias : {};
@@ -312,7 +320,8 @@ function realAnalysis(snap, paramOverrides) {
     compare,
     forecast: buildForecast(snap, trend, efficiency),
     baoben_summary: baobenSummary,
-    baoben_types: baobenSummary ? baobenSummary.types : null
+    baoben_types: baobenSummary ? baobenSummary.types : null,
+    calc_dishes: calcRows
   };
 }
 
@@ -521,6 +530,14 @@ function mockAnalysis(paramOverrides) {
       { week: 'W38', revenue: 58210, gross_rate: 40.1 }
     ],
     heatmap,
+    calc_dishes: (() => {
+      try {
+        const { mergeDishesWithBaoben, toCalcRows } = require('../lib/menu_baoben');
+        return toCalcRows(mergeDishesWithBaoben([]).dishes);
+      } catch (e) {
+        return [];
+      }
+    })(),
     matrix: (() => {
       try {
         const { mergeDishesWithBaoben } = require('../lib/menu_baoben');
@@ -1599,7 +1616,8 @@ async function handle(req, res, ctx, pathname) {
       mock: a.mock || !snap,
       note: a.note || (!snap ? NO_SNAP_MSG : undefined),
       baoben_summary: a.baoben_summary || null,
-      baoben_types: a.baoben_types || (a.baoben_summary && a.baoben_summary.types) || null
+      baoben_types: a.baoben_types || (a.baoben_summary && a.baoben_summary.types) || null,
+      calc_dishes: a.calc_dishes || []
     }));
     return true;
   }

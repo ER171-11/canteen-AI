@@ -26,6 +26,7 @@ import { useAuthStore } from '../../store/auth'
 import { COLORS } from '../../theme'
 import CalcParamsCard from './CalcParamsCard'
 import CalcCharts from './CalcCharts'
+import CalcDishTable from './CalcDishTable'
 
 const QUAD_META: Record<string, { name: string; color: string }> = {
   star: { name: '明星', color: '#E8442E' },
@@ -394,6 +395,10 @@ export default function WeeklyReportPage() {
           </Card>
         </Col>
       </Row>
+
+      <div style={{ marginTop: 16 }}>
+        <CalcDishTable rows={data?.calc_dishes ?? []} types={types} loading={loading} />
+      </div>
 
       <div style={{ marginTop: 16 }}>
         <CalcCharts

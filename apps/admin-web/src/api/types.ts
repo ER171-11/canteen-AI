@@ -701,6 +701,22 @@ export interface BaobenType {
   gp_share?: number
 }
 
+/** 逐菜结构表行（GET /api/modules/analysis 的 `calc_dishes`；对齐旧版 SD） */
+export interface BaobenDishRow {
+  /** 菜品名称 */
+  name: string
+  /** 类型（引流/爆品/利润/形象/常规） */
+  cat?: string | null
+  /** 食材成本（元/份） */
+  cost?: number | null
+  /** 售价（元/份） */
+  price?: number | null
+  /** 日销量（份/天，估算口径；真实销量口径切换见 FP-CALC-08） */
+  qty?: number | null
+  /** 是否上架（后端已按下架滤除，保留字段供后续模拟态使用） */
+  on?: boolean
+}
+
 /** 菜品矩阵行（四象限） */
 export interface MatrixRow {
   name: string
@@ -991,6 +1007,8 @@ export interface AnalysisResp {
   forecast?: AnalysisForecast | null
   baoben_summary?: BaobenSummary | null
   baoben_types?: Array<Record<string, unknown>> | null
+  /** 逐菜结构表行（只读；见基线 FP-CALC-09/10） */
+  calc_dishes?: BaobenDishRow[] | null
   mock?: boolean
   note?: string
 }

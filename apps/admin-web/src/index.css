@@ -14,6 +14,17 @@ body,
   color: #e8584a;
 }
 
+/* 逐菜结构表分组行（对齐旧版 HTML:140 `table.calc tr.grppar td`）
+   background 需 !important：antd 的 `td.ant-table-column-sort` 背景优先级更高，
+   否则「当前排序列」那一格会盖掉分组底色（开箱实测：排序后第一个分组行变 #fafafa） */
+.calc-grp-row > td {
+  background: #f1f5f9 !important;
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #334155;
+  text-align: left;
+}
+
 /* AI 强调渐变文字（品牌标识 / 登录标题） */
 .ai-gradient-text {
   background: linear-gradient(135deg, #f48fb1 0%, #9b6bbf 100%);

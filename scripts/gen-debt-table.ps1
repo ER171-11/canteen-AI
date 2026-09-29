@@ -51,7 +51,7 @@ $numOverride = @{ 'FP-SET-01' = 99 }   # 模块状态总览属锦上添花，排
 $pageOrder  = @('RECV','PO','ING','DISH','SALE','CALC','PRICE','DASH','SET')
 $pageStatus = @{
   RECV='🟡 进行中（替代模式）'; PO='🟡 待人工复核'; ING='🟡 待人工复核'; DISH='🟡 待人工复核'
-  SALE='🟡 待人工复核 · ⚠️ 整页缺失'; CALC='🟡 待人工复核 · ⚠️ 逐菜结构表/模拟态缺失'; PRICE='🟡 待人工复核'
+  SALE='🟡 待人工复核 · ⚠️ 整页缺失'; CALC='🟡 待人工复核 · ⚠️ 模拟态缺失'; PRICE='🟡 待人工复核'
   DASH='🟡 待人工复核 · ⚠️ MOCK 掩盖缺口'; SET='🟡 待人工复核 · ⚠️ 四类导出整块缺失'
 }
 
