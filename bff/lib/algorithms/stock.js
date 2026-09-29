@@ -45,8 +45,9 @@ function rebuildStock(data) {
 
   for (const po of arr(data.recv)) {
     const st = String((po && po.status) || '');
-    // 仅已入库计入库存；草稿/待收不进
-    if (st && (st.indexOf('草稿') >= 0 || st.indexOf('待') >= 0) && st.indexOf('已入库') < 0) continue;
+    // 仅已入库计入库存；草稿/待收不进；已作废旧版 delRecv 物理删除→Node 改为留痕，
+    // 由此处跳过（作废单不进台账，库存按剩余单据重算，效果等价于旧版「删除后重建」且不丢审计）
+    if (st && (st.indexOf('草稿') >= 0 || st.indexOf('待') >= 0 || st.indexOf('作废') >= 0 || st.indexOf('void') >= 0) && st.indexOf('已入库') < 0) continue;
     for (const l of arr(po && po.lines)) {
       const gid = (l && (l.ing != null ? l.ing : l.ing_id));
       if (gid === undefined || gid === null) continue;

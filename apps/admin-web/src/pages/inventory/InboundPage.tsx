@@ -11,6 +11,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Row,
   Select,
   Space,
@@ -60,6 +61,11 @@ function asDoc(r: unknown): InventoryDoc | null {
 
 function docKey(d: InventoryDoc): string {
   return String(d.id ?? d.no ?? '')
+}
+
+/** 是否已作废（状态含「作废」/void，旧版 delRecv 物理删除在 Node 改为留痕） */
+function isVoided(d: InventoryDoc): boolean {
+  return /作废|void/i.test(String(d.status ?? ''))
 }
 
 /** pass/warn/fail 及中文 → Tag 色 */
@@ -118,6 +124,9 @@ export default function InboundPage() {
   const [payDoc, setPayDoc] = useState<InventoryDoc | null>(null)
   /* FP-RECV-01 新建进货单：走 recv.inbound 审批队列，不直写库 */
   const [recvOpen, setRecvOpen] = useState(false)
+  /* FP-RECV-08 编辑进货单：走 recv.update 审批队列，不直写库 */
+  const [editDoc, setEditDoc] = useState<InventoryDoc | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
 
   const load = useCallback((d: Dayjs) => {
     setLoading(true)
@@ -248,6 +257,23 @@ export default function InboundPage() {
     message.success(`已导出 PDF：${name}（可直接发微信）`)
   }
 
+  /** FP-RECV-09 作废：只投 recv.void 建议动作（执行器只留痕、不物理删除、库存按台账自动回退） */
+  const voidRecv = async (doc: InventoryDoc) => {
+    const id = docKey(doc)
+    try {
+      await postAction({
+        type: 'recv.void',
+        operator: role ?? account ?? 'admin',
+        payload: { id, reason: '管理端作废', source: 'admin-web/inventory/inbound' },
+      })
+      message.success('作废已入队 → 请到审批中心确认（确认后原单标记已作废、库存自动回退）')
+      load(acceptDate)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '作废失败')
+    }
+  }
+
   const openAcceptModal = (doc?: InventoryDoc) => {
     form.resetFields()
     const firstLine = doc?.lines?.[0]
@@ -330,7 +356,9 @@ export default function InboundPage() {
       key: 'settle',
       width: 90,
       render: (_, r) =>
-        docDebt(r) > 0.01 ? (
+        isVoided(r) ? (
+          <Tag color="default">已作废</Tag>
+        ) : docDebt(r) > 0.01 ? (
           <Tag color={COLORS.yellow}>有欠款</Tag>
         ) : (
           <Tag color={COLORS.green}>已结清</Tag>
@@ -360,6 +388,27 @@ export default function InboundPage() {
             <Button type="link" size="small" onClick={() => openAcceptModal(r)}>
               补录
             </Button>
+          )}
+          {/* FP-RECV-08 编辑：走 recv.update 审批队列；已作废单不可编辑 */}
+          {canWrite && !isMock && !isVoided(r) && (
+            <Button type="link" size="small" onClick={() => { setEditDoc(r); setEditOpen(true) }}>
+              编辑
+            </Button>
+          )}
+          {/* FP-RECV-09 作废：走 recv.void 审批队列；只留痕不物理删除；已作废单不再显示 */}
+          {canWrite && !isMock && !isVoided(r) && (
+            <Popconfirm
+              title="作废进货单"
+              description="原单保留可查（不删除），确认后库存按台账自动回退，确定？"
+              okText="确认作废"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => voidRecv(r)}
+            >
+              <Button type="link" size="small" danger>
+                作废
+              </Button>
+            </Popconfirm>
           )}
         </Space>
       ),
@@ -746,6 +795,17 @@ export default function InboundPage() {
         suppliers={suppliers}
         orders={orders}
         onClose={() => setRecvOpen(false)}
+        onQueued={() => load(acceptDate)}
+      />
+
+      {/* FP-RECV-08 编辑进货单：入队后刷新列表（库存/欠款要等确认后由店内消费器改） */}
+      <RecvFormModal
+        open={editOpen}
+        editDoc={editDoc}
+        ings={ings}
+        suppliers={suppliers}
+        orders={orders}
+        onClose={() => setEditOpen(false)}
         onQueued={() => load(acceptDate)}
       />
     </div>

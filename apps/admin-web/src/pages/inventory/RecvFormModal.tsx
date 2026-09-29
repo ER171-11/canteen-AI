@@ -20,11 +20,14 @@ import { useAuthStore } from '../../store/auth'
 import { fmt, r2, today } from './settle/data'
 
 /**
- * 新建 JH 进货单，逐字段移植旧版 openRecv / openDocForm（旧 HTML:1559-1661）。
+ * 新建 / 编辑 JH 进货单，逐字段移植旧版 openRecv / openDocForm（旧 HTML:1559-1661）。
  *
- * 红线：不直写库——只向 /api/actions 投一条 `recv.inbound`，确认由审批中心 + 店内消费器完成。
- * 执行器 applyRecvInbound 已存在，本页不新增写通道；实付/付款方式/关联采购单/实收量
- * 是 Node 侧对 Python 版做的**向后兼容超集**（见 bff/lib/algorithms/recv_inbound.test.js 头注）。
+ * 红线：不直写库——只向 /api/actions 投一条 `recv.inbound`（新建）或 `recv.update`（编辑），
+ *   确认由审批中心 + 店内消费器完成。执行器 applyRecvInbound / applyRecvUpdate 已存在，本页不新增写通道。
+ *   实付/付款方式/关联采购单/实收量 是 Node 侧对 Python 版做的**向后兼容超集**
+ *   （见 bff/lib/algorithms/recv_inbound.test.js / recv_update.test.js 头注）。
+ *
+ * 编辑模式（editDoc 非空）：预填原单、提交 `recv.update`；已作废单不可编辑（由列表按钮禁用保证）。
  *
  * 与旧版的**已知差异**（都写在界面上，不静默）：
  *   1. 实收量旧版无此输入（只有「数量」一列）；本版拆成 订购量(计价/入库) + 实收量(仅登记)，
@@ -34,6 +37,7 @@ import { fmt, r2, today } from './settle/data'
  *      本版只登记单向关联。
  *   4. 原料档案未存换算系数 conv，故不显示旧版的「折库存单位」列；本版也不代建新原料
  *      （旧版 openNewIngForPo 属原料档案页）。
+ *   5. 编辑时「实付」仅覆盖**初始**付款，历史补付（recv.pay）记录保留（Node 超集保护，旧版无补付概念）。
  */
 
 /** 旧版 openRecv 付款方式 5 项（HTML:1583，顺序与默认值照抄，勿改） */
@@ -58,6 +62,8 @@ interface FormVals {
 
 export interface RecvFormModalProps {
   open: boolean
+  /** 非空 = 编辑模式（预填该单并提交 recv.update）；空 = 新建（提交 recv.inbound） */
+  editDoc?: InventoryDoc | null
   ings: IngItem[]
   suppliers: string[]
   orders: InventoryDoc[]
@@ -67,12 +73,14 @@ export interface RecvFormModalProps {
 
 export default function RecvFormModal({
   open,
+  editDoc,
   ings,
   suppliers,
   orders,
   onClose,
   onQueued,
 }: RecvFormModalProps) {
+  const isEdit = !!(editDoc && (editDoc.id || editDoc.no))
   const account = useAuthStore((s) => s.account)
   const role = useAuthStore((s) => s.role)
   const [form] = Form.useForm<FormVals>()
@@ -86,11 +94,38 @@ export default function RecvFormModal({
     return m
   }, [ings])
 
-  /* 旧版 openRecv 打开时：日期=今天、付款方式=首项、明细首行=第一个原料（HTML:1563/1583/1626） */
+  /* 旧版 openRecv 打开时：日期=今天、付款方式=首项、明细首行=第一个原料（HTML:1563/1583/1626）；
+     编辑模式预填原单（HTML:1642-1654 同字段） */
   useEffect(() => {
     if (!open) return
-    const first = ings[0]
     form.resetFields()
+    if (isEdit && editDoc) {
+      form.setFieldsValue({
+        date: editDoc.date ? dayjs(String(editDoc.date)) : dayjs(),
+        supplier: editDoc.supplier || '',
+        po: editDoc.po || undefined,
+        note: editDoc.note || '',
+        method: editDoc.method || RECV_METHODS[0],
+        /* 编辑预填「实付」= 初始付款合计（排除带 source/ts 的补付记录，避免覆盖历史补付） */
+        paid: Math.round(
+          (editDoc.payments ?? [])
+            .filter(
+              (p) =>
+                !(p && (p as Record<string, unknown>).source) &&
+                !(p && (p as Record<string, unknown>).ts),
+            )
+            .reduce((a, p) => a + (Number(p?.amount) || 0), 0) * 100,
+        ) / 100,
+        items: (editDoc.lines ?? []).map((l) => ({
+          ing_id: String(l.ing ?? ''),
+          qty: Number(l.qty) || 0,
+          recvQty: l.recvQty == null ? undefined : Number(l.recvQty),
+          price: Number(l.price) || 0,
+        })),
+      })
+      return
+    }
+    const first = ings[0]
     form.setFieldsValue({
       date: dayjs(),
       method: RECV_METHODS[0],
@@ -99,7 +134,7 @@ export default function RecvFormModal({
         ? [{ ing_id: String(first.id), qty: 1, price: Number(first.avg) || 0 }]
         : [{ qty: 1 }],
     })
-  }, [open, ings, form])
+  }, [open, ings, form, isEdit, editDoc])
 
   const payable = useMemo(
     () =>
@@ -155,9 +190,11 @@ export default function RecvFormModal({
     }
     try {
       await postAction({
-        type: 'recv.inbound',
+        type: isEdit ? 'recv.update' : 'recv.inbound',
         operator: role ?? account ?? 'admin',
         payload: {
+          /* 编辑模式：带 id 让执行器 applyRecvUpdate 定位原单；新建不带 id */
+          ...(isEdit ? { id: String(editDoc?.id ?? editDoc?.no ?? '') } : {}),
           supplier: String(v.supplier).trim(),
           date: v.date ? v.date.format('YYYY-MM-DD') : today(),
           note: v.note?.trim() || undefined,
@@ -175,7 +212,11 @@ export default function RecvFormModal({
           source: 'admin-web/inventory/inbound',
         },
       })
-      message.success('进货单已入队 → 请到审批中心确认（确认后店内库存/欠款才变）')
+      message.success(
+        isEdit
+          ? '进货单修改已入队 → 请到审批中心确认（确认后店内库存/欠款才变）'
+          : '进货单已入队 → 请到审批中心确认（确认后店内库存/欠款才变）',
+      )
       onQueued?.()
       onClose()
     } catch (e: unknown) {
@@ -190,11 +231,11 @@ export default function RecvFormModal({
 
   return (
     <Modal
-      title="新建 JH 进货单"
+      title={isEdit ? `编辑 JH 进货单 · ${editDoc?.no ?? editDoc?.id ?? ''}` : '新建 JH 进货单'}
       open={open}
       width={900}
       onCancel={onClose}
-      okText="提交入队"
+      okText={isEdit ? '提交修改' : '提交入队'}
       cancelText="取消"
       okButtonProps={{ disabled: invalid }}
       onOk={submit}

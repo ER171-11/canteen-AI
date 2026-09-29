@@ -10,6 +10,7 @@ const inv = require('./inventory');
 const pos = require('./pos');
 const dish = require('./dish');
 const ops = require('./ops');
+const inspection = require('./inspection');
 
 /* 库存算法：入库/盘点后重算 stock/qty/avg */
 registerAll({
@@ -28,6 +29,9 @@ registerAll({
   'loss.reject': (ctx, data, payload) => inv.rejectLossReport(ctx, data, payload),
   'recv.inbound': (ctx, data, payload) => inv.applyRecvInbound(data, payload),
   'recv.accept': (ctx, data, payload) => inv.insertRecvAccept(ctx, payload),
+  /* 编辑/作废：做成建议动作走审批队列，不直写库；作废只留痕、不物理删除 */
+  'recv.update': (ctx, data, payload) => inv.applyRecvUpdate(data, payload),
+  'recv.void': (ctx, data, payload) => inv.applyRecvVoid(data, payload),
   /* 补付 / 欠款清收：不登记 type 会被消费器判 need-manual 驳回（consumer.js:9） */
   'recv.pay': (ctx, data, payload) => inv.applyRecvPay(data, payload),
   'stock.count': (ctx, data, payload) => inv.applyStockCount(data, payload, ctx),
@@ -71,6 +75,7 @@ registerAll({
   'qc.record': (ctx, data, payload) => ops.insertQcRecord(ctx, data, payload),
   'qc.pass': (ctx, data, payload) => ops.insertQcRecord(ctx, data, payload),
   'plate.pass': (ctx, data, payload) => ops.insertQcRecord(ctx, data, payload),
+  'qc.force_pass': (ctx, data, payload) => ops.insertQcForcePass(ctx, data, payload),
   'queue.serve': (ctx, data, payload) => ops.applyQueueServe(ctx, data, payload),
   'sample.log': (ctx, data, payload) => ops.insertSample(ctx, data, payload),
   'workorder.create': (ctx, data, payload) => ops.insertWorkorder(ctx, data, payload),
@@ -97,6 +102,12 @@ registerAll({
   'vip.checkin': (ctx, data, payload) => ops.insertVipCheckin(ctx, data, payload),
   'finance.freeze': (ctx, data, payload) => ops.insertFinSplit(ctx, data, payload, false),
   'finance.approve': (ctx, data, payload) => ops.insertFinSplit(ctx, data, payload, true)
+});
+
+/* 闭店巡检域（C/D 块）：巡检照片只存手机本地，本域不接收任何图片字段 */
+registerAll({
+  'inspection.record': (ctx, data, payload) => inspection.recordInspection(ctx, data, payload),
+  'inspection.assign': (ctx, data, payload) => inspection.assignInspection(ctx, data, payload)
 });
 
 /* loss.report 的 data 侧与 SQLite 旁路均已由 inv.applyLossReport 处理（内含 loss_reports 写入） */

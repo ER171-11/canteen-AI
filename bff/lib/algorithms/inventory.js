@@ -666,6 +666,125 @@ function applyRecvPay(data, payload) {
   );
 }
 
+/* ---------- recv.update ---------- */
+
+/**
+ * recv.update：编辑已有进货单（审批队列执行）。
+ *
+ * 对齐旧版 openRecv 编辑态（HTML:1642-1654）：就地替换 明细/日期/供应商/备注/付款方式/应付，
+ * 并 rebuildStock 重算库存（旧版编辑保存后也 rebuildStock）。
+ *
+ * Node 超集安全项（不静默降级，与 recv.inbound 同理）：
+ *   · 保留「补付」（recv.pay）追加的 payments（带 source/ts 的那些），
+ *     仅用编辑表单的「实付」覆盖**初始**付款，避免编辑时吞掉历史补付记录
+ *     （旧版无补付概念，编辑会把 payments 整体重写为单条，本实现在此处做了保护）。
+ *   · 实付超付直接拒绝（同 recv.inbound 口径），不静默截断。
+ *   · 已作废单不可再编辑。
+ */
+function applyRecvUpdate(data, payload) {
+  if (!Array.isArray(data.recv)) throw new Error('data.recv 不是数组');
+  const rid = payload.id != null ? String(payload.id)
+    : (payload.recv_id != null ? String(payload.recv_id) : '');
+  if (!rid) throw new Error('recv.update 缺 id / recv_id');
+  const doc = data.recv.find((p) => p && (String(p.id) === rid || String(p.no) === rid));
+  if (!doc) throw new Error('recv.update 未找到进货单: ' + rid);
+  const st0 = String(doc.status || '');
+  if (st0.indexOf('作废') >= 0 || st0.indexOf('void') >= 0) {
+    throw new Error('已作废进货单不可编辑: ' + rid);
+  }
+
+  // 标量字段：有传才改，保持未传字段不变（编辑可只改某一项）
+  if (payload.date != null) doc.date = String(payload.date);
+  if (payload.supplier != null) doc.supplier = String(payload.supplier).trim();
+  if (payload.note !== undefined) doc.note = String(payload.note || '');
+  if (payload.method != null) doc.method = String(payload.method);
+  if (payload.po !== undefined) {
+    if (payload.po) doc.po = String(payload.po);
+    else delete doc.po;
+  }
+
+  if (Array.isArray(payload.items) && payload.items.length) {
+    const lines = [];
+    for (const it of payload.items) {
+      const qty = toFloat(it.qty || 0);
+      const hasRecv = it.recvQty !== undefined && it.recvQty !== null && it.recvQty !== ''
+        && toFloat(it.recvQty) > 0;
+      if (qty === 0 && !hasRecv) continue;
+      const price = toFloat(it.price || 0);
+      const line = {
+        ing: it.ing_id || it.ing,
+        name: pt(it.name),
+        qty: qty,
+        price: price,
+        conv: 1,
+        amount: Math.round(qty * price * 100) / 100,
+        unitCost: price
+      };
+      /* 实收量只登记、不定价，与 recv.inbound 同口径 */
+      if (it.recvQty !== undefined && it.recvQty !== null && it.recvQty !== '') {
+        line.recvQty = toFloat(it.recvQty);
+      }
+      lines.push(line);
+    }
+    if (!lines.length) throw new Error('recv.update 明细无有效数量行');
+    doc.lines = lines;
+    doc.payable = Math.round(lines.reduce((a, l) => a + l.amount, 0) * 100) / 100;
+  }
+
+  /* 付款：保留带 source/ts 的 补付 记录，用编辑表单「实付」覆盖**初始**付款 */
+  const prior = Array.isArray(doc.payments)
+    ? doc.payments.filter((p) => p && (p.source || p.ts))
+    : [];
+  if (payload.paid !== undefined && payload.paid !== null && payload.paid !== '') {
+    const paid = Math.round(toFloat(payload.paid) * 100) / 100;
+    if (paid < 0) throw new Error('recv.update paid 不能为负数');
+    if (paid > num(doc.payable, 0) + 0.01) {
+      throw new Error('recv.update 实付超过应付 ' + num(doc.payable, 0) + '（超付请核对后重填）');
+    }
+    const method = pt(payload.method) || doc.method || '现金/转账';
+    const initial = paid > 0 ? [{ amount: paid, date: doc.date || today(), method: method }] : [];
+    doc.payments = initial.concat(prior);
+    doc.method = method;
+  }
+  /* 未传 paid：保留原 payments（初始 + 补付）不变 */
+
+  const rb = rebuildStock(data);
+  return 'recv.update ' + (doc.no || rid) + ' 已更新；' + rb;
+}
+
+/* ---------- recv.void ---------- */
+
+/**
+ * recv.void：作废进货单（审批队列执行）。
+ *
+ * 红线：只改 status='已作废' 并记操作人/时间/原因，**绝不 DELETE**
+ *   （旧版 delRecv HTML:1676 物理删除不得照搬——删除即丢审计，且无法回滚）。
+ * 库存不在此处直接重建：标记作废后，rebuildStock 会按 stock.js 的过滤规则跳过
+ *   status 含「作废」/void 的单，故原本计入的库存与均价自动回退，
+ *   效果等价于旧版「删除后重建台账」且**不丢审计、可回查**。
+ * 幂等：已作废直接跳过。
+ */
+function applyRecvVoid(data, payload) {
+  if (!Array.isArray(data.recv)) throw new Error('data.recv 不是数组');
+  const rid = payload.id != null ? String(payload.id)
+    : (payload.recv_id != null ? String(payload.recv_id) : '');
+  if (!rid) throw new Error('recv.void 缺 id / recv_id');
+  const doc = data.recv.find((p) => p && (String(p.id) === rid || String(p.no) === rid));
+  if (!doc) throw new Error('recv.void 未找到进货单: ' + rid);
+  const st0 = String(doc.status || '');
+  if (st0.indexOf('作废') >= 0 || st0.indexOf('void') >= 0) {
+    return 'recv.void ' + (doc.no || rid) + ' 已作废（跳过）';
+  }
+  doc.status = '已作废';
+  doc.void_operator = payload.operator || 'QUEUE';
+  doc.void_at = payload.ts || nowIso();
+  if (payload.reason != null) doc.void_reason = String(payload.reason);
+  doc.note = (doc.note || '') + ' 【已作废·' + (payload.operator || 'QUEUE') + '】';
+  /* 重建台账：作废单被 stock.js 跳过，库存/均价按剩余单据重算，原单保留可查 */
+  const rb = rebuildStock(data);
+  return 'recv.void ' + (doc.no || rid) + ' → 已作废（库存按台账自动回退，原单保留可查）；' + rb;
+}
+
 /* ---------- stock.count ---------- */
 
 /**
@@ -984,6 +1103,8 @@ module.exports = {
   applyRecvInbound,
   insertRecvAccept,
   applyRecvPay,
+  applyRecvUpdate,
+  applyRecvVoid,
   applyStockCount,
   insertStockCount,
   applyOrderMark,
