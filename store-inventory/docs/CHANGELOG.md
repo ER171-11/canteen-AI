@@ -534,8 +534,16 @@
     `admin-web npm run lint`（`--max-warnings 0`）+ `npm run build`（exit 0）；`scripts/lint-zero-dep.js`；
     `ci/redline_guard.ps1`（受保护哈希文件未动）。
   - 单测：`node bff/lib/algorithms/recv_inbound.test.js` → PASS 11 cases。
-  - 链路实证（内存快照过执行器，不落盘）: 单号 `JH20260929-01`、应付 300、实付 200（微信）、欠款 100、
-    `po=CG1`、行内 `recvQty=8`、库存 10、均价 30、快照 `rev` 未被执行器改写；超付用例返回拒绝原因。
+  - **出口判据实证（真实 HTTP 链路，隔离 `BFF_DATA_DIR`，未碰真实 `bff/data`）**：
+    起一个临时 BFF（`BFF_PORT=8799` + 快照/组织副本）→ `boss` 登录拿写 token → `POST /api/actions`（payload 即表单产出）
+    → `GET /api/actions?status=queued` 命中该 id（**审批中心可见**）→ `POST .../confirm`（`rev` 校验通过 → `待执行`）
+    → `POST .../apply` → `{ok:true, status:'已执行', result:'recv 追加入库 JH20260929-01（1 行），实付 30.0；rebuild_stock 完成 ings=96 moves=154'}`
+    → 复查快照：`payable=125 / paid=30 / debt=95 / method=wechat / po=采购单id / recvQty=8`，
+    原料 `stock 9→27`、`avg=4.63`、`recv` 条数 `9→10`、`rev 279→280`。
+    （内存快照单测另证：超付被拒、不传超集字段时输出与 Python 一致。）
+  - **未复核的部分**：店内消费器（`bff/store-node/consumer.js`）跑的是**同一个** `applyRecvInbound`（`algorithms.run`），
+    但它还要经店内 `/api/db` + 三向合并 `/api/sync` 落 sqlite；本机没有店内库（`store-node/data` 为空、e2e 脚本是 bash），
+    **未在本机跑通该段**，故「店内节点侧」只能算逻辑同源，不算实测。
   - **CI 未验证**：本机跑不了 macOS runner，`kmp-build`/`store-node` 结论以第二次 CI 为准（见上条 T8-CI1），
     不得据本机结果推断 CI 通过。
 - 影响范围: `bff/lib/algorithms/{inventory.js,recv_inbound.test.js}`、
