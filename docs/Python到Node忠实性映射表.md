@@ -49,6 +49,15 @@ Python 原实现完整保留在 `old/store-inventory-legacy/`，未被删除。
 两处**有意偏离**已登记：① 超付由旧版的静默截断（`Math.min(paid,payable)`）改为**拒绝执行**（红线 ⑥ 不静默降级）；
 ② 实收量只登记 `line.recvQty`、不参与 `rebuildStock` 计价（旧版把实收数解析进 `qty`）。
 
+**补注（2026-09-29，阶段 3 / FP-RECV-09）：`rebuildStock` 的「跳过已作废单」是**未登记的偏离，待人工裁定**。**
+T6-B（提交 `7367c1a`）在 `bff/lib/algorithms/stock.js::rebuildStock` 内加了一条
+「`status` 含 `作废`/`void` 则跳过该进货单」的分支（用于让「作废」动作回退库存），
+而 Python 原实现 `python-runtime/queue_consumer.py:220-224` 的重放循环只有「草稿/待」两个跳过条件。
+差异只在新版独有的「已作废」状态下才会出现（旧版作废是**物理删除**，该状态不进 Python 输入域），
+因此 `stock.test.js` 的 fixture 盖不到它，上表的 6/6 平价结论**不受影响，但也不能证明这段行为一致**。
+按红线①原文（`rebuildStock` 只可调用、不可改写）本项需人工裁定：或登记为「有意偏离」并把 `stock.js` 纳入哈希基线，
+或改回原实现另寻回退路径。阶段 5（T6 收尾）只做登记，未改代码。
+
 > 迁移时每个算法文件头注释均标注来源，例如
 > `bff/lib/algorithms/stock.js`：「迁移自 queue_consumer.py rebuild_stock / resolve_ing_id」；
 > `bff/lib/algorithms/pos.js`：「忠实迁移自 store-inventory/queue_consumer.py」。
@@ -69,7 +78,7 @@ Python 原实现完整保留在 `old/store-inventory-legacy/`，未被删除。
 
 | 红线条款（计划 §9 / AGENTS.md） | 工程化落地 | 校验方式 | 实测 |
 |---|---|---|---|
-| `rebuildStock`/`dishRecipeCost`/`seedDB` 零改动 | 算法层受平价测试保护；`db.js`/`merge.js` 进哈希基线 | `ci/redline_baseline.sha256` | ✅ 哈希一致 |
+| `rebuildStock`/`dishRecipeCost`/`seedDB` 零改动 | 算法层受平价测试保护；哈希基线**只含** `bff/store-node/db.js`、`bff/store-node/merge.js`（`stock.js` 不在基线内） | `ci/redline_baseline.sha256` | ✅ 2 个哈希文件一致；⚠️ `stock.js::rebuildStock` 于 T6-B 新增「跳过已作废单」分支，**偏离未登记、待人工裁定**，见 §1 补注 |
 | 后台无旁路写（禁止直连 `/api/sync`、sqlite、`.db`） | `ci/redline_guard.sh` grep `api/sync\|sqlite3\|餐厅系统.db` | CI `redline-guard` | ✅ 无命中 |
 | Key 仅 env，不硬编码 | guard 扫 `sk-[A-Za-z0-9]{20,}` | 同上 | ✅ 无命中 |
 | 图片不落库 | guard 扫 `writeFileSync.*imageBase64` | 同上 | ✅ 无命中 |

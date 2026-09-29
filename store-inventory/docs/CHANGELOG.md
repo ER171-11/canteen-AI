@@ -635,3 +635,40 @@
 - 回档方案: `git revert <本次提交>`——预览端点与解析器消失，UI 的两个按钮一并回退；`recv.import` 从 registry 摘除后，已入队未执行的动作会被消费器判 `need-manual` 驳回（**不会静默落库**）。
 - 后续: 阶段 5（T6 收尾）把 `docs/迁移基线/FP-进货入库.md` 的 FP-RECV-01/08/09 三行改 ⬆️（连同 `InboundPage.tsx` 行号漂移统一复核）、重跑 `gen-debt-table.ps1 -Check`、刷新看板（届时 151 FP → ⬆️ 51 / ⬜ 100）。
 
+
+
+## [2026-09-29] T6-D - T6 收尾：基线同步 + 行号复核 + 漂移与看板（阶段 5）
+
+- 背景: 阶段 2/3/4 连改三次 `InboundPage.tsx` 后，基线里 FP-RECV-01/08/09 仍是 ⬜（代码其实早已落地提交），
+  且 FP-RECV-04…15 的「新版」行号仍是 **721 行版本**快照——行号是证据，漂移即证据失效。本阶段**不动产品代码**，只做对账收尾。
+- 交付（纯文档 + 生成脚本，**无运行时代码改动**）:
+  - `docs/迁移基线/FP-进货入库.md`：FP-RECV-01/08/09 翻 ⬆️ 并补齐「执行器 / 注册表 / 测试 / 前端入口」的完整 `:行号`，
+    汇总改 **⬆️ 15 / ⬜ 0**（进货入库页欠账清零），结论段与「建议补齐顺序」第 6 项一并收口。
+  - **全 15 行新版行号按 832 行版本逐条重取**（例：结算单按钮 `:342-345` → `:381-384`，四张 KPI 卡 `:471-501` → `:531-563`）。
+  - 更正 T6-C 条目里记错的**文件行数**：`bff/lib/recv_import.js` 791 → **832**、`RecvImportModal.tsx` 314 → **336**（原条目按「追加式」保留不改，以本条为准）。
+  - `scripts/gen-debt-table.ps1` 的「执行前置依赖」表已过期（原写「进货单/采购单/销售单职责边界 → 阻塞 W3 全部 27 张，待写入 ADR」），
+    改为「进货单：**已解除**（`ADR-004`，RECV 5 张已清）」+「采购单/销售单：W3 剩余 11 张（PO/SALE）仍待 ADR」。
+  - 下游同步：任务清单 §0 当前进度 / §1.1 产物索引 / §2 T6 / §3 依赖树 / §6 调取指令 / §7 判据（进货入库页清零已勾选）、
+    `ADR-004` §5 落地清单（改终态）+ §7 遗留项 + §8 回档说明、`docs/Python到Node忠实性映射表.md` §1 补注 + §3。
+- 验证（实际跑过）:
+  - `powershell -File scripts/gen-debt-table.ps1` → 「基线 151 项 → ⬆️ 51 / ⬜ 100；欠账卡 100 张（W1 39 / W2 30 / W3 27→24 / W4 7）」，无汇总漂移告警；随后 `-Check` → **CHECK OK（exit 0）**。
+  - `node scripts/gen-progress-board.js` → 「漂移校验: ok；流程签收敞口: 4；数字一致性: OK」，`docs/进度看板.html` 已重生成。
+  - 门禁全绿：`cd bff && npm test`（exit 0，含在途的 inspection / qc_media 用例）、`admin-web npm run lint`(`--max-warnings 0`, exit 0) + `npm run build`(exit 0)、
+    `node scripts/lint-zero-dep.js`（通过，116 文件）、`ci/redline_guard.ps1`（全部通过，含 R14：9 页共 151 项均已标注）。
+- ⚠️ 本阶段发现的**未登记偏离（红线①）**: 阶段 3（`7367c1a`）为让「作废」能回退库存，在 `bff/lib/algorithms/stock.js::rebuildStock` 内加了
+  「`status` 含 `作废`/`void` 则跳过该单据」分支；Python 原实现 `python-runtime/queue_consumer.py:220-224` 只有「草稿/待」两个跳过条件，
+  两端**不再逐字段一致**。该文件**不在** `ci/redline_baseline.sha256`（仅含 `bff/store-node/db.js`、`merge.js`），
+  且 `stock.test.js` 的 fixture 盖不到（旧版作废＝物理删除，该状态不进 Python 输入域），所以**门禁全绿却查不出这次改写**；
+  `docs/Python到Node忠实性映射表.md` 原先「零改动 · ✅ 哈希一致」的表述本身也不准确（本轮已更正为「哈希只覆盖 2 个文件 + `rebuildStock` 偏离待裁定」）。
+  处置需人工二选一：① 正式登记为「有意偏离」并把 `stock.js` 纳入哈希基线；② 改回原实现，另寻库存回退路径（如作废时反向入账）。
+  **本阶段只登记、不改代码**；已写入任务清单 §7.1 第 4 项、`ADR-004` §7 第 7 项、`FP-进货入库.md` 备注 5。
+- 影响面: `docs/迁移基线/{FP-进货入库,欠账总表}.md`、`docs/迁移颗粒度规范.md` 附录 A、`docs/下一步任务清单_2026-09-28.md`、
+  `docs/decisions/ADR-004-进货单录入边界.md`、`docs/Python到Node忠实性映射表.md`、`docs/进度看板.html`、`scripts/gen-debt-table.ps1`。**无源码与依赖变更。**
+- AI 坑（留给后续）:
+  - **「行号证据」会随任何一次页面改动整体失效**：改完 `InboundPage.tsx` 必须**同阶段**回写基线行号，否则留给下一位的是一张会咬人的表。
+  - **记数不要凭印象**：T6-C 把 `recv_import.js` 记成 791 行、`RecvImportModal.tsx` 记成 314 行，实测 832 / 336 —— 行数与行号都要用工具取，不靠记忆。
+  - **门禁全绿 ≠ 算法忠实**：哈希基线只覆盖 2 个文件，红线①保护的其他函数被改写时 `redline_guard.ps1` 不会报警；复核要回到 `git show` 看 diff。
+- 回档方案: `git revert <本次提交>`——纯文档回退，无运行时影响（回退后基线会重新显示 FP-RECV-01/08/09 为 ⬜，与代码实际不符；如需保持一致可手工重跑 `gen-debt-table.ps1`）。
+- 后续: **阶段 6（T7 写回闭环端到端自动化验证）**：覆盖 `recv.inbound / update / void / import` 的「UI → 入队 → 审批 → 消费器 → 库存」闭环；
+  其后 T8 的 CI 远端仍属**未验证**（仓库无 remote），以及 §7.1 的 4 项人工签收（含红线①裁定）。
+

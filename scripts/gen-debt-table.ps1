@@ -300,7 +300,8 @@ Add '## 执行前置依赖'
 Add ''
 Add '| 前置决策 | 阻塞的卡 | 结论存放处 |'
 Add '|---|---|---|'
-Add ("| 进货单/采购单/销售单「在店内录还是云端录」的职责边界 | W3 全部 {0} 张 | 待写入 ADR（T6 前置） |" -f ($ordered | Where-Object { $_.W -eq 'W3' }).Count)
+Add '| 进货单「在店内录还是云端录」的职责边界 | ~~W3 的 RECV 5 张~~ **已解除**：`FP-RECV-01/02/03/08/09` 已全部 ⬆️ | `docs/decisions/ADR-004-进货单录入边界.md` |'
+Add ("| 采购单/销售单的同名职责边界 | W3 剩余 {0} 张（PO/SALE） | 待写入 ADR |" -f ($ordered | Where-Object { $_.W -eq 'W3' -and ($_.Page -eq 'PO' -or $_.Page -eq 'SALE') }).Count)
 Add '| 应收/实收按「单日期」还是「收款日期」统计 | `FP-DASH-02/03`、`FP-SALE-08` | 待写入 ADR |'
 Add '| 「服务端快照」形态（替代旧 localStorage 备份） | `FP-SET-07/10/11` | 待写入 ADR |'
 Add '| 双机同步四件套是否废弃 | `FP-SET-05/06/08/09` | 需业务批准人签字后方可标 ⚰️ |'
