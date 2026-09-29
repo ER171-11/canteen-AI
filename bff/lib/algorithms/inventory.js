@@ -8,7 +8,7 @@
  *   ing.upsert                        → applyIngUpsert
  *   quote.upsert                      → applyQuoteUpsert
  *   loss.report                       → applyLossReport
- *   recv.inbound                      → applyRecvInbound
+ *   recv.inbound                      → applyRecvInbound（含 Node 超集：paid / method / po / line.recvQty）
  *   recv.accept                       → insertRecvAccept
  *   recv.pay                          → applyRecvPay（补付 / 欠款清收）
  *   stock.count                       → applyStockCount + insertStockCount
@@ -515,7 +515,7 @@ function applyRecvInbound(data, payload) {
       const qty = toFloat(it.qty || 0);
       const price = toFloat(it.price || 0);
       if (qty === 0) continue;
-      lines.push({
+      const line = {
         ing: it.ing_id || it.ing,
         name: pt(it.name),
         qty: qty,
@@ -523,10 +523,32 @@ function applyRecvInbound(data, payload) {
         conv: 1,
         amount: Math.round(qty * price * 100) / 100,
         unitCost: price
-      });
+      };
+      /* 【Node 超集】实收量：旧版 openRecv 明细只有「数量」一列（HTML:1636），
+         批量导入时把「实收数」解析进 qty（HTML:2792），行上没有独立的实收量字段。
+         这里只做**登记**：写入 line.recvQty 供列表展示与对账，
+         **不参与 rebuildStock 计价**（仍按 qty 计入库存与应付）。不传该字段时行为与 Python 完全一致。 */
+      if (it.recvQty !== undefined && it.recvQty !== null && it.recvQty !== '') {
+        line.recvQty = toFloat(it.recvQty);
+      }
+      lines.push(line);
     }
     if (!lines.length) throw new Error('recv.inbound items 无有效数量行');
     const payable = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+    const method = pt(payload.method) || '现金/转账';
+    /* 【Node 超集】实付：旧版 openRecv 保存时写 payments=[{amount,date,method}]（HTML:1638-1646），
+       且把超付金额**静默截断**（paid=Math.min(paid,payable)）——本实现改为「超付即拒绝」，
+       避免静默吞掉多付金额（红线⑥ 不静默降级）；拒绝会以失败状态在审批中心可见。
+       不传 paid 时 payments=[]，行为与 Python 完全一致。 */
+    let paid = 0;
+    if (payload.paid !== undefined && payload.paid !== null && payload.paid !== '') {
+      paid = Math.round(toFloat(payload.paid) * 100) / 100;
+      if (paid < 0) throw new Error('recv.inbound paid 不能为负数');
+      if (paid > payable + 0.01) {
+        throw new Error('recv.inbound paid 超过应付 ' + payable + '（超付请核对后重填）');
+      }
+    }
+    const payments = paid > 0 ? [{ amount: paid, date: date, method: method }] : [];
     const sameDay = recv.filter((p) => p && p.date === date).length;
     const inbound = {
       id: uid('R', 10),
@@ -535,13 +557,18 @@ function applyRecvInbound(data, payload) {
       supplier: payload.supplier || '未指定供应商',
       lines: lines,
       payable: payable,
-      payments: [],
+      payments: payments,
       note: '【云端入库】' + (payload.note || ''),
-      method: '现金/转账',
+      method: method,
       status: '已入库'
     };
+    /* 【Node 超集】关联采购单：旧版只把选中的采购单号写到 recv.po（HTML:1650-1654），
+       采购单侧的收货进度回写由旧版 syncAllOrderRecv() 负责——Node 侧**尚未实现**（属采购管理页欠账），
+       故此处只登记单向关联，不改 data.orders：界面已明示，不做静默假装。 */
+    if (payload.po) inbound.po = String(payload.po);
     recv.push(inbound);
-    msg = 'recv 追加入库 ' + inbound.no + '（' + lines.length + ' 行）';
+    msg = 'recv 追加入库 ' + inbound.no + '（' + lines.length + ' 行）'
+      + (paid > 0 ? '，实付 ' + pf(paid) : '');
   }
 
   const rb = rebuildStock(data);

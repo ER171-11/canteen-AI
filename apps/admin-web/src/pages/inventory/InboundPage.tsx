@@ -44,6 +44,7 @@ import { COLORS } from '../../theme'
 import SettleModal from './settle/SettleModal'
 import SettleBatchModal from './settle/SettleBatchModal'
 import PayModal from './PayModal'
+import RecvFormModal from './RecvFormModal'
 import { DEFAULT_SETTLE_TPL, loadSettleTpl } from './settle/template'
 import { exportSettlePdf } from './settle/pdf'
 import type { SettleOpts } from './settle/html'
@@ -97,6 +98,8 @@ export default function InboundPage() {
 
   const [docs, setDocs] = useState<InventoryDoc[]>([])
   const [ings, setIngs] = useState<IngItem[]>([])
+  /* FP-RECV-01 新建进货单的「关联采购单」下拉数据源（快照 data.orders） */
+  const [orders, setOrders] = useState<InventoryDoc[]>([])
   const [accepts, setAccepts] = useState<RecvAcceptRecord[]>([])
   const [standards, setStandards] = useState<AcceptStandard[]>([])
   const [supplier, setSupplier] = useState<string>()
@@ -113,6 +116,8 @@ export default function InboundPage() {
   const [settleBatchOpen, setSettleBatchOpen] = useState(false)
   /* FP-RECV-07 补付（欠款清收）：走 recv.pay 审批队列，不直写库 */
   const [payDoc, setPayDoc] = useState<InventoryDoc | null>(null)
+  /* FP-RECV-01 新建进货单：走 recv.inbound 审批队列，不直写库 */
+  const [recvOpen, setRecvOpen] = useState(false)
 
   const load = useCallback((d: Dayjs) => {
     setLoading(true)
@@ -121,6 +126,7 @@ export default function InboundPage() {
       fetchSnapshot()
         .then((snap) => {
           setIngs(snap.data?.ings ?? [])
+          setOrders(snap.data?.orders ?? [])
           const raw = snap.data?.recv ?? []
           const list = raw.map(asDoc).filter(Boolean) as InventoryDoc[]
           setDocs(list)
@@ -128,6 +134,7 @@ export default function InboundPage() {
         })
         .catch(() => {
           setDocs(MOCK_RECV)
+          setOrders([])
           setIsMock(true)
         }),
       fetchRecvAccept(ds)
@@ -524,9 +531,18 @@ export default function InboundPage() {
             <Button disabled={!filtered.length} onClick={() => setSettleBatchOpen(true)}>
               批量结算单
             </Button>
+            {/* FP-RECV-01 新建进货单：只投 recv.inbound 建议动作，确认前不改账面 */}
             <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
               <Button
                 type="primary"
+                disabled={!canWrite || isMock}
+                onClick={() => setRecvOpen(true)}
+              >
+                新建进货单
+              </Button>
+            </Tooltip>
+            <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
+              <Button
                 disabled={!canWrite || isMock}
                 onClick={() => openAcceptModal()}
               >
@@ -537,7 +553,7 @@ export default function InboundPage() {
         }
       >
         {filtered.length === 0 && !loading ? (
-          <Empty description="暂无进货单，货到了请在店内系统或后续审批流新建 JH 进货单" />
+          <Empty description="暂无进货单：货到了点右上角「新建进货单」录入，提交后到审批中心确认" />
         ) : (
           <Table<InventoryDoc>
             rowKey={rk}
@@ -720,6 +736,16 @@ export default function InboundPage() {
         open={!!payDoc}
         doc={payDoc}
         onClose={() => setPayDoc(null)}
+        onQueued={() => load(acceptDate)}
+      />
+
+      {/* FP-RECV-01 新建进货单：入队后刷新列表（库存/欠款要等确认后由店内消费器改） */}
+      <RecvFormModal
+        open={recvOpen}
+        ings={ings}
+        suppliers={suppliers}
+        orders={orders}
+        onClose={() => setRecvOpen(false)}
         onQueued={() => load(acceptDate)}
       />
     </div>

@@ -495,3 +495,68 @@
   若 `kmp-build` 仍挂则降级「源码储备·不编译」并在 `docs/运行保障层.md` §5.3 留痕
 
 
+## [2026-09-29] T6-A - 新建 JH 进货单（阶段 2 / FP-RECV-01）
+
+- 背景: ADR-004 定案「进货录入 = **云端唯一入口**」，但 `InboundPage.tsx` 空态仍写着
+  「请在店内系统**或**后续审批流新建」——两个并列入口没决策；而页面上**根本没有新建表单**，
+  进货单只能靠店内节点产生。阶段 2 把这条链路补齐：清残留 + 加新建入口。
+- 关键约束（照抄计划，未越界）: 执行器 `applyRecvInbound` **已存在**（`registry.js:30`），
+  本阶段**不新增写通道**——前端只向 `/api/actions` 投一条 `recv.inbound`，确认由审批中心 + 店内消费器做，
+  页面不直写库（红线②）。
+- 实现 1 —— 后端 `bff/lib/algorithms/inventory.js`（`items` 分支补 4 项旧版字段，统称 **Node 超集**）:
+  旧版「新建进货单」在浏览器 JS（`old/.../真实数据版.html:1559-1661`）里保存 4 个字段，而迁移来的
+  Python 分支固定写 `payments: []` / `method: '现金/转账'`、没有关联采购单、没有行内实收量——
+  **字段在迁移中缩水**，与 ADR-004 §4「旧版录入字段不缩水」冲突。本次补齐：
+  `paid`（→ `payments=[{amount,date,method}]`，付款日期取单据日期）、`method`、
+  `po`（**单向**登记关联采购单）、行内 `recvQty`。
+  **4 个字段全部可选**：不传时输出与 Python 逐字段一致，故 `inventory.test.js` 的 Python 差分不受影响（实测仍全绿）。
+- 实现 2 —— 前端 `apps/admin-web/src/pages/inventory/RecvFormModal.tsx`（新文件）:
+  逐字段移植旧版 `openRecv`：日期（默认今天）/ 供应商（AutoComplete 可输入新供应商，必填）/ 备注 /
+  关联采购单（取快照 `data.orders` 中非「已作废」者，按日期倒序，标签沿用旧版 `单号 · 日期 · 供应商`）/
+  明细（原料·订购量·实收量·单价·金额，行内可增删）/ 实付（含「按应付全额」按钮，照抄旧版 `docFull`）/
+  付款方式（旧版 5 项，顺序与默认值照抄 `HTML:1583`）/ 欠款（实时计算）。
+- 实现 3 —— `InboundPage.tsx`：工具栏加「新建进货单」（与「补录验收」同受 `canWrite && !isMock` 约束）；
+  空态文案改为「货到了点右上角「新建进货单」录入，提交后到审批中心确认」——ADR-004 §5 第 1 项就此关闭。
+- 实现 4 —— 新增行为契约测试 `bff/lib/algorithms/recv_inbound.test.js`（11 例）:
+  超集部分**无 Python 可差分**（Python 侧根本没这些字段），只能靠契约测试锁：单号口径 / 同日序号自增 /
+  实付与欠款 / 超付拒绝 / 负数拒绝 / 实收量仅登记 / **不传超集字段时与 Python 一致**（专守向后兼容不变量）/
+  `po` 登记且不动 `orders` / 空明细拒绝 / 浮点 r2 归整 / 多行汇总。
+- **5 处已知差异（全部写在界面上，不静默——红线⑥）**:
+  1. 旧版明细只有「数量」一列（导入时把「实收数」解析进 `qty`）；本版拆成 **订购量（计价/入库）** +
+     **实收量（仅登记展示）**，短收对账口径属后续阶段；
+  2. 旧版超付 `Math.min(paid,payable)` **静默截断**；本版**超付即拒绝**（失败状态在审批中心可见）；
+  3. 旧版「关联采购单」由 `syncAllOrderRecv()` 回写采购单**收货进度**，Node 侧**未实现** → 本版只登记单向关联，
+     采购管理页收货进度不会因此变化（属采购管理页欠账）；
+  4. 原料档案无 `conv` 换算系数 → **不显示**旧版「折库存单位」列（不假造 conv=1 的换算结果）；
+  5. 旧版可边录边新建原料（`openNewIngForPo`）→ 本版**不代建原料**，提示先去「原料档案」新增。
+- 验证:
+  - 门禁全绿：`bff npm test`（算法 10/10，含 Python 差分 6 域，**inventory 差分仍通过**）；
+    `admin-web npm run lint`（`--max-warnings 0`）+ `npm run build`（exit 0）；`scripts/lint-zero-dep.js`；
+    `ci/redline_guard.ps1`（受保护哈希文件未动）。
+  - 单测：`node bff/lib/algorithms/recv_inbound.test.js` → PASS 11 cases。
+  - 链路实证（内存快照过执行器，不落盘）: 单号 `JH20260929-01`、应付 300、实付 200（微信）、欠款 100、
+    `po=CG1`、行内 `recvQty=8`、库存 10、均价 30、快照 `rev` 未被执行器改写；超付用例返回拒绝原因。
+  - **CI 未验证**：本机跑不了 macOS runner，`kmp-build`/`store-node` 结论以第二次 CI 为准（见上条 T8-CI1），
+    不得据本机结果推断 CI 通过。
+- 影响范围: `bff/lib/algorithms/{inventory.js,recv_inbound.test.js}`、
+  `apps/admin-web/src/pages/inventory/{RecvFormModal.tsx,InboundPage.tsx}`、
+  `docs/decisions/ADR-004-进货单录入边界.md`、`docs/Python到Node忠实性映射表.md`、
+  `docs/下一步任务清单_2026-09-28.md`、本文件。**未触碰**受保护哈希文件（`bff/store-node/{db,merge}.js`）；
+  `rebuildStock` 只调用不改写（红线①）。
+- AI避坑提示:
+  - **`po_id` 是 `order_id` 的别名**（`inventory.js` 里 `oid = payload.order_id || payload.po_id`）：
+    payload 一带 `po_id`/`order_id`，执行器就走「自采购单建单」分支并**完全忽略 `items`**——明细被静默丢弃。
+    表单「关联采购单」只能用 `po` 字段。
+  - 往**平价保护**的算法里加字段，必须做成「不传即与原实现逐字段一致」的**可选超集**；先想清楚有没有 Python 侧
+    可对拍，没有就**登记进映射表 + 配契约测试**，别假装它还在平价范围内。
+  - 旧版的「静默截断 / 静默跳过」是缺陷不是行为：宁可**拒绝执行**（失败可见），也不要吞掉金额或行。
+  - `npm run lint` 是 `--max-warnings 0`：`useMemo` 依赖不全这类 warning 也会挂门禁；
+    本地 lint 会一并检查**别人未提交的在途文件**（本次被 `safety/InspectionBoardPage.tsx` 一个多余分号挡住，已顺手修）。
+- 回档方案: `git revert <本次提交>`——执行器回到 `payments: []` / 固定 method 形态，前端新建入口与空态文案一并回退。
+  **注意**：回档后 payload 里的 `paid/po/recvQty` 会被旧执行器忽略，已录实付的单据会显示成「全欠款」，需人工核对
+  ——这正是把超集写成可选字段的代价，也是本阶段留在测试里的不变量说明。
+- 后续: 阶段 3（T6-B）编辑 `recv.update` + 作废 `recv.void`（作废只置 `status='已作废'`，**不得物理删除**）；
+  阶段 5 再同步 `docs/迁移基线/FP-进货入库.md` 的 FP-RECV-01 行、本文件 §2/§7 进度并刷新看板。
+
+
+

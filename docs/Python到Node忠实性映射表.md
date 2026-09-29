@@ -37,7 +37,17 @@ Python 原实现完整保留在 `old/store-inventory-legacy/`，未被删除。
 | 运营/人员/食安/会员/财务/设备 | `queue_consumer.py` | `bff/lib/algorithms/ops.js` | `ops.test.js` | ✅ PASS |
 | POS/桌台/收银/BOM 扣料 | `queue_consumer.py` | `bff/lib/algorithms/pos.js` | `pos.test.js` | ✅ PASS（38 cases） |
 | 动作分发/执行 | `queue_consumer.py::execute` | `bff/lib/algorithms/execute.js` | `execute.test.js` | ✅ PASS |
-| **汇总** | | | `node bff/lib/algorithms/run-tests.js` | **6/6** |
+| **汇总（平价差分域）** | | | `node bff/lib/algorithms/run-tests.js` | **6/6** |
+| 行为契约（**无** Python 可差分，见下补注） | 旧版浏览器 JS（`old/.../真实数据版.html`） | `inspection` / `qc_media` / `recv_pay` / `recv_inbound` 四个 `*.test.js` | 同上（同一 runner） | 4/4（runner 合计输出 **10/10**） |
+
+**补注（2026-09-29，阶段 2 / FP-RECV-01）：`applyRecvInbound` 的 `items` 分支是「Node 超集」。**
+旧版「新建进货单」在浏览器 JS 里保存 4 个 Python 侧**没有**的字段：实付 `payments=[{amount,date,method}]`（旧 HTML:1638-1646）、
+付款方式 `method`（HTML:1583）、关联采购单 `po`（HTML:1650-1654）、行内实收量（旧版只有「数量」一列，HTML:1636）。
+`queue_consumer.py` 的对应分支固定写 `payments: []` / `method: '现金/转账'`，故这部分**不可能有 Python 差分**，
+只能由行为契约测试锁：`bff/lib/algorithms/recv_inbound.test.js`（11 例）。
+超集字段**全部可选**——不传时输出与 Python 逐字段一致（该文件用例 7 专门守这条不变量），因此上表的 6/6 平价结论不受影响。
+两处**有意偏离**已登记：① 超付由旧版的静默截断（`Math.min(paid,payable)`）改为**拒绝执行**（红线 ⑥ 不静默降级）；
+② 实收量只登记 `line.recvQty`、不参与 `rebuildStock` 计价（旧版把实收数解析进 `qty`）。
 
 > 迁移时每个算法文件头注释均标注来源，例如
 > `bff/lib/algorithms/stock.js`：「迁移自 queue_consumer.py rebuild_stock / resolve_ing_id」；
