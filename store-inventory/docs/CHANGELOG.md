@@ -606,3 +606,32 @@
 
 
 
+
+## [2026-09-29] T6-C - 进货单批量导入与模板下载（阶段 4 / FP-RECV-02 / FP-RECV-03）
+
+- 背景: 旧版「进货入库」页有批量导入：`#fileRecvImport`(HTML:327) → `readImportFile(f,'po')`:3547 → `parseRecvTable`:3388 → `previewRecvImport`:3591 → `commitRecvImport`:3650；模板按钮 `#btnRecvTpl`(:3791) 实际绑定的是 **`downloadPoTemplate`**:3778（注意：`previewRecImport`:3709 / `commitRecImport`:3754 / `downloadRecTemplate`:3784 是**菜品配方页的食谱卡**导入，不是采购单——旧证据引用有误，已一并更正）。
+- 交付（按 ADR-004 §2.4：**预览零写 → 提交只入队一个 `recv.import`**）:
+  - 新增**零依赖解析层** `bff/lib/recv_import.js`（791 行，纯计算、绝不写库）：移植格式嗅探、列别名表 `IMP_PO_DEFS`、表头自动定位、`metaFromText`、`recvQty`、按「供应商+日期」拆单、预览聚合。→ 支持 `.xlsx`（Node 内置 `zlib.inflateRawSync` 替代浏览器 `DecompressionStream`）、伪 `.xls`(=网页表格，正则版 `parseHtmlTables`)、`.csv/.tsv`（UTF-8/GBK）、`.json`；**明确不支持**旧版二进制 `.xls`（OLE2/BIFF8 未移植，返回「另存为 .xlsx 或 CSV」）。
+  - `POST /api/inventory/recv/import/preview`（`bff/routes/inventory.js`:226-264）：只读、8MB 上限、失败一律 400 + 明确文案。
+  - `applyRecvImport`（`bff/lib/algorithms/inventory.js`:820，**批末统一 `rebuildStock` 一次**）+ `registry.js`:36 注册 `recv.import`。
+  - 前端 `RecvImportModal.tsx`（314 行：选文件 → 预览表格 → 确认只投一个动作）、`recvTemplate.ts`（模板下载，客户端生成 CSV）；`InboundPage.tsx` 工具条加「下载导入模板」:587-588 与「批量导入」:589-593。
+- 关键约束（红线）:
+  - **预览 = 只读**：不写文件、不入队、不改快照（已由测试逐字节断言）。
+  - **提交 = 一个动作**：整批只投 1 条 `recv.import`，批内原子；执行器内部不逐张重算，批末一次 `rebuildStock`。
+  - 不支持的格式必须**界面明示**，不得静默降级（红线⑥）。
+- 测试（新增 3 份，均挂到 `npm test`）:
+  - `bff/lib/algorithms/recv_import.test.js`（执行器 7 例：单号口径、`markPaid`、**批末只 rebuild 一次**、非法行整批拒绝、空批次零改动、`suppliers` 并入、与手工单序号连续）。
+  - `bff/lib/algorithms/recv_import_parse.test.js`（解析层 10 例：CSV 引号/BOM、表头别名、拆单、`recvQty` 三种分支、JSON/网页表格/**手写 ZIP 造真 .xlsx**、二进制 .xls 明确报错、预览纯函数性）。
+  - `bff/routes/recv_import.test.js`（路由 16 例：405、正常预览、**预览零写逐字节**、400/413 分支）。
+- 验证（实际跑过）:
+  - 门禁全绿：`bff npm test`（含 3 份新用例）、`admin-web npm run lint`(`--max-warnings 0`) + `build`、`node scripts/lint-zero-dep.js`（116 文件）、`ci/redline_guard.ps1`、`gen-debt-table.ps1 -Check`（exit 0）。
+  - **真实 HTTP 链路实证**（隔离 `BFF_DATA_DIR`，临时脚本跑完删除）：一行非法 → 预览 200 + `bad=1` 且该行剔除；全非法 → 400；二进制 .xls → 400 明确提示；手写 .xlsx → 200 `format=xlsx amount=20`；**连点 4 次预览后 snapshot.json 字节未变**；入队 → 审批中心可见 → `confirm(rev=100)` → `apply` → `已执行 recv.import 导入 2 张进货单（3 行，应付合计 350.0）… ings=2 moves=3`；复查快照 `recv 0→2 / rev 100→101 / 五花肉库存 0→11 均价 30 / 青菜 0→5 / suppliers 并入`。
+- 与旧版的**已知差异**（界面已明示）: ① 未匹配原料**不自动建档**（旧版 `createIngFromImport` 会新建）；② 无「手动指定列」（旧版 `openColMap`:3465）；③ 数量非数字计 `bad` 剔除，与「实收数 ×/未收」的业务性 `skipped` 分开（旧版混算）；④ 不回写采购单收货进度。
+- AI 坑（留给后续）:
+  - 组件文件里再 export 常量/函数会触发 `react-refresh/only-export-components`（`--max-warnings 0` 会挂门禁）——共享 helper 要单独放文件（本次新增 `recvTemplate.ts` 就是为此）。
+  - `map((g, i) => ...)` 里 `i` 一旦不用要立刻删，lint 会拦。
+  - 预览端点在**全局鉴权**之下（非白名单），脚本/本地验证必须先 `POST /api/admin/login` 拿 token（demo 账号 `boss` → 老板角色）。
+- 影响面: `bff/lib/recv_import.js`(新)、`bff/routes/inventory.js`、`bff/lib/algorithms/{inventory,registry}.js`、`bff/package.json`、`apps/admin-web/src/api/{index,types}.ts`、`apps/admin-web/src/pages/inventory/{RecvImportModal.tsx,recvTemplate.ts}(新)`、`InboundPage.tsx`、`docs/迁移基线/{FP-进货入库,欠账总表}.md`、`docs/迁移颗粒度规范.md` 附录 A、`docs/decisions/ADR-004`、`docs/下一步任务清单_2026-09-28.md`。
+- 回档方案: `git revert <本次提交>`——预览端点与解析器消失，UI 的两个按钮一并回退；`recv.import` 从 registry 摘除后，已入队未执行的动作会被消费器判 `need-manual` 驳回（**不会静默落库**）。
+- 后续: 阶段 5（T6 收尾）把 `docs/迁移基线/FP-进货入库.md` 的 FP-RECV-01/08/09 三行改 ⬆️（连同 `InboundPage.tsx` 行号漂移统一复核）、重跑 `gen-debt-table.ps1 -Check`、刷新看板（届时 151 FP → ⬆️ 51 / ⬜ 100）。
+
