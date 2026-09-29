@@ -713,5 +713,56 @@
   - **巡检 `done` 依赖端侧 `photo_taken`**：服务端拿不到照片（照片不上云），无法内容校验，是信任终端的既知边界，勿在文档里写成「已核验」。
 - 后续: 为 `/api/kitchen/sop-videos` 补测试；按需为品控大图做「URL 过期自动重签」优化；`kmp-build` / `redline_guard` 需在类 Unix + JDK 环境复跑确认。
 
+---
+
+## [2026-09-29] T7 - 写回闭环端到端验证（阶段 6 / `scripts/e2e-writeback.js`）
+
+- 背景: 阶段 2–5 把「进货单录入 → 云端审批 → 店内消费器 → 库存」四段各自测通了，但**四段从来没在同一台机器上串跑过一次**：
+  既有 `scripts/e2e-*.sh` 依赖 bash+curl+python3（本机 Windows 无 bash，跑不了），且 `bff/store-node/data` 长期为空
+  （任务清单 §8.2.2 已如实标注「本机无店内库，该段未在本机实测」）。写类功能一旦回归，靠单元测试是看不出来的。
+- 决策:
+  - **e2e 用 Node 写而不是 `.sh`**：出口判据要求「一条命令可复跑」，而本机没有 bash——用 `.sh` 等于把验收权交给没有的环境。
+    新脚本 `scripts/e2e-writeback.js` 只用 Node 内置模块（`http`/`net`/`child_process`/`node:sqlite` 间接），
+    Windows / Linux / macOS 同一条命令：`node scripts/e2e-writeback.js`（等价 `cd bff && npm run e2e`）。
+    **旧 `.sh` 三支保持原样，未替换、未删除。**
+  - **自持环境，不出仓库、不碰真实数据**：店内节点用 `startServer` 进程内起（**临时 sqlite + 临时 backup_dir + `cold_backup_on_start:false`**），
+    避免 `Store` 构造时在 `store-inventory/data/backups` 建目录；云端 BFF 用子进程起并**隔离 `BFF_DATA_DIR`**
+    （组织/队列/快照/审计全部落在临时目录）、`BFF_HOST=127.0.0.1`、**`SI_SCHEDULER=0`**（关后台 tick，否则 SI 会把动作塞进同一条队列污染断言）。
+  - **消费器必须跑真实 CLI 子进程**（`--once --db <临时库>`）：只有走真 CLI 才能覆盖「读 `/api/db` 取 `baseRev` → 应用算法 → `POST /api/sync(machine=QUEUE)` → 回调 `execute` → 推快照」这条**真实代码路径**。
+- 交付（**无产品代码改动**）:
+  - 新增 `scripts/e2e-writeback.js`（零第三方依赖，12 步 / **47 条断言**，退出码 0 全绿、1 断言失败、2 环境不满足）。
+  - `.github/workflows/ci.yml` 新增 job **`writeback-e2e`**（`ubuntu-latest` + node 22）；`bff/package.json` 增 `"e2e"` 脚本。
+  - 下游同步：任务清单 §0 / §1.1 / §2 T7 / §3 / §6 / §7 / §7.1（新增第 5 项）/ §8.2.6、`docs/进度看板.html`。
+- 验证（实际跑过）:
+  - `node scripts/e2e-writeback.js` → **WRITEBACK E2E OK**：断言 **47** 条、备注 1 条、店内 API **14** 次请求、耗时约 2s（多次复跑 2.1–2.4s）。
+    主链路证据：`queued → 409 rev mismatch → confirm(rev=1) → 待执行 1 条 → 消费器执行成功 → 已执行(via=store, executed_rev=2)
+    → 店内 rev 1→2 / machine=QUEUE / 单据 JH20260929-01(应付 60) / 库存 0→2、均价 30 → 云端快照 rev=2 且 recv 与店内逐字段一致`。
+  - **rev 冲突（两处硬断言）**：① 确认层过期 `rev` → **409 `rev mismatch`** 且动作**不离开** `queued`、「待执行」仍 0；
+    ② `/api/sync` 层过期 `baseRev` + 两端同刻改同一记录 → `action=merged` + `conflicts` 报 `ings/<id> → both-changed-same-time`，
+    服务端版本胜出（stock=5 不被过期 stock=9 覆盖）、本机新增记录不丢 —— 冲突**不静默覆盖**。
+  - **重复执行幂等**：同一动作二次 `confirm` / `execute` / `apply` **均 409 `invalid state: 已执行`**；消费器**重跑**「拉到待执行动作 0 条」，
+    店内 rev / `recv` 张数 / 快照 rev 全部不变（零写入）。
+  - 门禁：`cd bff && npm test` exit 0；`node scripts/lint-zero-dep.js` 通过（**117** 文件，含新脚本）；`ci/redline_guard.ps1` 全部通过（含 R14）；
+    `scripts/gen-debt-table.ps1 -Check` → **CHECK OK**（本阶段不动 FP 基线，无漂移）；`node scripts/gen-progress-board.js` 已刷新看板
+    （151 → ⬆️ 51 / ⬜ 100 不变，流程签收敞口 4 → **5**，CI job 列表 9 含新 job）；
+    `apps/admin-web` 零改动仍复跑：`npm run lint`（`--max-warnings 0`）+ `npm run build` **均 exit 0**。
+    跑完 `git status` 无新增文件（临时目录自动删除；`bff/store-node/data/pusher_state.json` 已还原）。
+- ⚠️ 实证的**幂等边界**（阶段 6 新发现并登记，非本阶段引入）: 「同一动作不可重复执行」**成立**（同 id 二次执行全被 409 拦下）；
+  但**执行完成后**再提交**同一 payload** 会**新建动作**（`dedup=false`）——`POST /api/actions` 的幂等只覆盖 OPEN 状态（`queued`/`待执行`，阶段 4 设计），
+  于是「连点两下保存」= 两条待审批动作 = 两笔入库。脚本已把它写成 ⚠ 备注并断言「复投零写入、不触发执行」。
+  收口需人工决策：① 接受为设计边界并在 UI 明示；或 ② 补「跨已执行动作的批指纹比对」（**属写类语义变更，须先写 ADR**）。
+  已登记到任务清单 §7.1 第 5 项。
+- 影响面: `scripts/e2e-writeback.js`（新增）、`.github/workflows/ci.yml`、`bff/package.json`、
+  `docs/下一步任务清单_2026-09-28.md`、`docs/进度看板.html`、本文件。**无 `bff/lib`、`bff/routes`、`store-node` 运行时代码改动，无依赖变更。**
+- AI 坑（留给后续）:
+  - **pusher 去重状态会咬人**：`bff/store-node/data/pusher_state.json` 记着「上次推的 rev + ext 计数」，同 rev 同计数会**跳过推送**。
+    e2e 里必须跑前挪开、跑后还原（脚本已做），否则会出现「快照没回写」的**假阴性**。
+  - **BFF 后台 tick 会污染队列**：不设 `SI_SCHEDULER=0` 时，SI 任务在快照存在后会自己入队动作，消费器会把它们一并消费，断言随即失稳。
+  - **别用真实数据目录跑 e2e**：默认 `db_path` 指向 `store-inventory/data/餐厅系统.db`，`Store` 构造还会在 `data/backups` 建目录——
+    一定要传临时 `db_path` + `backup_dir`，否则测试会悄悄改真实库（并留下目录）。
+  - **断言要用工具取数**：`node:sqlite` 只在 Node ≥ 22 可用，脚本开头做了版本闸（低版本直接退 2 并说明原因），别把失败误读成功能坏了。
+- 回档方案: `git revert <本次提交>` —— 只删一个脚本 + 一个 CI job + 一处 `package.json` 脚本，**无运行时与数据影响**；
+  e2e 全程使用临时目录，回退后无需清理。
+- 后续: **阶段 7（T9 iOS 工程化决策 + T10 文档收尾）**；`writeback-e2e` job 与其余 job 一样**未在真实 CI 跑过**（本机领先 `origin/main` 7 个提交未推送，§7 首项仍敞开）。
 
 

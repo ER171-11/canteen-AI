@@ -95,6 +95,18 @@ jobs:
           sqlite3 /tmp/test_ci.db < store-inventory/migrations/001_new_tables.sql
           sqlite3 /tmp/test_ci.db "SELECT count(*) FROM sqlite_master WHERE type='table';"
 
+  writeback-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # T7 写回闭环：本脚本自带隔离（临时 sqlite + 隔离 BFF_DATA_DIR + SI_SCHEDULER=0），
+      # 不依赖真实经营数据与已运行的服务，一条命令跑完「确认→队列→消费器→/api/sync→快照回写」。
+      - name: 写回闭环端到端（rev 冲突 + 重复执行幂等）
+        run: node scripts/e2e-writeback.js
+
   kmp-build:
     runs-on: macos-latest
     steps:

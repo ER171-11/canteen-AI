@@ -10,7 +10,8 @@
     "test:store": "node store-node/run-tests.js",
     "test:seed": "node store-node/seed/run-tests.js",
     "test:routes": "node routes/run-tests.js && node routes/recv_import.test.js",
-    "test": "node lib/algorithms/run-tests.js && node store-node/run-tests.js && node store-node/seed/run-tests.js && node routes/run-tests.js"
+    "test": "node lib/algorithms/run-tests.js && node store-node/run-tests.js && node store-node/seed/run-tests.js && node routes/run-tests.js",
+    "e2e": "node ../scripts/e2e-writeback.js"
   },
   "private": true,
   "license": "UNLICENSED"
