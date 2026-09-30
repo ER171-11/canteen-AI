@@ -90,7 +90,7 @@ fun QcMediaSection(
 
     val pendingBytes = remember { mutableStateOf<ByteArray?>(null) }
 
-    val capture = rememberWatermarkCapture(
+    val shooter = rememberWatermarkCapture(
         onCaptured = { photo, _ ->
             val wo = selectedWo
             val op = AppModule.displayName ?: AppModule.account ?: "厨师"
@@ -164,7 +164,7 @@ fun QcMediaSection(
         // 2) 拍照判定入口
         Button(
             onClick = {
-                capture(
+                shooter.capture(
                     WatermarkSpec(
                         storeName = AppModule.storeName ?: "本店",
                         pointName = "品控·${selectedWo?.name ?: "出品"}",

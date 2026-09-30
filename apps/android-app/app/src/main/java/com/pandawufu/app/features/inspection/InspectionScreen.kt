@@ -19,6 +19,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -59,6 +60,7 @@ private val FiveGreenC = Color(0xFF5BA85B)
 private val FiveRedC = Color(0xFFE8584A)
 private val FiveYellowC = Color(0xFFF2B233)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InspectionScreen() {
     val context = LocalContext.current
@@ -76,7 +78,7 @@ fun InspectionScreen() {
 
     var pendingNodeId by remember { mutableStateOf<String?>(null) }
 
-    val capture = rememberWatermarkCapture(
+    val shooter = rememberWatermarkCapture(
         onCaptured = { photo, spec ->
             val nodeId = pendingNodeId
             val op = AppModule.displayName ?: AppModule.account ?: "巡检员"
@@ -85,7 +87,7 @@ fun InspectionScreen() {
                 // 1) 本地台账（照片只存手机，服务器不收图）
                 val entry = photoStore.record(
                     photo,
-                    spec.copy(kind = "巡检", nodeId = nodeId),
+                    spec.copy(kind = "巡检"),
                     nodeId = nodeId
                 )
                 if (entry != null) inspVm.dispatch(InspectionViewModel.InspectionIntent.NoteLocalPhoto(nodeId ?: ""))
@@ -171,7 +173,7 @@ fun InspectionScreen() {
                     doneSet = state.doneNodeIds(),
                     onShoot = { node ->
                         pendingNodeId = node.id
-                        capture(
+                        shooter.capture(
                             WatermarkSpec(
                                 storeName = AppModule.storeName ?: "本店",
                                 pointName = "巡检·${node.name}",
