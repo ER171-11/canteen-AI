@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
@@ -19,14 +19,28 @@ import {
   Typography,
   message,
 } from 'antd'
-import { fetchAdminDishes, fetchAnalysis, postAction, type AnalysisParams } from '../../api'
-import type { AnalysisResp, Dish, MatrixRow } from '../../api/types'
+import {
+  fetchAdminDishes,
+  fetchAnalysis,
+  postAction,
+  simulateAnalysis,
+  type AnalysisParams,
+} from '../../api'
+import type {
+  AnalysisResp,
+  AnalysisSimResp,
+  CalcQMode,
+  CalcSimRowOverride,
+  Dish,
+  MatrixRow,
+} from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
 import { useAuthStore } from '../../store/auth'
 import { COLORS } from '../../theme'
 import CalcParamsCard from './CalcParamsCard'
 import CalcCharts from './CalcCharts'
 import CalcDishTable from './CalcDishTable'
+import { rowOvKey, SIM_BASIS_LABEL, type BulkAction } from './calcSim'
 
 const QUAD_META: Record<string, { name: string; color: string }> = {
   star: { name: '明星', color: '#E8442E' },
@@ -86,12 +100,119 @@ export default function WeeklyReportPage() {
     loadDishes()
   }, [load, loadDishes])
 
+  /* ---------------- 结构测算「模拟态」只读推演（FP-CALC-08/11/12/13，见 ADR-007） ----------------
+   * 基线：`GET /api/modules/analysis`（店级 KPI 走保本价盘整表口径）。
+   * 模拟态：`POST /api/modules/analysis/sim`（行集切到本店在售菜品，即旧版 calcModel 的 SD 口径），
+   *   故进入模拟态时店级 KPI 会跳变 —— 页面必须挂「模拟态 · 本店在售菜品口径」徽标。
+   * 本页**不持第二份公式**：成本率/日营收/毛利额一律取后端回传行，避免前端公式漂移。 */
+  const [params, setParams] = useState<AnalysisParams>({})
+  const [simOn, setSimOn] = useState(false)
+  const [simBusy, setSimBusy] = useState(false)
+  const [simNonce, setSimNonce] = useState(0)
+  const [qmode, setQmode] = useState<CalcQMode>('real30')
+  const [qfallback, setQfallback] = useState(true)
+  const [overrides, setOverrides] = useState<Record<string, CalcSimRowOverride>>({})
+  const [sim, setSim] = useState<AnalysisSimResp | null>(null)
+  const simSeq = useRef(0)
+
+  // 推演请求去抖 300ms：行内连点数字输入只发一次（旧版是内存即时重算，新版按端点回源）
+  useEffect(() => {
+    if (!simOn) return undefined
+    const seq = ++simSeq.current
+    const t = window.setTimeout(() => {
+      setSimBusy(true)
+      simulateAnalysis({ params, qmode, qfallback, rows: overrides })
+        .then((r) => {
+          if (seq !== simSeq.current) return // 过期响应丢弃
+          setSim(r)
+        })
+        .catch(() => {
+          if (seq !== simSeq.current) return
+          setSimOn(false)
+          setSim(null)
+          message.error('模拟推演失败（BFF 离线或端点未部署），已退回基线口径')
+        })
+        .finally(() => {
+          if (seq === simSeq.current) setSimBusy(false)
+        })
+    }, 300)
+    return () => window.clearTimeout(t)
+  }, [simOn, params, qmode, qfallback, overrides, simNonce])
+
   const trend7 = useMemo(() => (data?.trend ?? []).slice(-7), [data])
   const matrix = useMemo(() => data?.matrix ?? [], [data])
-  const kpi = data?.baoben_summary?.kpi ?? {}
-  const types = data?.baoben_summary?.types ?? []
-  const effParams = data?.baoben_summary?.params
-  const scenes = data?.baoben_summary?.scenes ?? []
+  const simSummary = sim?.baoben_summary ?? null
+  const kpi = (simOn ? simSummary?.kpi : data?.baoben_summary?.kpi) ?? {}
+  const types = (simOn ? simSummary?.types : data?.baoben_summary?.types) ?? []
+  const effParams = (simOn ? simSummary?.params : data?.baoben_summary?.params) ?? undefined
+  const scenes = (simOn ? simSummary?.scenes : data?.baoben_summary?.scenes) ?? []
+  const calcDishes = (simOn ? sim?.calc_dishes : data?.calc_dishes) ?? []
+  const adviceList = (simOn ? simSummary?.advice : data?.baoben_summary?.advice) ?? []
+
+  /** 模拟态控制句柄（下发给逐菜结构表；本表只上抛动作，不持状态） */
+  const simCtl = {
+    active: simOn,
+    overrides,
+    qmode,
+    qfallback,
+    qmodeLabel: sim?.qmode_label,
+    qdays: sim?.qdays,
+    qstat: sim?.qstat,
+    busy: simBusy,
+    onStart: () => setSimOn(true),
+    onStop: () => {
+      setSimOn(false)
+      setSim(null)
+      setOverrides({})
+    },
+    onOverride: (key: string, patch: CalcSimRowOverride | null) =>
+      setOverrides((prev) => {
+        const next = { ...prev }
+        if (patch == null) delete next[key]
+        else next[key] = { ...(prev[key] ?? {}), ...patch }
+        return next
+      }),
+    /** 批量调价/调量/上架/恢复默认：以当前生效行值为基数（旧版 data-bulk，HTML:4296-4311） */
+    onBulk: (scope: string, action: BulkAction) =>
+      setOverrides((prev) => {
+        const next = { ...prev }
+        for (const r of calcDishes) {
+          if (scope !== '__all' && (r.cat || '常规') !== scope) continue
+          const k = rowOvKey(r)
+          if (action === 'reset') {
+            delete next[k]
+            continue
+          }
+          const patch: CalcSimRowOverride = { ...(next[k] ?? {}) }
+          const p = Number(r.price) || 0
+          const q = Number(r.qty) || 0
+          if (action === 'on') patch.on = true
+          else if (action === 'p-10') patch.p = Math.round(p * 0.9)
+          else if (action === 'p-5') patch.p = Math.round(p * 0.95)
+          else if (action === 'p5') patch.p = Math.round(p * 1.05)
+          else if (action === 'p10') patch.p = Math.round(p * 1.1)
+          else if (action === 'q-20') patch.q = Math.max(0, Number((q * 0.8).toFixed(1)))
+          else if (action === 'q20') patch.q = Number((q * 1.2).toFixed(1))
+          next[k] = patch
+        }
+        return next
+      }),
+    onQmode: (m: CalcQMode) => {
+      setQmode(m)
+      setSimOn(true) // 切换口径即进入模拟态（旧版切换即重算本页 SD）
+    },
+    onQfallback: (v: boolean) => {
+      setQfallback(v)
+      setSimOn(true)
+    },
+  }
+
+  /** 参数重算：模拟态走推演端点（保留行覆盖），否则回源基线 GET */
+  const applyParams = (p: AnalysisParams) => {
+    setParams(p)
+    if (!simOn) load(p)
+    else setSimNonce((n) => n + 1)
+  }
 
   const quadStats = useMemo(() => {
     const acc: Record<string, { n: number; marginSum: number }> = {}
@@ -168,9 +289,21 @@ export default function WeeklyReportPage() {
       <Card
         title="经营周报"
         extra={
-          <Space>
+          <Space wrap>
             {data?.rev != null && <Tag color="blue">rev {data.rev}</Tag>}
-            <Button size="small" onClick={() => load()}>
+            {simOn && (
+              <Tooltip title="模拟态基准行集为本店在售菜品（旧版 calcModel 的 SD 口径），与基线「保本价盘整表」口径不同，店级 KPI 会随之跳变，非计算错误">
+                <Tag color="orange">{SIM_BASIS_LABEL}</Tag>
+              </Tooltip>
+            )}
+            {simOn && simBusy && <Tag color="processing">推演中…</Tag>}
+            <Button
+              size="small"
+              onClick={() => {
+                load(params)
+                if (simOn) setSimNonce((n) => n + 1)
+              }}
+            >
               刷新
             </Button>
           </Space>
@@ -180,8 +313,14 @@ export default function WeeklyReportPage() {
           effParams={effParams}
           kpi={kpi}
           loading={loading}
-          onApply={(p) => load(p)}
-          onReset={() => load()}
+          simActive={simOn}
+          onApply={applyParams}
+          onReset={() => {
+            setParams({})
+            setOverrides({})
+            load()
+            if (simOn) setSimNonce((n) => n + 1)
+          }}
         />
 
         <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
@@ -269,7 +408,11 @@ export default function WeeklyReportPage() {
         </Col>
 
         <Col xs={24} md={14}>
-          <Card title="菜品类型营收/毛利占比（静态价盘）" size="small" loading={loading}>
+          <Card
+            title={`菜品类型营收/毛利占比（${simOn ? SIM_BASIS_LABEL : '静态价盘'}）`}
+            size="small"
+            loading={loading}
+          >
             <Table
               size="small"
               rowKey={(r) => String(r.k ?? r.name)}
@@ -377,15 +520,15 @@ export default function WeeklyReportPage() {
                 )
               }}
             />
-            {(data?.baoben_summary?.advice ?? []).length > 0 && (
+            {adviceList.length > 0 && (
               <Alert
                 type="info"
                 showIcon
                 style={{ marginTop: 8 }}
-                message="保本价盘建议"
+                message={simOn ? '保本测算建议（模拟态 · 本店在售菜品口径）' : '保本价盘建议'}
                 description={
                   <ul style={{ margin: 0, paddingLeft: 18 }}>
-                    {(data?.baoben_summary?.advice ?? []).map((s, i) => (
+                    {adviceList.map((s, i) => (
                       <li key={i}>{s}</li>
                     ))}
                   </ul>
@@ -397,7 +540,7 @@ export default function WeeklyReportPage() {
       </Row>
 
       <div style={{ marginTop: 16 }}>
-        <CalcDishTable rows={data?.calc_dishes ?? []} types={types} loading={loading} />
+        <CalcDishTable rows={calcDishes} types={types} loading={loading} sim={simCtl} />
       </div>
 
       <div style={{ marginTop: 16 }}>
@@ -406,10 +549,14 @@ export default function WeeklyReportPage() {
           kpi={kpi}
           effParams={effParams}
           loading={loading}
+          simActive={simOn}
           canSync={!offline}
           onSync={() => {
+            // FP-CALC-07 同步菜品主数据：清空模拟覆盖，按最新快照/配方重置测算输入
+            setOverrides({})
             loadDishes()
-            load()
+            load(params)
+            if (simOn) setSimNonce((n) => n + 1)
           }}
         />
       </div>

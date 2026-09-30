@@ -70,6 +70,8 @@ const ROUTES = [
   require('./routes/admin'),
   require('./routes/kitchen'),
   require('./routes/modules'),
+  // 结构测算「模拟态」只读推演（独立文件；零写库，见 ADR-007）
+  require('./routes/analysis_sim'),
   require('./routes/app_release'),
   require('./routes/settle'),
   require('./routes/qc_media'),

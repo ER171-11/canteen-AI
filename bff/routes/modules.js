@@ -123,7 +123,7 @@ function realAnalysis(snap, paramOverrides) {
     for (const d of arr(data.dishes)) {
       if (d && d.name != null) shopNames.add(String(d.name));
     }
-    calcRows = toCalcRows(merged.dishes.filter((d) => d && shopNames.has(String(d.name || ''))));
+    calcRows = merged.dishes.filter((d) => d && shopNames.has(String(d.name || '')));
 
     // 近 7 日真销量聚合：sales.dish(短名) → dishAlias → 菜品 id → 份数
     const alias = (data.dishAlias && typeof data.dishAlias === 'object') ? data.dishAlias : {};
@@ -136,6 +136,8 @@ function realAnalysis(snap, paramOverrides) {
       if (d.name) dishByName[String(d.name)] = d;
       if (d.sku_id != null && !dishBySku[String(d.sku_id)]) dishBySku[String(d.sku_id)] = d;
     }
+    // 逐菜结构表口径：默认照抄旧版 `SC_QMODE='real30'`，取数口径同下方近 7 日真销量聚合（见 ADR-007）
+    calcRows = toCalcRows(calcRows, { sales, alias, byName: dishByName });
     const cleanKey = (s) => String(s == null ? '' : s)
       .replace(/^[　 *＊·・]+/, '').replace(/[　 *＊]+$/, '').trim();
     const fromDay = (() => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, type ReactNode } from 'react'
-import { Button, Card, Col, Divider, Form, InputNumber, Row, Space, Typography } from 'antd'
+import { Button, Card, Col, Divider, Form, InputNumber, Row, Space, Tag, Typography } from 'antd'
 import type { AnalysisParams } from '../../api'
 import type { BaobenKpi, BaobenParams } from '../../api/types'
 import { COLORS } from '../../theme'
@@ -100,6 +100,7 @@ export default function CalcParamsCard({
   effParams,
   kpi,
   loading,
+  simActive,
   onApply,
   onReset,
 }: {
@@ -107,6 +108,8 @@ export default function CalcParamsCard({
   effParams?: BaobenParams
   kpi?: BaobenKpi
   loading?: boolean
+  /** 模拟态：重算走 `POST /api/modules/analysis/sim`（保留逐菜行覆盖），否则回源基线 GET */
+  simActive?: boolean
   onApply: (params: AnalysisParams) => void
   onReset: () => void
 }) {
@@ -180,11 +183,12 @@ export default function CalcParamsCard({
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             只读测算，不写入配方/库存
           </Typography.Text>
+          {simActive && <Tag color="orange">模拟态</Tag>}
           <Button size="small" onClick={onReset}>
             恢复默认参数
           </Button>
           <Button size="small" type="primary" loading={loading} onClick={submit}>
-            按参数重算
+            {simActive ? '按参数重推演' : '按参数重算'}
           </Button>
         </Space>
       }
@@ -232,8 +236,8 @@ export default function CalcParamsCard({
       <Space size={12} wrap>
         <Typography.Text type={dirty ? 'warning' : 'secondary'} style={{ fontSize: 12 }}>
           {dirty
-            ? '参数已改，尚未重算：点右上「按参数重算」后保本线与图表才按新参数刷新'
-            : `当前生效店参来自 BFF 回显：面积 ${effParams?.area ?? '—'}㎡ · 员工 ${effParams?.staff ?? '—'} 人 · 餐位 ${effParams?.seats ?? '—'} 个 · ${effParams?.days ?? '—'} 天 · 目标月利润 ${fmt(effParams?.target_profit, 0)} 元`}
+            ? `参数已改，尚未重算：点右上「${simActive ? '按参数重推演' : '按参数重算'}」后保本线与图表才按新参数刷新`
+            : `当前生效店参来自 BFF 回显（${simActive ? '模拟态·本店在售菜品口径' : '基线·保本价盘口径'}）：面积 ${effParams?.area ?? '—'}㎡ · 员工 ${effParams?.staff ?? '—'} 人 · 餐位 ${effParams?.seats ?? '—'} 个 · ${effParams?.days ?? '—'} 天 · 目标月利润 ${fmt(effParams?.target_profit, 0)} 元`}
         </Typography.Text>
         {dirty && (
           <span

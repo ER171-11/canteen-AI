@@ -967,3 +967,86 @@
   它是只读隔离硬约束的唯一新触点）→ ② `FP-CALC-13` 批量调价/调量 → ③ `FP-CALC-08` 日销量口径切换
   → ④ `FP-CALC-14` 五类角色卡片（与四象限并列新增，不得替换）」推进。
 
+## [2026-09-30] T11 第三批 - 结构测算「模拟态」只读推演（阶段 11 / FP-CALC-08/11/12/13）
+
+- 背景: 阶段 10 之后结构测算是**纯只读**的——老板能看到「哪道菜成本率失控」，却改不动一个数字看效果。
+  旧版靠内存副本 `SD[]`（`syncCalc()` HTML:3870）+ `calcModel()`（HTML:3923）做到「行内改价/改量/下架 → 全页即时重算」，
+  全程不落库。新版量本利公式在 BFF（`menu_baoben.js`），若把公式搬回前端就会产出**第二份公式**，
+  与阶段 9 已确立的「参数卡/合计一律取后端 `kpi`」直接冲突。故本阶段先出隔离设计（ADR-007），再实现。
+- 决策（全文见 `docs/decisions/ADR-007-结构测算模拟层只读推演.md`）:
+  1. **独立只读推演端点** `POST /api/modules/analysis/sim`（新文件 `bff/routes/analysis_sim.js`，`server.js` 仅注册一行）：
+     只认 POST，其余方法交回外层 404。**不动** `bff/routes/modules.js` 自带的「非 GET 一律不处理」契约——
+     把 POST 塞进那个文件会破坏该文件「只读端点，无任何写库路径」的自证性。只读 POST 在本仓已有先例
+     （`POST /api/inventory/recv/import/preview`）。
+  2. **零写库是可测断言，不是声明**：推演路径只允许 `loadSnapshot()`（只读）+ 纯函数；行覆盖一律
+     `Object.assign({}, row, ov)` 生成**新对象**，绝不 mutate 快照数组与其元素；不入 `actions_queue.json`。
+  3. **公式单一来源**：从 `computeBaobenSummary()` 抽出算术核心 `computeModel(act,P)` 与 `kpiOf(M,P)`，
+     基线汇总与推演 `simulateBaoben()` **共用同一函数**；`computeBaobenSummary()` 对外输出逐字段不变（既有断言锁死）。
+  4. **模拟态基准行集 = 逐菜表 95 行（本店在售菜品，即旧版 `SD` 口径）**，最忠实旧版。代价：进入模拟态首帧
+     店级 KPI 由「保本价盘 86 项」口径切成「本店在售 95 行」口径，数字会跳（实测 `day_rev` 20,552.8 → 27,725.28、
+     `be_day` 11,903.49 → 11,848.85）。处理方式是**不掩盖、不静默修数**：卡片头必挂
+     「模拟态 · 本店在售菜品口径」徽标，退出模拟态即回基线；同时把基线页内「逐菜表合计 ≠ 店级 KPI」这一
+     **既有事实**在 ADR-007 §2.4 登记（不是本阶段引入的缺陷）。
+  5. **日销量三口径**（估算 q / 近30天真实日均 / 近7天真实日均）+「无销量回落估算」开关，默认
+     `real30` + 回落开——逐字照抄旧版 `SC_QMODE='real30'`/`SC_QFALLBACK=true`；真实销量 = 近 N 天 `sales`
+     求和 ÷ N，无销量按开关回落估算 q。**只影响测算行，绝不写回菜品主数据 `daily_qty`。**
+  6. **行覆盖按「菜名优先、id 次之」匹配**（`applyRowOverrides`），行键同理（`rowOvKey`：有 id 用 id，否则菜名）——
+     旧版 `SD` 是对象数组，本店 9 个 `SKU-WF-*` 占位菜 id 缺失，用 id 会撞键。
+  7. 前端**不持第二份公式**：成本率/日营收/日毛利额一律取后端回传行；「即时重算」= 一次本地 BFF 推演（毫秒级），
+     行内输入做 **300ms 去抖合并**，过期响应按 `seq` 丢弃（代价：输入后约 0.3s 数值才刷新；收益：行值、店级 KPI、
+     图表、建议来自**同一个响应**）。
+- 影响范围:
+  - 后端: `bff/lib/menu_baoben.js`（抽 `computeModel`/`kpiOf`；新增 `toCalcRows`/`applyRowOverrides`/`simulateBaoben`
+    与口径工具 `QMODE_LABELS`/`DEFAULT_QMODE`/`DEFAULT_QFALLBACK`/`dishRealQty`/`calcQtyOf`/`scQDays`）、
+    `bff/routes/analysis_sim.js`（新增）、`bff/server.js`（注册路由）、`bff/routes/modules.js`（GET 行集改用带参 `toCalcRows`，
+    纯 GET 契约未动）、`bff/lib/algorithms/baoben_sim.test.js`（新增）。
+  - 前端: `pages/ops/calcSim.ts`（新增，契约中枢：`SIM_BASIS`/`rowOvKey`/`QMODE_OPTIONS`/`BulkAction`/`CalcSimCtl`）、
+    `pages/ops/CalcDishTable.tsx`（行内 c/p/q `InputNumber` + 上架勾选 + 重置 + 批量工具条 + 口径 `Select` + 表尾口径统计）、
+    `pages/ops/WeeklyReportPage.tsx`（`simCtl` 去抖回源 + 徽标）、`CalcParamsCard.tsx`/`CalcCharts.tsx`（模拟态徽标/联动）、
+    `src/api/index.ts`（`simulateAnalysis`）、`src/api/types.ts`（`AnalysisSimResp`/`CalcSimRowOverride`/`CalcQMode`）。
+  - 门禁: `ci/redline_guard.ps1` 与 `.sh` **新增 R15「结构测算模拟态零写库」**——剥注释后扫
+    `bff/routes/analysis_sim.js` + `bff/lib/menu_baoben.js` 是否含 `saveDB`/`writeFileSync`/`writeFile(`/`postAction`/
+    `actions_queue`/`sqlite`（ADR-007 红线①的机器化）；R13 原先只扫 `bff/routes/admin` 与 `apps/admin-web/src`，漏了本路径。
+  - 冒烟: `bff/test_contract.sh` 新增 10 条模拟态断言（推演可调、默认口径、行覆盖回显、未覆盖行不动、GET 404、快照 rev 不前进）；
+    新增 `scripts/smoke-calc-sim.ps1` + `scripts/smoke-calc-sim.js`（CDP 开箱，一键起停 BFF/vite/无头 Edge）。
+  - 基线/文档: `docs/decisions/ADR-007-*.md`（新增）、`docs/迁移基线/FP-结构测算.md`（08/09/11/12/13 翻 ⬆️，
+    结构测算 15/5 → **19/1**）、`docs/迁移基线/欠账总表.md`、`docs/迁移颗粒度规范.md` 附录 A、
+    `scripts/gen-debt-table.ps1`（CALC「模拟态缺失」欠账标记解除：`FP-CALC-11/12/13` 三项已全部 ⬆️）。
+- 验证:
+  - `cd bff && npm test` **exit 0**；`node lib/algorithms/baoben_sim.test.js` **exit 0**
+    （`PASS 行集 95 道 · 真实口径命中 5 道 · 未上架 1 道 · 默认口径 real30 · 零写库校验通过`）。
+  - 契约冒烟 `bash bff/test_contract.sh`：**PASS=207 / FAIL=2**；同环境下 HEAD 版为 **197/2** ⇒ 本次 +10 条断言**全绿、0 新增失败**。
+    那 2 条（actions 驳回原因、按 `status=已执行` 过滤）**是既有失败**，根因是 Windows 下 curl 命令行传中文参数被转码
+    （响应里中文已乱码），与本次无关；本次新增断言因此把含中文菜名的请求体改为 **由 node 写文件 + `--data-binary @file`**。
+  - **无头浏览器开箱**（CDP 驱动本机 Edge，`scripts/smoke-calc-sim.ps1`，一键起停、无额外依赖）：**41/41 通过**。
+    关键观测：基线徽标 0 个且售价框 `disabled`；点「进入模拟态」后徽标出现、控件转可编辑、`日保本` 11,903 → 11,849（口径切换）；
+    `Σ逐菜日营收 24,109 ≈ 店级 day_dish_rev 24,109`（同源）、`day_rev 27,725 = day_dish_rev × (1+0.15)`；
+    行内改首行售价 ×4 → 该行日营收 1,375.60 → 5,502.40、店级日保本 11,849 → 10,969、行出现「已改」标记；
+    批量「-10%」→ **95/95 行**售价 = 原价 ×0.9 取整；取消勾选「白切文昌鸡」→「已下架」+ 日保本 11,538 → 11,463；
+    口径切「估算 q」→ 表头回「日销量」、日保本再变；退出模拟态 → 徽标消失、日保本回 11,903、行数仍 95；
+    控制台 **0 报错**。
+  - **零写库双保险**：单测侧（连续推演前后 `snapshot.json`/`menu-baoben.json`/`actions_queue.json` 不变）+
+    开箱侧（同一三文件全程 `size:mtimeMs` 指纹一致、快照 `rev` 未前进、审批队列 `count=0`）+
+    门禁侧（R15 静态扫描）。开箱脚本**只对 ADR-007 §2.2 点名的三个文件做指纹**——`audit.jsonl`/`tokens.json`/
+    `si_*.json` 本就是运行日志，登录/调度器一定会改，把它们纳入断言只会产生假红。
+  - `apps/admin-web`: `npm run lint`（`--max-warnings 0`）**通过，0 warning**；`ci/redline_guard.ps1` **全绿**（含新 R15）；
+    `bash -n ci/redline_guard.sh` 语法通过；`scripts/gen-debt-table.ps1 -Check` **退出码 0**（总表与基线一致）；看板已刷新。
+- ⚠️ 未验证项（诚实清单）:
+  1. **模拟态与真实下架的边界只在 UI 层分开**：勾选「上架」是推演覆盖，真实下架仍走 `dish.set_active` +
+     审批队列（`WeeklyReportPage.tsx` 既有路径）。但**同一行既有勾选框又有真实下架按钮**时的交互引导
+     未做可用性测试，只做了程序化验证。
+  2. **仅程序化验证，未经人工目视**：批量工具条 4 档调价 × 5 档作用域的组合矩阵只覆盖了「全部菜品 / −10%」一档，
+     其余组合靠代码审阅（`Math.round(p×k)`、`q` 保留 1 位小数照抄旧版）。
+  3. **只在 Edge（Chromium）验过**，未在 Firefox/WebKit 回归；300ms 去抖在慢机/弱网下的体感未测。
+  4. **性能未压测**：95 行行内输入每次触发全量推演（毫秒级本地调用），未测 500 行量级；`qstat` 回传真实命中率
+     （本仓 `n_real=5 / n_fallback=90`）说明**真实销量数据覆盖很低**，切换 `real30/real7` 时大多数行在回落估算——
+     这是数据现状，非缺陷。
+  5. **契约冒烟里那 2 条既有失败（Windows curl 中文编码）未修**：属 CI（Linux）不受影响的本机环境问题，留给 `T8-CI` 线。
+- 回档方案: `git revert` 本提交即可。后端为**加法式**（新增端点 + 抽出函数，`GET /api/modules/analysis` 仅行集口径
+  默认切成 `real30`，出参键名未增删）；前端为新增组件与状态；**无 DB 迁移、无依赖变更**。
+  ⚠️ 一处**非纯加法**需知悉：`GET /api/modules/analysis` 的 `calc_dishes` 日销量默认口径由「估算」变为
+  「近 30 天真实日均」（旧版默认口径，属 `FP-CALC-08`），故该接口 `qty` 分组数值会变——**预期内**，已在契约冒烟中锁定。
+  未触碰红线文件（`db.js`/`merge.js` 哈希未变）。
+- 后续: 结构测算 **19/1**，只剩 `FP-CALC-14` 五类角色卡片（与现有四象限**口径不同，需并列新增，不得替换**）。
+  全局欠账 **⬆️ 69 / ⬜ 82**（合计 151）。
+

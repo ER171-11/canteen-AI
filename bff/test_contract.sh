@@ -593,6 +593,31 @@ assert_node "analysis 矩阵象限 star/dog" "$TMPD/man.json" 'j.matrix.some(fun
 assert_node "analysis efficiency 客单价" "$TMPD/man.json" 'j.efficiency&&j.efficiency.avg_ticket>0&&j.efficiency.peak_hour!=null'
 assert_node "analysis forecast 7日+备货" "$TMPD/man.json" 'j.forecast&&j.forecast.days&&j.forecast.days.length>=7&&Array.isArray(j.forecast.restock)'
 
+# 10.b 结构测算「模拟态」只读推演（ADR-007，阶段 11 / T11-4）
+curl -s "$BASE/api/snapshot/latest" -H "$MAUTH" > "$TMPD/sim_rev0.json"
+CODE=$(curl -s -o "$TMPD/sim0.json" -w "%{http_code}" -X POST "$BASE/api/modules/analysis/sim" \
+  -H "$MAUTH" -H 'Content-Type: application/json' -d '{}')
+assert_code "POST analysis/sim 可推演" 200 "$CODE"
+assert_node "sim basis=本店在售菜品 + calc_dishes 非空" "$TMPD/sim0.json" 'j.ok===true&&j.basis==="shop_dishes"&&Array.isArray(j.calc_dishes)&&j.calc_dishes.length>=1'
+assert_node "sim 默认口径 real30+回落开（照抄旧版 SC_QMODE/SC_QFALLBACK）" "$TMPD/sim0.json" 'j.qmode==="real30"&&j.qfallback===true&&j.qmode_label==="近30天真实（日均）"&&j.qstat&&j.qstat.n_total>=1'
+assert_node "sim 响应与 GET analysis 同形（baoben_summary.kpi）" "$TMPD/sim0.json" '!!j.baoben_summary&&!!j.baoben_summary.kpi&&typeof j.baoben_summary.kpi.be_day==="number"&&j.rev!=null'
+# 请求体含中文菜名，统一交给 node 写文件再 --data-binary，避免 shell 编码/引号踩坑
+node -e 'require("fs").writeFileSync(process.argv[1],JSON.stringify({qmode:"est",qfallback:false,rows:{"红饺":{c:10,p:99,q:7,on:false}}}))' "$TMPD/sim1.body.json"
+CODE=$(curl -s -o "$TMPD/sim1.json" -w "%{http_code}" -X POST "$BASE/api/modules/analysis/sim" \
+  -H "$MAUTH" -H 'Content-Type: application/json' --data-binary @"$TMPD/sim1.body.json")
+assert_code "POST analysis/sim 带行覆盖+口径" 200 "$CODE"
+assert_node "sim est 口径生效 + 回落可关" "$TMPD/sim1.json" 'j.qmode==="est"&&j.qfallback===false&&j.qstat.n_real===0'
+SIMROW=$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const r=(j.calc_dishes||[]).find(x=>x.name==="红饺")||{};console.log([r.cost,r.price,r.qty,r.on].join(","));' "$TMPD/sim1.json")
+if [ "$SIMROW" = "10,99,7,false" ]; then ok "sim 行覆盖回显 c/p/q/on（只回显不写库）"; else bad "sim 行覆盖回显异常（实得 $SIMROW）"; fi
+SIMROW2=$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const r=(j.calc_dishes||[]).find(x=>x.name==="黑饺")||{};console.log([r.price,r.on].join(","));' "$TMPD/sim1.json")
+if [ "$SIMROW2" = "32,true" ]; then ok "sim 未覆盖行保持基线"; else bad "sim 未覆盖行被改动（实得 $SIMROW2）"; fi
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/modules/analysis/sim" -H "$MAUTH")
+assert_code "GET analysis/sim 404（只读推演只认 POST）" 404 "$CODE"
+curl -s "$BASE/api/snapshot/latest" -H "$MAUTH" > "$TMPD/sim_rev1.json"
+REV0=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).rev)' "$TMPD/sim_rev0.json")
+REV1=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).rev)' "$TMPD/sim_rev1.json")
+if [ "$REV0" = "$REV1" ]; then ok "推演未推进快照 rev（$REV0，零写库）"; else bad "推演推进了快照 rev：$REV0 → $REV1"; fi
+
 curl -s "$BASE/api/modules/equipment" -H "$MAUTH" > "$TMPD/meq.json"
 assert_node "equipment temps 非空" "$TMPD/meq.json" 'j.ok&&Array.isArray(j.temps)&&j.temps.length>=1&&j.temps[0].device'
 assert_node "equipment energy_summary" "$TMPD/meq.json" 'j.energy_summary&&Array.isArray(j.energy_summary.items)'

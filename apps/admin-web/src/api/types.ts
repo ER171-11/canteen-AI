@@ -703,6 +703,8 @@ export interface BaobenType {
 
 /** 逐菜结构表行（GET /api/modules/analysis 的 `calc_dishes`；对齐旧版 SD） */
 export interface BaobenDishRow {
+  /** 菜品 id（模拟态按 id 定位；无 id 时后端回落菜名） */
+  id?: string
   /** 菜品名称 */
   name: string
   /** 类型（引流/爆品/利润/形象/常规） */
@@ -711,10 +713,48 @@ export interface BaobenDishRow {
   cost?: number | null
   /** 售价（元/份） */
   price?: number | null
-  /** 日销量（份/天，估算口径；真实销量口径切换见 FP-CALC-08） */
+  /** 日销量（份/天，按当前口径：估算 q / 近30天真实日均 / 近7天真实日均，见 FP-CALC-08） */
   qty?: number | null
-  /** 是否上架（后端已按下架滤除，保留字段供后续模拟态使用） */
+  /** 菜品主数据估算日销（旧版 `est`，用于回落与提示） */
+  est?: number
+  /** 近 N 天真实销售总份数（旧版 `sq`；估算口径恒 0） */
+  sq?: number
+  /** 日销量来源：`real` 真实销量 / `est` 估算值（旧版 `src`） */
+  src?: 'real' | 'est'
+  /** 是否上架（模拟态可取消勾选模拟下架；后端已按真实下架滤除） */
   on?: boolean
+}
+
+/** 结构测算模拟态行覆盖（POST /api/modules/analysis/sim 的 `rows`，按菜名或菜品 id） */
+export interface CalcSimRowOverride {
+  /** 食材成本（元/份） */
+  c?: number
+  /** 售价（元/份） */
+  p?: number
+  /** 日销量（份/天） */
+  q?: number
+  /** 是否上架（false = 模拟下架） */
+  on?: boolean
+}
+
+/** 日销量口径（照抄旧版 `SC_QMODES`） */
+export type CalcQMode = 'est' | 'real30' | 'real7'
+
+/** POST /api/modules/analysis/sim —— 只读推演（不落库、不入队，见 ADR-007） */
+export interface AnalysisSimResp {
+  ok: boolean
+  sim?: boolean
+  rev?: number | string | null
+  /** 基准行集标识：`shop_dishes` = 本店在售菜品（旧版 calcModel 的 SD 口径） */
+  basis?: string | null
+  qmode?: CalcQMode
+  qmode_label?: string
+  qfallback?: boolean
+  qdays?: number
+  baoben_summary?: BaobenSummary | null
+  calc_dishes?: BaobenDishRow[] | null
+  /** 口径提示计数 */
+  qstat?: { n_total?: number; n_active?: number; n_real?: number; n_fallback?: number } | null
 }
 
 /** 菜品矩阵行（四象限） */
@@ -972,6 +1012,8 @@ export interface BaobenSummary {
   brand?: string
   source?: string
   count?: number
+  /** 基准行集标识：缺省/`menu_baoben` = 保本价盘整表；`shop_dishes` = 本店在售菜品（模拟态，见 ADR-007） */
+  basis?: string
   params?: BaobenParams
   kpi?: BaobenKpi
   types?: BaobenType[]

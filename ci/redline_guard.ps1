@@ -11,6 +11,7 @@
 检查项与 bash 版一一对应：
   R3/R4 受保护文件哈希基线（bff/store-node/{db,merge}.js 零改动）
   R13   后台无旁路写（admin-web / bff admin 路由不得直连 /api/sync 或 sqlite）
+  R15   结构测算模拟态零写库（analysis_sim / menu_baoben 不含写库·入队调用，ADR-007 红线①）
   R5    无硬编码 Key
   R10   图片不落库（BFF 侧）
   R14   迁移功能清单逐项标注状态
@@ -93,6 +94,38 @@ if ($hits.Count -gt 0) {
   $hits | ForEach-Object { Write-Host "  $_" }
 } else {
   Ok '后台写操作均指向 /api/actions 队列'
+}
+
+# ---------------------------------------------------------------- R15
+Say '== R15 结构测算模拟态零写库（ADR-007 红线①） =='
+# 模拟态推演必须「只读」：路由 + 算法文件里不得出现任何写库 / 写文件 / 入队调用。
+# 与 .sh 版一一对应。先剥注释再扫：ADR-007 的说明文字与文件头的契约注释里，
+# 逐字写着「不 saveDB / 不 postAction / 不入 actions_queue.json」——不剥注释会自相矛盾地报红。
+$simFiles = @('bff/routes/analysis_sim.js', 'bff/lib/menu_baoben.js')
+$writeRx = [regex]'saveDB|writeFileSync|writeFile\s*\(|postAction|actions_queue|sqlite'
+$simHits = New-Object System.Collections.ArrayList
+foreach ($f in $simFiles) {
+  if (-not (Test-Path -LiteralPath $f)) { Fail "模拟态文件缺失：$f"; continue }
+  $txt = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $f).Path, [System.Text.Encoding]::UTF8)
+  # 块注释替换为等量空行（保住行号），行注释整段删除
+  $code = [regex]::Replace($txt, '/\*[\s\S]*?\*/', {
+      param($m) [regex]::Replace($m.Value, '[^\r\n]', ' ')
+    })
+  $code = [regex]::Replace($code, '(?m)//.*$', '')
+  $ln = 0
+  foreach ($line in ($code -split "`r?`n")) {
+    $ln++
+    if ($writeRx.IsMatch($line)) {
+      $rel = $f.Replace('\', '/')
+      [void]$simHits.Add(("{0}:{1}: {2}" -f $rel, $ln, $line.Trim()))
+    }
+  }
+}
+if ($simHits.Count -gt 0) {
+  Fail '模拟态出现写库调用（只读推演已被破坏）:'
+  $simHits | ForEach-Object { Write-Host "  $_" }
+} else {
+  Ok '模拟态仅只读快照 + 纯计算（无 saveDB / 写文件 / postAction / actions_queue / sqlite）'
 }
 
 # ---------------------------------------------------------------- R5

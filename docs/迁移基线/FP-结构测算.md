@@ -21,12 +21,12 @@
 | FP-CALC-05 | 调整变动成本率参数（酒水占比/酒水成本/包装/外卖佣金/营销/变动水电/杂费/手续费） | HTML:371 `#pVar`、:373 合计 | `CalcParamsCard.tsx`:46-61（9 项，按 % 录入、提交时 ÷100）、:153-161（变动成本率合计/边际贡献率/月固定成本合计）；后端 `menu_baoben.js`:239 `varOtherRate`、:214 varRate | ⬆️ 已移植 | 合计一律取后端 kpi，不在前端复算公式（避免双份口径漂移） |
 | FP-CALC-06 | 调整运营口径（人均点菜份数/营业天数/餐位数/目标利润）与「恢复默认参数」 | HTML:355 `#calcResetParam`、:4314、:377 `#pOp` | `CalcParamsCard.tsx`:62-96（4 项全部可调）、:183-185「恢复默认参数」（→ `WeeklyReportPage.tsx`:59-71 不带 query 回源 = 后端 DEFAULT_PARAMS）、:162-170（点菜份数/日均客流/人均消费/保本综合翻台回显） | ⬆️ 已移植 | **主动偏离**：旧版「输入即重算」，新版改「按参数重算」按钮 +「参数已改，尚未重算」提示（`CalcParamsCard.tsx`:121-132、:186-188），避免每次按键打一次回源 |
 | FP-CALC-07 | 同步菜品主数据（按最新菜品/配方重置测算输入） | HTML:356 `#calcSync`、:4320、`syncCalc` :3870 | `CalcCharts.tsx`:313-318「同步菜品主数据」→ `WeeklyReportPage.tsx`:405-408（重拉菜品主数据 + 店参归零回源）；后端合并 `menu_baoben.js`:412 `mergeDishesWithBaoben` | ⬆️ 已移植 | 口径说明：新版无「模拟态」输入可重置，故同步 = 重拉快照菜品 + 店参回默认，等价于「按最新数据重置测算输入」 |
-| FP-CALC-08 | 切换日销量口径（估算 / 近30天真实 / 近7天真实，含无销量回落估算开关） | HTML:358-364 `#scQMode`/`#scQFb`、:4324 | 无（新版用静态价盘 daily_qty） | ⬜ 待补 | 只读聚合；真实销量需 `/api/modules/analysis` realAnalysis 的 sales 聚合支撑 |
-| FP-CALC-09 | 逐菜结构表（成本/售价/成本率/毛利率/日销量/日营收/日毛利额） | HTML:411-426、`renderCalcTable` :4043 | `CalcDishTable.tsx`（9 列同旧版列序 + 类型分组行）；后端 `modules.js` 出 `calc_dishes`、`menu_baoben.js` `toCalcRows` | ⬆️ 已移植 | 行集 = 店内上架菜品（对齐旧版 `syncCalc`）；勾选与行内改价/改量属 FP-CALC-11/12，本表不含编辑控件 |
+| FP-CALC-08 | 切换日销量口径（估算 / 近30天真实 / 近7天真实，含无销量回落估算开关） | HTML:358-364 `#scQMode`/`#scQFb`、:4324 | `CalcDishTable.tsx` 卡片头口径 `Select`（3 档）+「无销量回落估算」勾选 + 表尾口径统计与 `q` 列 tooltip；数据源 `POST /api/modules/analysis/sim` 的 `qmode`/`qfallback`（`analysis_sim.js`、`menu_baoben.js` `dishRealQty`/`calcQtyOf`/`scQDays`） | ⬆️ 已移植 | 阶段 11。默认 `real30` + 回落开（照抄旧版 `SC_QMODE='real30'`/`SC_QFALLBACK=true`）；真实销量 = 近 N 天 `sales` 求和 ÷ N，无销量按开关回落估算 q；切换口径即进入模拟态（门店级徽标） |
+| FP-CALC-09 | 逐菜结构表（成本/售价/成本率/毛利率/日销量/日营收/日毛利额） | HTML:411-426、`renderCalcTable` :4043 | `CalcDishTable.tsx`（9 列同旧版列序 + 类型分组行；阶段 11 补「上架」勾选与「操作·重置」两列 → 共 11 列）；后端基线 `modules.js` 出 `calc_dishes`、`menu_baoben.js` `toCalcRows`；模拟态 `analysis_sim.js` | ⬆️ 已移植 | 行集 = 店内上架菜品（对齐旧版 `syncCalc`）；基线只读、模拟态可编辑（勾选/行内改价改量见 FP-CALC-11/12） |
 | FP-CALC-10 | 表头排序（名称/类型/成本/售价/成本率/毛利率/销量/营收/毛利） | HTML:414-422 `sortable`、`calcSortedIdx` :4021 | `CalcDishTable.tsx`（9 个表头 sorter；默认「日营收」降序，换列从降序起、同列再点翻转；名称/类型按 `localeCompare('zh')`；无售价按哨兵 成本率 9 / 毛利率 −9） | ⬆️ 已移植 | 分组行插在**排序结果**的类型变化处（同旧版），故按营收排序时分组行会重复出现 |
-| FP-CALC-11 | 行内改售价/成本/日销量并即时重算（本页模拟，不写库） | HTML:428 说明、`updateCalcRow` :4073、`renderCalcCharts` :4092 | 无（新版调价走审批队列**落库**，无模拟态） | ⬜ 待补 | **模拟层缺失**：需独立「推演态」参数集，不写配方/库存 |
-| FP-CALC-12 | 取消勾选模拟下架该菜（SKU 精简对保本点影响） | HTML:428 说明、`updateCalcGroups` :4083 | 无模拟；真实下架走 `dish.set_active`（`WeeklyReportPage.tsx`:381-393） | ⬜ 待补 | 模拟态 + 真实动作分开，二者都要 |
-| FP-CALC-13 | 按类型批量调价/调量/上架/恢复默认（−10%/−5%/+5%/+10%、±20%） | HTML:396-410 `data-bulk`、:4296 处理 | 无 | ⬜ 待补 | 批量走建议动作入队（写类） |
+| FP-CALC-11 | 行内改售价/成本/日销量并即时重算（本页模拟，不写库） | HTML:428 说明、`updateCalcRow` :4073、`renderCalcCharts` :4092 | `CalcDishTable.tsx` 成本/售价/日销量三列 `InputNumber`（步长 0.5/1/0.1 逐字照抄旧版）+「重置」列（按行清覆盖）；覆盖上行 `POST /api/modules/analysis/sim` 的 `rows`，后端 `menu_baoben.js` `applyRowOverrides`（纯函数、生成新对象）→ 单一公式 `computeModel` | ⬆️ 已移植 | 阶段 11。**模拟态零写库**：行覆盖只活在内存 + 请求体，不 `saveDB`/不写 `data/*.json`/不入 `actions_queue.json`；行值一律取后端回传行，**前端不持第二份公式**（避免口径漂移） |
+| FP-CALC-12 | 取消勾选模拟下架该菜（SKU 精简对保本点影响） | HTML:428 说明、`updateCalcGroups` :4083 | `CalcDishTable.tsx` 首列「上架」勾选（`on` 覆盖，行线删除线 + `已下架` 标签）；模拟取消勾选 → 该行退出 `computeModel` 汇总（店级 KPI/图表联动）。真实下架仍走 `dish.set_active`（`WeeklyReportPage.tsx`:381-393） | ⬆️ 已移植 | 阶段 11。模拟态与真实动作**严格分开**：勾选只在推演层，写库仍需审批队列 |
+| FP-CALC-13 | 按类型批量调价/调量/上架/恢复默认（−10%/−5%/+5%/+10%、±20%） | HTML:396-410 `data-bulk`、:4296 处理 | `CalcDishTable.tsx` 工具条：作用域 `Select`（全部菜品 / 引流·爆品·利润·形象·常规）+ 调价 4 档 + 调量 ±20% +「全部上架」+「恢复默认」；口径 `WeeklyReportPage.tsx` `simCtl.onBulk`（`Math.round(p×k)`、`q` 保留 1 位小数，照抄旧版） | ⬆️ 已移植 | 阶段 11。以「当前生效行值」为基数逐次累积覆盖（同旧版 `SD` 就地改值）；批量结果为 `rows` 覆盖，**不入审批队列** |
 | FP-CALC-14 | 五类角色卡片与分类切换（引流/爆品/利润/形象/常规） | HTML:387 `#typeCards`、`renderCalcTypes` :3978、`renderCalcTabs` :4038 | 近似：四象限分布（波士顿口径）`WeeklyReportPage.tsx`:279-296，非五类角色 | ⬜ 待补 | 口径不同，**不构成等价**；建议保留五类角色视图 |
 | FP-CALC-15 | 查看各类型「营收占比 vs 毛利占比」对比 | HTML:389-391 `#typeChart` | `WeeklyReportPage.tsx`:300-336（rev_share/gp_share 进度条表） | ⬆️ 已移植 | 验证：/ops/weekly 菜品类型表 |
 | FP-CALC-16 | 日营收 vs 保本线图（含保本线、安全边际） | HTML:436-442 `#beChart`、`renderCalcCharts` :4092 | `CalcCharts.tsx`:60-110（同尺寸 SVG viewBox 560×150，含保本虚线、缺口/安全边际大字与两行脚注） | ⬆️ 已移植 | 同尺寸同配色重绘（旧 `#beChart`），零图表依赖；近 7 日柱状趋势仍保留在 `WeeklyReportPage.tsx`:249-278 |
@@ -40,21 +40,18 @@
 | 项 | 数 |
 |---|---|
 | FP 总数 | 20 |
-| ⬆️ 已移植 | 15（其中 1 项为新版新增能力：FP-CALC-20） |
+| ⬆️ 已移植 | 19（其中 1 项为新版新增能力：FP-CALC-20） |
 | 🔄 等价替代 | 0 |
-| ⬜ 待补 | 5 |
+| ⬜ 待补 | 1 |
 | ⚰️ 废弃 | 0 |
 
 **结论**：阶段 9（2026-09-29）补齐「算得出但看不见」的参数与图表缺口，阶段 10 补齐
-**逐菜结构表 + 表头排序**（老板看单菜毛利的入口）。剩余 5 项集中在
-**模拟态推演（11/12/13）**，以及销量口径（08）、五类角色（14）。
+**逐菜结构表 + 表头排序**，阶段 11 补齐**模拟态只读推演**（08 口径切换 / 11 行内改价改量 /
+12 模拟下架 / 13 批量调价调量）。剩余 1 项：**FP-CALC-14 五类角色卡片**。
 
 ## 建议补齐顺序
 
-1. **FP-CALC-11 / 12** 模拟态推演（行内改价/改量、模拟下架，需先定「模拟层不写库」隔离设计）
-2. **FP-CALC-13** 按类型批量调价/调量（模拟态之上，或直接走建议动作入队）
-3. **FP-CALC-08** 日销量口径切换（估算 / 近 30 天 / 近 7 天，依赖 realAnalysis 销量聚合）
-4. **FP-CALC-14** 五类角色卡片（与现有四象限口径不同，需并列新增，不得替换）
+1. **FP-CALC-14** 五类角色卡片（与现有四象限口径不同，需并列新增，不得替换）
 
 ## 备注
 
@@ -88,7 +85,26 @@
 - 阶段 10 **已知口径差异（非缺陷）**：Σ逐菜日营收 20,950 元 ≠ 店级 `kpi.day_rev` 20,552.8 元。
   成因：逐菜表行集 = 店内菜品（95 道）、售价以店内为准；店级汇总走保本价盘整表（含「仅价盘有」的项，
   如「五福饺子」+342 元）。两处口径本就不同，图表各按自身口径呈现，**未做强行对齐**。
-- 阶段 10 未做：勾选列（模拟下架，FP-CALC-12）、行内改价/改量（FP-CALC-11）、「重置」列（FP-CALC-11）、
-  日销量的销量口径 tooltip（`d.src`/`d.sq`，FP-CALC-08）。故本表为**纯只读**，无任何写回路径。
-- **未闭环（阶段 10 续）**：日销量列固定为保本价盘估算口径，**不等于旧版默认的「近 30 天真实销量」**，
-  切换能力仍记 FP-CALC-08（⬜）；仍未做人工目视比对。
+- ~~阶段 10 未做：勾选列（模拟下架）、行内改价/改量、「重置」列、日销量口径 tooltip~~ → **阶段 11 已全部补齐**
+  （见下）。阶段 10 当时的「纯只读」结论在阶段 11 被**模拟态**取代：只读的是**基线**，模拟态是显式进入的推演层。
+- ~~**未闭环（阶段 10 续）**：日销量列固定为保本价盘估算口径，**不等于旧版默认的「近 30 天真实销量」**~~ →
+  **阶段 11 已闭环**：默认口径改为 `real30`（= 旧版默认），且三档可切换。
+- 阶段 11（2026-09-30）迁移 08/11/12/13，落地 ADR：
+  `docs/decisions/ADR-007-结构测算模拟层只读推演.md`。
+  - **口径分界（必须遵守）**：基线 = `GET /api/modules/analysis`，店级 KPI 走**保本价盘整表**；
+    模拟态 = `POST /api/modules/analysis/sim`，行集切到**本店在售菜品**（= 旧版 `calcModel()` 的 `SD` 口径）。
+    因此**进入模拟态首帧店级 `day_rev` 20,552.8 → 27,725.28（+7,172.48）、`be_day` 11,903.49 → 11,848.85**
+    ——这是口径切换不是计算错误，
+    故页面（`WeeklyReportPage.tsx` 卡头、`CalcCharts.tsx`、`CalcDishTable.tsx` 卡头）三处挂
+    「模拟态 · 本店在售菜品口径」徽标；基线说明文案也显式写出「口径不同，非计算错误」。
+  - **零写库**：新端点独立成文件 `bff/routes/analysis_sim.js`（不并入 `routes/modules.js`，避免破坏其
+    「只读端点 · 非 GET 一律 404」契约的自证性）；只 `loadSnapshot()` 只读 + `lib/menu_baoben` 纯计算，
+    不 `saveDB`、不写 `data/*.json`、不 `postAction`、不入 `actions_queue.json`。
+  - **单一公式事实来源**：`computeModel(act, P)` 从 `computeBaobenSummary()` 抽出（行含 `price/cost/qty/type`），
+    模拟端点与基线端点共用同一公式；`applyRowOverrides()` 为纯函数（生成新对象，绝不 mutate 快照）。
+    前端不持第二份公式：成本率/日营收/毛利额一律取后端回传行。
+  - 主动偏离 1 条：旧版「输入即重算」为内存即时重算，新版为**去抖 300ms 回源推演**（行值/店级 KPI/图表
+    全部来自同一响应，杜绝两份公式漂移）；代价是输入后约 0.3s 才更新数值。
+  - 验证：`bff/lib/algorithms/baoben_sim.test.js`（三段：`computeModel` 与 `computeBaobenSummary`
+    逐字段自洽 / 三口径与回落开关 / 零写库可测断言：`data/*.json` mtime+digest 不变、请求体不 mutate、幂等）；
+    BFF 全量 `npm test` 通过；红线守卫 `ci/redline_guard.ps1` 全部通过。

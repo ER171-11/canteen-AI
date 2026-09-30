@@ -5,9 +5,12 @@ import type {
   ActionItem,
   ActionStatus,
   AnalysisResp,
+  AnalysisSimResp,
   AppRelease,
   BaobenParams,
   BookingResp,
+  CalcQMode,
+  CalcSimRowOverride,
   Dish,
   FoodsafeResp,
   Health,
@@ -150,6 +153,26 @@ export async function fetchAnalysis(params?: AnalysisParams): Promise<AnalysisRe
   const { data } = await client.get<AnalysisResp>('/modules/analysis', {
     params: params && Object.keys(params).length ? params : undefined,
   })
+  return data
+}
+
+/** 结构测算模拟态入参（`rows` 按菜名或菜品 id 覆盖 c/p/q/on） */
+export interface AnalysisSimParams {
+  params?: AnalysisParams
+  qmode?: CalcQMode
+  qfallback?: boolean
+  rows?: Record<string, CalcSimRowOverride>
+}
+
+/**
+ * POST /api/modules/analysis/sim —— 结构测算「模拟态」只读推演。
+ *
+ * 后端零写库：不落库、不入队、不写菜品主数据（见 `docs/decisions/ADR-007-结构测算模拟层只读推演.md`）。
+ * 基准行集 = 本店在售菜品（旧版 `calcModel()` 的 `SD` 口径），与基线 `fetchAnalysis()` 的保本价盘口径不同，
+ * 故响应里带 `basis`，页面对模拟态必须挂口径徽标。
+ */
+export async function simulateAnalysis(body: AnalysisSimParams): Promise<AnalysisSimResp> {
+  const { data } = await client.post<AnalysisSimResp>('/modules/analysis/sim', body)
   return data
 }
 

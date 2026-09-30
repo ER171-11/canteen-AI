@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react'
-import { Button, Card, Col, Row, Space, Table, Typography } from 'antd'
+import { Button, Card, Col, Row, Space, Table, Tag, Typography } from 'antd'
 import type { BaobenKpi, BaobenParams, BaobenScene } from '../../api/types'
+import { SIM_BASIS_LABEL } from './calcSim'
 
 /**
  * 结构测算 · 图表与情景（只读）
@@ -282,6 +283,7 @@ export default function CalcCharts({
   loading,
   onSync,
   canSync,
+  simActive,
 }: {
   scenes: BaobenScene[]
   kpi: BaobenKpi
@@ -290,6 +292,8 @@ export default function CalcCharts({
   /** FP-CALC-07 同步菜品主数据：按最新快照/配方重置测算输入 */
   onSync: () => void
   canSync: boolean
+  /** 模拟态：KPI/情景来自 `POST /api/modules/analysis/sim`（本店在售菜品口径，见 ADR-007） */
+  simActive?: boolean
 }) {
   const days = Number(effParams?.days) || 30
   const dayRev = Number(kpi.day_rev) || 0
@@ -308,7 +312,8 @@ export default function CalcCharts({
         title="三、保本测算与盈亏"
         loading={loading}
         extra={
-          <Space>
+          <Space wrap>
+            {simActive && <Tag color="orange">{SIM_BASIS_LABEL}</Tag>}
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               保本日营收 = 月固定成本 ÷ 边际贡献率 ÷ 月营业天数
             </Typography.Text>
@@ -405,7 +410,9 @@ export default function CalcCharts({
               )}
             </div>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
-              {`基准：日营收 ¥${fmt(dayRev)} · 日保本 ¥${fmt(beDay)} · 边际贡献率 ${pct(cm, 2)}`}
+              {`基准：日营收 ¥${fmt(dayRev)} · 日保本 ¥${fmt(beDay)} · 边际贡献率 ${pct(cm, 2)}（${
+                simActive ? '模拟态·本店在售菜品口径' : '基线·保本价盘口径'
+              }）`}
             </Typography.Text>
           </Card>
         </Col>

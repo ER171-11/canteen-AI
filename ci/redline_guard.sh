@@ -25,6 +25,30 @@ else
   echo "OK: 后台写操作均指向 /api/actions 队列"
 fi
 
+echo "== R15 结构测算模拟态零写库（ADR-007 红线①）=="
+# 模拟态推演必须「只读」：路由 + 算法文件里不得出现任何写库 / 写文件 / 入队调用。
+# 先剥注释再扫：ADR-007 的说明文字与文件头契约注释里，逐字写着
+# 「不 saveDB / 不 postAction / 不入 actions_queue.json」——不剥注释会自相矛盾地报红。
+SIM_HITS=""
+for f in bff/routes/analysis_sim.js bff/lib/menu_baoben.js; do
+  if [ ! -f "$f" ]; then
+    echo "FAIL: 模拟态文件缺失：$f"
+    FAIL=1
+    continue
+  fi
+  H=$(sed -e 's://.*::' -e '/\/\*/,/\*\//d' "$f" \
+    | grep -nE 'saveDB|writeFileSync|writeFile\(|postAction|actions_queue|sqlite' \
+    | sed "s|^|$f:|" || true)
+  if [ -n "$H" ]; then SIM_HITS="$SIM_HITS$H
+"; fi
+done
+if [ -n "$SIM_HITS" ]; then
+  echo "FAIL: 模拟态出现写库调用（只读推演已被破坏）:"; printf '%s' "$SIM_HITS"
+  FAIL=1
+else
+  echo "OK: 模拟态仅只读快照 + 纯计算（无 saveDB / 写文件 / postAction / actions_queue / sqlite）"
+fi
+
 echo "== R5 无硬编码密钥 =="
 KEYS=$(grep -rn -E 'sk-[A-Za-z0-9]{20,}' \
   --include='*.js' --include='*.ts' --include='*.tsx' --include='*.py' \
