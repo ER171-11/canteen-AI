@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,12 +69,10 @@ fun InspectionScreen() {
     val inspVm = remember {
         InspectionViewModel(
             repository = AppModule.inspectionRepository,
-            today = null,
-            defaultStation = AppModule.storeName,
-            nowMs = { System.currentTimeMillis() }
+            today = null
         )
     }
-    val state by inspVm.state
+    val state by inspVm.state.collectAsState()
 
     var pendingNodeId by remember { mutableStateOf<String?>(null) }
 

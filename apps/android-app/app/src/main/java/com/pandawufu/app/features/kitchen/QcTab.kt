@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pandawufu.app.AppModule
 import com.pandawufu.app.confirm.KimiCtaByType
+import com.pandawufu.app.ui.designsystem.CardBg
+import com.pandawufu.app.ui.designsystem.Sub
 import com.pandawufu.shared.viewmodel.KitchenViewModel
 import com.pandawufu.shared.viewmodel.QcMediaViewModel
 

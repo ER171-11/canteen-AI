@@ -33,10 +33,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +51,9 @@ import androidx.compose.ui.unit.sp
 import com.pandawufu.app.AppModule
 import com.pandawufu.app.media.WatermarkSpec
 import com.pandawufu.app.media.rememberWatermarkCapture
+import com.pandawufu.app.ui.designsystem.CardBg
+import com.pandawufu.app.ui.designsystem.Sub
+import com.pandawufu.app.ui.designsystem.Txt
 import com.pandawufu.shared.model.QcRecordDto
 import com.pandawufu.shared.model.QcVerdictDto
 import com.pandawufu.shared.model.QcVerdictLevel
@@ -76,7 +81,7 @@ fun QcMediaSection(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state by qcVm.state
+    val state by qcVm.state.collectAsState()
 
     val workorders = kitchenState.workorders
     var selectedWoId by remember { mutableStateOf<String?>(null) }

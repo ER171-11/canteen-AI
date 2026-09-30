@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -127,7 +128,7 @@ fun TableBoardSection(tables: List<PosTableDto>, rev: String?) {
 }
 
 @Composable
-private fun Kpi(label: String, value: Int, color: Color) {
+private fun RowScope.Kpi(label: String, value: Int, color: Color) {
     Column(Modifier.weight(1f)) {
         Text("$value", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = color)
         Text(label, fontSize = 11.sp, color = Sub)

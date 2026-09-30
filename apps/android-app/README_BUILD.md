@@ -25,44 +25,64 @@ env -u LD_PRELOAD ./gradlew :app:assembleDebug --no-daemon
 
 APK：`app/build/outputs/apk/debug/app-debug.apk`（约 18MB）
 
-## Windows 本机（2026-09-29 补充）
+## Windows 本机（2026-09-29 实测跑通）
 
-### 前置（缺一不可）
+### 实际采用的环境（全部装在用户目录，无需管理员）
 
-| 依赖 | 本机现状 | 要求 |
+| 组件 | 路径 | 来源 |
 |---|---|---|
-| Android SDK（platform-35 / build-tools / platform-tools） | **没有**（`ANDROID_HOME` 为空，常见路径均不存在） | 装 Android Studio 或 cmdline-tools |
-| JDK | 仅 `C:\Program Files\Java\jdk-14.0.2` | **AGP 8.13 要求 JDK 17+**，可用 Android Studio 自带 JBR |
-| `local.properties` | 已改为 Windows 写法 | `sdk.dir` 必须指向真实存在的 SDK 目录 |
+| JDK 17.0.20.1 (Temurin) | `%USERPROFILE%\tools\jdk17\jdk-17.0.20.1+1` | 清华 Adoptium 镜像 |
+| Android SDK | `%USERPROFILE%\tools\android-sdk` | Google cmdline-tools `commandlinetools-win-13114758_latest.zip` |
+| Gradle 8.13 | `%USERPROFILE%\tools\gradle-8.13` | 腾讯镜像（官方源在国内很慢） |
+| AVD | `panda-test`（Android 15 / google_apis / x86_64 / Pixel 6） | `avdmanager` |
+| 辅助脚本 | `%USERPROFILE%\tools\{install-sdk.cmd, make-avd.cmd, finish-install.ps1}` | 本机调试用 |
 
-已改动项：
-- `local.properties`：`sdk.dir=C:/Users/mingyzhikui/AppData/Local/Android/Sdk`（正斜杠，避免 `.properties` 的反斜杠转义坑）
-- `gradle.properties`：注释掉 `android.aapt2FromMavenOverride`（那是 arm64 Linux 的 qemu 包装器）
+系统自带的 `C:\Program Files\Java\jdk-14.0.2` **不可用**（AGP 8.13 要求 JDK 17+）。
+
+### 本仓已改动
+
+- `local.properties`（gitignored）：`sdk.dir=C:/Users/mingyzhikui/tools/android-sdk`、`bff.base.url=http://10.0.2.2:8787`
+  - 正斜杠是必须的：`.properties` 里 `\U` 被当转义符，`C:\Users` 会变成 `C:Users`
+- `gradle.properties`：注释掉 `android.aapt2FromMavenOverride`（arm64 Linux 的 qemu 包装器，Windows x86-64 设了必失败）
 
 ### 构建
 
 ```powershell
+$env:JAVA_HOME="$env:USERPROFILE\tools\jdk17\jdk-17.0.20.1+1"
+$env:ANDROID_HOME="$env:USERPROFILE\tools\android-sdk"
+$env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 cd apps\android-app
-.\gradlew.bat :app:assembleDebug --no-daemon
+& "$env:USERPROFILE\tools\gradle-8.13\bin\gradle.bat" :app:assembleDebug --no-daemon
 ```
 
 产物：`app\build\outputs\apk\debug\app-debug.apk`
 
-### 模拟器跑通链路（推荐，一台电脑就够）
+> 不用 `.\gradlew.bat` 的原因：wrapper 要从 `services.gradle.org` 拉 137MB 分发包（本机握手就 3.4s），腾讯镜像 2s 下完。
 
-1. 仓库根目录双击「启动测试.cmd」把 BFF 起到 8787；
-2. `local.properties` 里 `bff.base.url=http://10.0.2.2:8787`（AVD 内 10.0.2.2 = 宿主机回环）；
-3. `adb install -r app\build\outputs\apk\debug\app-debug.apk`；
-4. App 登录 `boss / wufu123`。
+### 模拟器
+
+```powershell
+$root="$env:USERPROFILE\tools"
+$adb="$root\android-sdk\platform-tools\adb.exe"
+& "$root\android-sdk\emulator\emulator.exe" -avd panda-test -no-boot-anim -gpu auto
+& $adb wait-for-device
+& $adb install -r app\build\outputs\apk\debug\app-debug.apk
+& $adb shell monkey -p com.pandawufu.app -c android.intent.category.LAUNCHER 1
+```
+
+- 本机 AMD Ryzen 7 4800H + `HypervisorPresent=True` + `WinHvPlatform.dll` 在位 → WHPX 加速可用；
+- AVD 内 `10.0.2.2` 即宿主机，BFF 默认绑 `0.0.0.0:8787`，无需额外配置；
+- 登录 `boss / wufu123`。
 
 ### 真机（先确认 `adb devices` 能看到设备）
 
 - **USB**：`adb reverse tcp:8787 tcp:8787`，并把 `bff.base.url` 改成 `http://127.0.0.1:8787` 重新打包；
 - **Wi-Fi**：改成电脑局域网 IP（本机当前 `http://192.168.1.19:8787`），手机与电脑同网段，并放行 Windows 防火墙 8787 入站。
 
-### 注意：仓库里的旧 APK 在本机不可直接用
+### 坑：仓库里带进来的旧 APK
 
-`app/build/outputs/apk/debug/app-debug.apk` 是 Linux 机产物，`BuildConfig.BFF_BASE_URL` 已在编译期固化为 `http://192.168.1.22:8787`（本机 WLAN 是 192.168.1.19）。该值**运行时无法修改**，只能重新打包，或把电脑 IP 改成恰好 192.168.1.22。
+- 旧的 `app-debug.apk` 是 Linux 机产物，`BuildConfig.BFF_BASE_URL` 已在编译期固化为 `http://192.168.1.22:8787`（本机 WLAN 是 192.168.1.19），装上也连不上；2026-09-29 已重命名为 `app-debug.apk.linux-stale` 留档。
+- `BuildConfig.BFF_BASE_URL` 是编译期常量，运行时无法改，换环境必须重新打包。
 
 ## 联调 BFF
 
