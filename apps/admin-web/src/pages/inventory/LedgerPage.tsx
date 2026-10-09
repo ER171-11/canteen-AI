@@ -5,7 +5,6 @@ import type { ColumnsType } from 'antd/es/table'
 import { fetchSnapshot } from '../../api'
 import type { IngItem, StockLogItem } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
-import { MOCK_INGS, MOCK_LOGS } from './mock'
 import { fmtNum, stockValue } from './utils'
 import { COLORS } from '../../theme'
 
@@ -34,8 +33,8 @@ export default function LedgerPage() {
         else setLogs([])
       })
       .catch(() => {
-        setLogs(MOCK_LOGS)
-        setIngs(MOCK_INGS)
+        setLogs([])
+        setIngs([])
         setIsMock(true)
       })
       .finally(() => setLoading(false))

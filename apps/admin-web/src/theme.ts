@@ -11,8 +11,13 @@ export const COLORS = {
   red: '#E8584A',
   black: '#3A3A3A',
   yellow: '#F2B233',
+  gold: '#E8B53A',
+  orange: '#F5A623',
   green: '#5BA85B',
+  blue: '#3A6EA5',
+  indigo: '#4B5FA6',
   purple: '#9B6BBF',
+  gray: '#8C8C8C',
 } as const
 
 export const themeConfig: ThemeConfig = {

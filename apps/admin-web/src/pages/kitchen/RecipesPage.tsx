@@ -27,7 +27,6 @@ import ColorBadge from './components/ColorBadge'
 import BomTable from './components/BomTable'
 import MockAlert from './components/MockAlert'
 import { colorMeta, colorOrderKey, FIVE_COLOR_ORDER } from './colorMeta'
-import { MOCK_RECIPES } from './mock'
 import { COLORS } from '../../theme'
 
 type BomFormLine = { name?: string; qty?: number; unit?: string }
@@ -72,9 +71,8 @@ export default function RecipesPage() {
         if (list.length > 0 && !selectedId) setSelectedId(list[0].sku_id)
       })
       .catch(() => {
-        setItems(MOCK_RECIPES)
+        setItems([])
         setIsMock(true)
-        if (MOCK_RECIPES.length > 0) setSelectedId(MOCK_RECIPES[0].sku_id)
       })
     fetchSnapshot()
       .then((snap) => {

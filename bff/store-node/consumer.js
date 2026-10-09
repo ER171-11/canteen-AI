@@ -27,6 +27,7 @@ const { nowIso, sleep, httpJson, withRetry } = require('./common');
 require('../lib/algorithms/registry');
 const algorithms = require('../lib/algorithms/index');
 const pusher = require('./pusher');
+const provider = require('../lib/provider');
 
 const DEFAULT_STORE_URL = 'http://127.0.0.1:8765';
 const DEFAULT_BFF_URL = 'http://127.0.0.1:8787';
@@ -231,6 +232,16 @@ async function processAction(action, storeUrl, bffUrl, token, dbPath, opts) {
     try { payload = JSON.parse(payload); } catch (e) { payload = {}; }
   }
   const traceId = action.trace_id || require('crypto').randomBytes(8).toString('hex');
+
+  /* 前厅动作预留：美团承接模式下绝不写库（防御性兜底；confirm 已在 BFF 拦截，
+     此处防止 provider 中途切换导致已进入待执行的动作落库） */
+  if (action.front_house && provider.frontHouseProvider() !== 'self') {
+    log.info('前厅动作 pending_provider，跳过写库 id=' + aid + ' type=' + atype + ' trace=' + traceId);
+    await callback(undefined, 'pending_provider=' + provider.frontHouseProvider()
+      + '，前厅动作暂不写库，置 FRONT_OF_HOUSE_PROVIDER=self 后启用');
+    recordAction(dbPath, action, 'pending_provider', undefined, traceId);
+    return { outcome: 'rejected', detail: 'pending_provider' };
+  }
 
   const callback = async (result, error) => {
     const body = {};

@@ -80,6 +80,7 @@ registerAll({
   'qc.force_pass': (ctx, data, payload) => ops.insertQcForcePass(ctx, data, payload),
   'queue.serve': (ctx, data, payload) => ops.applyQueueServe(ctx, data, payload),
   'sample.log': (ctx, data, payload) => ops.insertSample(ctx, data, payload),
+  'fs.sample_clear': (ctx, data, payload) => ops.clearSample(ctx, data, payload),
   'workorder.create': (ctx, data, payload) => ops.insertWorkorder(ctx, data, payload),
   'workorder.advance': (ctx, data, payload) => ops.advanceWorkorder(ctx, data, payload),
   'workorder.step_clock': (ctx, data, payload) => ops.clockWorkorderStep(ctx, data, payload),
@@ -95,6 +96,8 @@ registerAll({
   'fs.disinfect': (ctx, data, payload) => ops.insertDisinfect(ctx, data, payload),
   'fs.trace_scan': (ctx, data, payload) => ops.insertFsTrace(ctx, data, payload),
   'equipment.maintain': (ctx, data, payload) => ops.insertEqMaintain(ctx, data, payload),
+  'equipment.temp_log': (ctx, data, payload) => ops.insertEqTemp(ctx, data, payload),
+  'equipment.energy_log': (ctx, data, payload) => ops.insertEqEnergy(ctx, data, payload),
   'vip.campaign': (ctx, data, payload) => ops.insertVipCampaign(ctx, data, payload),
   'vip.coupon_redeem': (ctx, data, payload) => ops.redeemVipCoupon(ctx, data, payload),
   'vip.balance_deduct': (ctx, data, payload) => ops.deductVipBalance(ctx, data, payload),
@@ -103,7 +106,10 @@ registerAll({
   'review.followup': (ctx, data, payload) => ops.insertReviewFollowup(ctx, data, payload),
   'vip.checkin': (ctx, data, payload) => ops.insertVipCheckin(ctx, data, payload),
   'finance.freeze': (ctx, data, payload) => ops.insertFinSplit(ctx, data, payload, false),
-  'finance.approve': (ctx, data, payload) => ops.insertFinSplit(ctx, data, payload, true)
+  'finance.approve': (ctx, data, payload) => ops.insertFinSplit(ctx, data, payload, true),
+  'finance.invoice': (ctx, data, payload) => ops.insertFinInvoice(ctx, data, payload),
+  'finance.tax': (ctx, data, payload) => ops.insertFinTax(ctx, data, payload),
+  'finance.cash': (ctx, data, payload) => ops.insertFinCash(ctx, data, payload)
 });
 
 /* 闭店巡检域（C/D 块）：巡检照片只存手机本地，本域不接收任何图片字段 */

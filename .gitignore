@@ -51,3 +51,12 @@ store-inventory/_p1prof/
 .idea/
 .vscode/
 餐厅系统.zip
+
+# 归档副本（整包重复，不入库；保留源码仓库本身）
+canteenAI other/
+canteenAI-handoff-20261009/
+canteenAI-handoff-20261009.zip
+
+# 个人/IDE 临时文件
+.commitmsg.txt
+.codebuddy/

@@ -27,7 +27,6 @@ import type {
 } from '../../api/types'
 import MockAlert from './components/MockAlert'
 import { colorMeta, colorOrderKey, FIVE_COLOR_ORDER } from './colorMeta'
-import { MOCK_BOARD, MOCK_QC_RECORDS } from './mock'
 import { COLORS } from '../../theme'
 
 function defectText(v: unknown): string {
@@ -67,7 +66,7 @@ export default function QcPage() {
           setBoardMock(false)
         })
         .catch(() => {
-          setBoard(MOCK_BOARD)
+          setBoard([])
           setYieldAlerts([])
           setBoardMock(true)
         }),
@@ -77,7 +76,7 @@ export default function QcPage() {
           setQcMock(false)
         })
         .catch(() => {
-          setRecords(MOCK_QC_RECORDS)
+          setRecords([])
           setQcMock(true)
         }),
     ]).finally(() => setLoading(false))

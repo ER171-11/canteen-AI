@@ -6,7 +6,6 @@ import { Link } from 'react-router-dom'
 import { fetchSnapshot } from '../../api'
 import type { IngItem, InventoryDoc } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
-import { MOCK_ORDERS } from './mock'
 import { docDebt, docPaid, formatLinesSummary } from './utils'
 import { COLORS } from '../../theme'
 
@@ -33,7 +32,7 @@ export default function PurchasePage() {
         }
       })
       .catch(() => {
-        setDocs(MOCK_ORDERS)
+        setDocs([])
         setFromSnapshot(false)
         setIsMock(true)
       })

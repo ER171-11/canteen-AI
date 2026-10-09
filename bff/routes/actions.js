@@ -23,6 +23,7 @@ const { WRITE_ROLES, mayWriteActions } = require('../lib/auth');
 const { loadSnapshot } = require('./snapshot');
 const policy = require('../lib/policy');
 const siAudit = require('../lib/si_audit');
+const provider = require('../lib/provider');
 
 const FILE = 'actions_queue.json';
 const EXPIRE_MS = 24 * 3600 * 1000;
@@ -99,11 +100,15 @@ function enqueue(type, payload, operator, traceId, meta) {
   const snap = loadSnapshot();
   const now = new Date().toISOString();
   const m = meta || {};
+  const fh = provider.isFrontHouseAction(type);
   const action = {
     id: 'act_' + crypto.randomBytes(8).toString('hex'),
     type: String(type || ''),
     payload: payload == null ? {} : payload,
     operator: operator || null,
+    /* 前厅动作预留：meituan 模式下不写库，置 self 后启用（红线：切回自营才触达） */
+    front_house: fh,
+    pending_provider: fh ? provider.frontHouseProvider() : null,
     hash,
     status: 'queued',
     rev: snap ? snap.rev : null,
@@ -147,6 +152,8 @@ function publicView(a) {
     executed_rev: a.executed_rev == null ? null : a.executed_rev,
     via: a.via || null,
     rollback_available: a.auto_executed === true && a.via === 'bff' && a.status === '已执行',
+    front_house: a.front_house === true,
+    pending_provider: a.pending_provider || null,
     created_at: a.created_at,
     confirmed_at: a.confirmed_at,
     executed_at: a.executed_at,
@@ -309,6 +316,15 @@ async function handle(req, res, ctx, pathname) {
       ctx.sendJSON(res, 409, { ok: false, error: 'invalid state: ' + a.status, id, status: a.status });
       return true;
     }
+    // 前厅动作在美团承接模式下禁止写库（切换 self 后才允许消费）
+    if (a.front_house && !provider.isSelf()) {
+      ctx.sendJSON(res, 423, {
+        ok: false,
+        error: 'pending_provider: 前厅动作在美团承接模式下不写库，置 FRONT_OF_HOUSE_PROVIDER=self 后启用',
+        id, status: a.status
+      });
+      return true;
+    }
     const { executeAction } = require('../lib/algorithms/execute');
     const snap = loadSnapshot();
     if (!snap) {
@@ -390,6 +406,15 @@ async function handle(req, res, ctx, pathname) {
       body = body || {};
       if (a.status !== 'queued') {
         ctx.sendJSON(res, 409, { ok: false, error: 'invalid state: ' + a.status, id, status: a.status });
+        return true;
+      }
+      // 前厅动作在美团承接模式下禁止确认（切换 self 后才允许）
+      if (a.front_house && !provider.isSelf()) {
+        ctx.sendJSON(res, 423, {
+          ok: false,
+          error: 'pending_provider: 前厅动作在美团承接模式下不写库，置 FRONT_OF_HOUSE_PROVIDER=self 后启用',
+          id, status: a.status
+        });
         return true;
       }
       const snap = loadSnapshot();

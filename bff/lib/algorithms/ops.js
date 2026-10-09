@@ -392,6 +392,25 @@ function insertSample(ctx, data, payload) {
   return 'fs_samples 插入 rowid=' + (rid === null ? '-' : rid);
 }
 
+/**
+ * fs.sample_clear：留样销毁登记 → fs_samples.cleared_at（M4-T4 留样状态机收尾）。
+ */
+function clearSample(ctx, data, payload) {
+  const sid = payload.id;
+  if (sid === null || sid === undefined || sid === '') return 'fs_samples 销毁登记缺 id，跳过';
+  const clearedAt = payload.cleared_at || nowIso();
+  const r = storeUpdate(ctx, 'fs_samples', { cleared_at: clearedAt }, { id: sid });
+  if (r === 0 && !(ctx && ctx.store)) {
+    fallback(ctx, data, 'fs_samples', {
+      id: sid,
+      dish: payload.dish || '',
+      cleared_at: clearedAt,
+      note: payload.note || 'queue clear'
+    });
+  }
+  return 'fs_samples#' + sid + ' 销毁登记 ' + clearedAt;
+}
+
 /* ---------- 工单 ---------- */
 
 const WO_FLOW = ['待开始', '制作中', '待传', '已完成'];
@@ -911,6 +930,35 @@ function insertEqMaintain(ctx, data, payload) {
   return 'eq_maintain rowid=' + (rid === null ? '-' : rid);
 }
 
+/**
+ * equipment.temp_log → eq_temp（M8-T2 温度登记）。
+ * eq_temp 为红线「不进 rev 体系」的高频时序表：仅走 sqlite store，
+ * 无 store 时不回落 data.ext，避免把高频点混入整库 rev 合并。
+ */
+function insertEqTemp(ctx, data, payload) {
+  const row = {
+    ts: payload.ts || nowIso(),
+    device: payload.device || '',
+    temp: pt(payload.temp != null ? payload.temp : payload.celsius)
+  };
+  const rid = storeInsert(ctx, 'eq_temp', row);
+  return 'eq_temp rowid=' + (rid === null ? '-' : rid) + (rid === null ? '（无 store，按红线不回落 rev）' : '');
+}
+
+/**
+ * equipment.energy_log → eq_energy（M8-T4 能耗抄表）。
+ */
+function insertEqEnergy(ctx, data, payload) {
+  const rid = persist(ctx, data, 'eq_energy', {
+    date: payload.date || today(),
+    device: payload.device || '',
+    kind: payload.kind || '电',
+    reading: pt(payload.reading),
+    usage: pt(payload.usage)
+  });
+  return 'eq_energy rowid=' + (rid === null ? '-' : rid);
+}
+
 /* ---------- vip.campaign ---------- */
 
 /**
@@ -1230,6 +1278,52 @@ function insertFinSplit(ctx, data, payload, approve) {
   return 'fin_split rowid=' + (rid === null ? '-' : rid);
 }
 
+/* ---------- finance.invoice / finance.tax / finance.cash（M9） ---------- */
+
+/**
+ * finance.invoice → fin_invoices（M9-T2 开票登记/入账）。
+ */
+function insertFinInvoice(ctx, data, payload) {
+  const rid = persist(ctx, data, 'fin_invoices', {
+    invoice_no: payload.invoice_no || payload.no || '',
+    kind: payload.kind || '普票',
+    direction: payload.direction || '销项',
+    amount: pt(payload.amount),
+    tax: pt(payload.tax),
+    ts: payload.ts || nowIso(),
+    status: payload.status || '已开具'
+  });
+  return 'fin_invoices rowid=' + (rid === null ? '-' : rid);
+}
+
+/**
+ * finance.tax → fin_tax（M9-T4 税务申报登记：申报/缴款状态）。
+ */
+function insertFinTax(ctx, data, payload) {
+  const rid = persist(ctx, data, 'fin_tax', {
+    period: payload.period || today().slice(0, 7),
+    kind: payload.kind || '增值税',
+    amount: pt(payload.amount),
+    filed_at: payload.filed_at || null,
+    status: payload.status || '待申报'
+  });
+  return 'fin_tax rowid=' + (rid === null ? '-' : rid);
+}
+
+/**
+ * finance.cash → fin_cash（M9-T4 现金流水登记：备用金/找零/存款）。
+ */
+function insertFinCash(ctx, data, payload) {
+  const rid = persist(ctx, data, 'fin_cash', {
+    ts: payload.ts || nowIso(),
+    kind: payload.kind || '支出',
+    amount: pt(payload.amount),
+    account: payload.account || '未标',
+    note: payload.note || ''
+  });
+  return 'fin_cash rowid=' + (rid === null ? '-' : rid);
+}
+
 module.exports = {
   insertQcRecord,
   insertQcForcePass,
@@ -1238,6 +1332,7 @@ module.exports = {
   insertQueueServe,
   insertLossReport,
   insertSample,
+  clearSample,
   insertWorkorder,
   normWoStatus,
   advanceWorkorder,
@@ -1254,6 +1349,8 @@ module.exports = {
   insertDisinfect,
   insertFsTrace,
   insertEqMaintain,
+  insertEqTemp,
+  insertEqEnergy,
   insertVipCampaign,
   redeemVipCoupon,
   deductVipBalance,
@@ -1262,6 +1359,9 @@ module.exports = {
   insertReviewFollowup,
   insertVipCheckin,
   insertFinSplit,
+  insertFinInvoice,
+  insertFinTax,
+  insertFinCash,
   // 内部复用（测试可用）
   _internal: { getWorkorder, fallback, persist, rebuildStock }
 };

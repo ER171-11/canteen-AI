@@ -881,6 +881,151 @@ export interface StaffModuleResp {
   generated_at?: string
 }
 
+/* ---------------- M2 排班员工：/api/staff/* ---------------- */
+
+/** GET /api/staff/schedule */
+export interface StaffScheduleRow {
+  staff_id?: string | null
+  staff_name: string
+  role?: string | null
+  /** date(YYYY-MM-DD) → A/B/C/休 */
+  cells: Record<string, string>
+  hours: number
+  days: number
+}
+export interface StaffScheduleResp {
+  ok: boolean
+  week_start: string
+  days: string[]
+  staff: StaffScheduleRow[]
+  totals: { people: number; hours: number; shifts: number }
+}
+
+/** GET /api/staff/clock */
+export interface AttendanceRow {
+  staff_id: string | null
+  staff_name: string
+  role?: string | null
+  shift?: string | null
+  start_time?: string | null
+  end_time?: string | null
+  clock_ts?: string | null
+  clock_kind?: string | null
+  makeup: boolean
+  late_min?: number | null
+  /** 准点 / 迟到 N 分 / 缺勤 / 补录 */
+  status: string
+}
+export interface StaffClockResp {
+  ok: boolean
+  date: string
+  expected: number
+  clocked: number
+  on_time: number
+  late: number
+  absent: number
+  makeup: number
+  thresholds: { late_min: number; absent_min: number }
+  rows: AttendanceRow[]
+  rev?: number | string | null
+}
+
+/** GET /api/staff/perf */
+export interface StaffPerfRow {
+  rank: number
+  staff_id: string | null
+  staff_name: string
+  score: number
+  hours: number
+  remark: string | null
+}
+export interface StaffPerfResp {
+  ok: boolean
+  perf: StaffPerfRow[]
+  rev?: number | string | null
+}
+
+/** GET /api/staff/train */
+export interface CertAlert {
+  staff_name: string
+  expire_at: string | null
+  days_left: number | null
+  level: 'red' | 'warn' | 'ok' | 'unknown'
+  blocked: boolean
+}
+export interface TrainCourse {
+  course: string
+  done: number
+  total: number
+  pct: number
+  passed: boolean
+  last_ts: string | null
+}
+export interface StaffTrainProgress {
+  staff_id: string
+  staff_name: string | null
+  courses: TrainCourse[]
+  gated_skus: string[]
+  blocked_skus: string[]
+  blocked?: boolean
+}
+export interface StaffTrainResp {
+  ok: boolean
+  sop_total: number
+  train: TrainItem[]
+  progress: StaffTrainProgress[]
+  certs: CertAlert[]
+  summary: {
+    staff: number
+    cert_red: number
+    cert_warn: number
+    blocked_staff: number
+    gated_skus: number
+  }
+  skill_matrix: Record<string, string>
+  uniform: TrainItem[]
+  rev?: number | string | null
+}
+
+/** /api/staff/swaps */
+export type SwapStatus = 'pending_peer' | 'pending_manager' | 'applied' | 'rejected'
+export interface SwapItem {
+  id: string
+  date: string
+  shift: string
+  shift_start?: string | null
+  shift_end?: string | null
+  shift_role?: string | null
+  from_staff: string
+  from_name?: string | null
+  to_staff: string
+  to_name?: string | null
+  reason?: string | null
+  status: SwapStatus
+  requested_by?: string | null
+  peer_by?: string | null
+  peer_at?: string | null
+  approved_by?: string | null
+  approved_at?: string | null
+  rejected_by?: string | null
+  rejected_at?: string | null
+  reject_reason?: string | null
+  created_at?: string
+  updated_at?: string
+  base_rev?: number | string | null
+  applied_rev?: number | string | null
+  write_actions?: string[]
+}
+export interface SwapResp {
+  ok: boolean
+  swap?: SwapItem
+  items?: SwapItem[]
+  count?: number
+  write_actions?: string[]
+  error?: string
+  expected_rev?: number | string | null
+}
+
 /* 预订模块 GET /api/modules/booking?date= */
 export interface BookingItem {
   id?: string
@@ -968,6 +1113,217 @@ export interface FoodsafeResp {
   disinfect: DisinfectItem[]
   rev?: number | string
   generated_at?: string
+}
+
+/* ============ 食安模块 v2 GET/POST /api/foodsafe/* （M4 后场） ============ */
+
+/** 证照临期分级：逾期禁营 / 红 / 橙 / 黄 / 绿 / 未知 */
+export type CertLevel = 'expired' | 'red' | 'orange' | 'yellow' | 'green' | 'unknown'
+export type CertKind = 'health' | 'store'
+
+export interface CertRow {
+  id: string | number | null
+  type: string
+  holder: string
+  cert_no?: string | null
+  issued_at?: string | null
+  expire_at?: string | null
+  status?: string | null
+  days: number | null
+  level: CertLevel
+  kind: CertKind
+  /** 健康证逾期/红 → 排班禁岗 */
+  blocked: boolean
+  /** 店铺证照逾期 → 停业风险 */
+  store_risk: boolean
+}
+
+export interface CertThresholds {
+  block: number
+  red: number
+  orange: number
+  yellow: number
+}
+
+export interface FoodsafeCertsResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: CertRow[]
+  counts: Record<string, number>
+  thresholds: CertThresholds
+  health_blocked: string[]
+  store_risks: CertRow[]
+  store_stop_risk: boolean
+  advice: string[]
+}
+
+export interface CertConfigResp {
+  ok: boolean
+  cert: CertThresholds
+  defaults: CertThresholds
+  config?: { cert?: CertThresholds } | null
+  rev?: number | string | null
+}
+
+export interface TraceRow {
+  id: string | number | null
+  batch_no: string
+  ing_name: string
+  supplier: string
+  recv_date?: string | null
+  origin?: string | null
+  cert_no?: string | null
+  check_result?: string | null
+  /** 缺检验报告/合格证 → 前端标「待补」(黄) */
+  missing_cert: boolean
+}
+
+export interface TraceDrill {
+  recv: Record<string, unknown>[]
+  sales: Record<string, unknown>[]
+  need_cert: boolean
+  note: string
+}
+
+export interface TraceResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: TraceRow[]
+  batches: number
+  missing_cert: number
+  advice: string[]
+  sales_source?: string
+  query?: string
+  batch?: TraceRow | null
+  matches?: number
+  drill?: TraceDrill
+}
+
+export type WeightLevel = 'pass' | 'warn' | 'fail' | 'unknown'
+export type SampleLevel = 'green' | 'yellow' | 'red' | 'done' | 'unknown'
+
+export interface SampleRow {
+  id: string | number | null
+  date?: string | null
+  meal?: string | null
+  dish: string
+  keeper?: string | null
+  weight_g: number
+  need_g: number
+  weight_ok: boolean
+  weight_level: WeightLevel
+  short_g: number
+  kept_at: string | null
+  due_at: string | null
+  hours_left: number | null
+  elapsed_h: number | null
+  status: string
+  level: SampleLevel
+  cleared_at?: string | null
+}
+
+export interface SampleReminder {
+  id: string | number | null
+  dish: string
+  level: string
+  text: string
+}
+
+export interface SampleSummary {
+  total: number
+  pending: number
+  due_soon: number
+  expired: number
+  cleared: number
+  under_weight: number
+}
+
+export interface FoodsafeSamplesResp {
+  ok: boolean
+  rev?: number | string | null
+  hold_hours: number
+  warn_hours: number
+  weight_rule: Record<string, number>
+  auto_archive_conf: number
+  rows: SampleRow[]
+  summary: SampleSummary
+  reminders: SampleReminder[]
+}
+
+export interface DisinfectDay {
+  date: string
+  records: number
+  done_areas: string[]
+  missed: string[]
+  rate: number | null
+}
+
+export interface DisinfectState {
+  area: string
+  state: string
+  overdue: boolean
+}
+
+export interface DisinfectResp {
+  ok: boolean
+  rev?: number | string | null
+  areas: string[]
+  span: string[]
+  days: DisinfectDay[]
+  avg_rate: number | null
+  today_done: number
+  today_missed: string[]
+  pending: DisinfectState[]
+  overdue: DisinfectState[]
+}
+
+export interface FoodsafeAlert {
+  level: string
+  text: string
+}
+
+export interface FoodsafeOverviewResp {
+  ok: boolean
+  rev?: number | string | null
+  certs: {
+    counts: Record<string, number>
+    health_blocked: string[]
+    store_risks: number
+    store_stop_risk: boolean
+    thresholds: CertThresholds
+  }
+  samples: SampleSummary
+  disinfect: {
+    areas: number
+    today_done: number
+    today_missed: string[]
+    avg_rate: number | null
+  }
+  trace: { batches: number; missing_cert: number }
+  alerts: FoodsafeAlert[]
+}
+
+/** 写操作统一回执（入队动作 / Kimi 待复核 / 克重 422 拦截） */
+export interface FoodsafeEnqueueResp {
+  ok: boolean
+  action_id?: string
+  rev?: number | string | null
+  note?: string
+  error?: string
+  /** Kimi 入档结果 */
+  archived?: boolean
+  review?: boolean
+  conf?: number | null
+  threshold?: number
+  source?: string
+  reason?: string
+  /** 留样克重回执 */
+  weight_level?: WeightLevel
+  need_g?: number
+  weight_g?: number
+  dish?: string
+  rule?: string
+  due_at?: string
 }
 
 /* 分析模块 GET /api/modules/analysis（与 App/KMP 同源） */
@@ -1079,6 +1435,430 @@ export interface EquipmentResp {
     mom?: string | null
   } | null
   mock_temps?: boolean
+}
+
+/* ---------------- 设备 M8 /api/equipment/*（后场：GET 只读聚合 + POST 入队） ---------------- */
+
+export type TempLevel = 'critical' | 'over' | 'warn' | 'ok' | 'unknown'
+export interface EquipmentTempRow {
+  device: string
+  kind: string
+  temp: number | null
+  max: number
+  minutes?: number
+  history?: number[]
+  margin?: number | null
+  level: TempLevel
+  status: string
+  over: boolean
+}
+export interface EquipmentTempsResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: EquipmentTempRow[]
+  counts: Record<string, number>
+  over: number
+  alerts: Array<{ device: string; kind: string; level: string; text: string }>
+  advice: string[]
+  limits: Record<string, number>
+  mock?: boolean
+}
+
+export type MaintainLevel = 'overdue' | 'due_soon' | 'ok' | 'unknown'
+export interface MaintainPlanRow {
+  device: string
+  kind: string
+  last_ts: string | null
+  operator: string | null
+  next_due: string | null
+  days_left: number | null
+  level: MaintainLevel
+  count: number
+  total_cost: number
+}
+export interface MaintainRecordRow {
+  id: number | null
+  device: string
+  kind: string
+  ts: string | null
+  operator: string | null
+  cost: number | null
+  next_due: string | null
+  note: string | null
+}
+export interface EquipmentMaintainResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: MaintainRecordRow[]
+  devices: MaintainPlanRow[]
+  counts: Record<string, number>
+  interval_d: number
+  due_soon_d: number
+  advice: string[]
+}
+
+export interface EnergyRow {
+  id: number | null
+  date: string | null
+  device: string
+  kind: string
+  reading: number | null
+  usage: number | null
+}
+export interface EquipmentEnergyResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: EnergyRow[]
+  items: Array<{ kind: string; amount: number; pct: number }>
+  total: number
+  revenue: number
+  ratio: number | null
+  budget: number
+  over_budget: boolean
+  mock: boolean
+  advice: string[]
+}
+
+export interface EquipmentOverviewResp {
+  ok: boolean
+  rev?: number | string | null
+  temps: { total: number; over: number; counts: Record<string, number> }
+  maintain: { counts: Record<string, number>; interval_d: number }
+  energy: { total: number; budget: number; ratio: number | null; over_budget: boolean; mock: boolean }
+  alerts: Array<{ level: string; text: string }>
+  advice: string[]
+}
+
+export interface EquipmentConfigResp {
+  ok: boolean
+  equipment: {
+    temps: Record<string, number>
+    warn_margin: number
+    over_alert_min: number
+    maintain_interval_d: number
+    maintain_due_soon_d: number
+    energy_budget: number
+  }
+  defaults?: Record<string, unknown>
+  rev?: number | string | null
+}
+
+export interface EquipmentEnqueueResp {
+  ok: boolean
+  action_id?: string
+  rev?: number | string | null
+  note?: string
+  error?: string
+  level?: string
+  over?: boolean
+}
+
+/* ---------------- 财务 M9 /api/finance/*（后场：GET 只读聚合 + POST 入队） ---------------- */
+
+export interface InvoiceRow {
+  id: number | null
+  invoice_no: string | null
+  kind: string
+  direction: string
+  amount: number
+  tax: number | null
+  status: string
+  ts: string | null
+}
+export interface FinanceInvoicesResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: InvoiceRow[]
+  count: number
+  by_direction: Record<string, number>
+  by_kind: Record<string, number>
+  month: string
+  issued_this_month: number
+  quota: number
+  remaining: number
+  usage_pct: number | null
+  advice: string[]
+}
+
+export interface TaxRow {
+  id: number | null
+  period: string
+  kind: string
+  amount: number
+  status: string
+  filed_at: string | null
+  filed: boolean
+  overdue: boolean
+  deadline: string | null
+  days_left: number | null
+}
+export interface FinanceTaxResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: TaxRow[]
+  pending: TaxRow[]
+  pending_count: number
+  payable: number
+  by_kind: Record<string, number>
+  counts: { filed: number; pending: number; overdue: number }
+  deadline_day: number
+  advice: string[]
+}
+
+export interface CashRow {
+  id: number | null
+  ts: string | null
+  kind: string
+  amount: number
+  account: string
+  note: string | null
+}
+export interface FinanceCashflowResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: CashRow[]
+  income: number
+  expense: number
+  net: number
+  by_account: Record<string, { income: number; expense: number }>
+  by_kind: Record<string, number>
+  advice: string[]
+}
+
+export interface SplitRow {
+  id: number | null
+  period: string | null
+  party: string
+  amount: number
+  ratio: number | null
+  frozen_until: string | null
+  status: string
+  frozen: boolean
+  days_left: number | null
+  can_release: boolean
+}
+export interface FinanceSplitResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: SplitRow[]
+  counts: { frozen: number; settled: number; releasable: number }
+  frozen_count: number
+  frozen_amount: number
+  frozen_until: string | null
+  releasable: Array<{ id: number | null; party: string; amount: number }>
+  advice: string[]
+}
+
+export interface FinanceOverviewResp {
+  ok: boolean
+  rev?: number | string | null
+  invoices: { count: number; issued_this_month: number; quota: number; remaining: number; usage_pct: number | null }
+  tax: { pending_count: number; payable: number; overdue: number }
+  cashflow: { income: number; expense: number; net: number }
+  split: { frozen_count: number; frozen_amount: number; releasable: number }
+  alerts: Array<{ level: string; text: string }>
+  advice: string[]
+}
+
+export interface FinanceConfigResp {
+  ok: boolean
+  finance: { invoice_quota_monthly: number; split_frozen_days: number; tax_deadline_day: number }
+  defaults?: Record<string, unknown>
+  rev?: number | string | null
+}
+
+export interface FinanceEnqueueResp {
+  ok: boolean
+  action_id?: string
+  rev?: number | string | null
+  note?: string
+  error?: string
+}
+
+/* ---------------- 供应链 M10 /api/supply/*（后场：GET 只读聚合 + POST 入队） ---------------- */
+
+export interface SupplyVendorRow {
+  id: string | number | null
+  name: string
+  category: string
+  status: string
+  period: string
+  level: number | null
+  contact: string | null
+  phone: string | null
+}
+export interface SupplyVendorsResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: SupplyVendorRow[]
+  count: number
+  by_category: Record<string, number>
+  by_status: Record<string, number>
+  by_period: Record<string, number>
+  low_rated: string[]
+  advice: string[]
+}
+
+export interface SupplyQuote {
+  ing: string
+  src: string
+  price: number
+  unit: string | null
+  date: string | null
+}
+export interface SupplyCompareRow {
+  name: string
+  candidates: number
+  best: { src: string; price: number }
+  worst: { src: string; price: number }
+  spread_pct: number | null
+  quotes: SupplyQuote[]
+}
+export interface SupplyCompareResp {
+  ok: boolean
+  rev?: number | string | null
+  available: number
+  rows: SupplyCompareRow[]
+  spread_top: SupplyCompareRow[]
+  warn_pct: number
+  advice: string[]
+}
+
+export interface SupplyAccountRow {
+  id: number | null
+  supplier: string
+  balance: number
+  kind: string
+  due: string | null
+  status: string
+}
+export interface SupplyAccountsResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: SupplyAccountRow[]
+  count: number
+  payable: number
+  aging: { current: number; over30: number; over60: number; overdue: number }
+  need_settle: number
+  overdue_list: Array<{ supplier: string; balance: number; due: string | null; status: string; bucket: string }>
+  over30_d: number
+  over60_d: number
+  advice: string[]
+}
+
+export interface SupplyOverviewResp {
+  ok: boolean
+  rev?: number | string | null
+  vendors: { count: number; by_category: Record<string, number>; low_rated: number }
+  compare: { available: number; top: { name: string; spread_pct: number | null; best: { src: string; price: number } } | null }
+  accounts: { count: number; payable: number; aging: { current: number; over30: number; over60: number; overdue: number }; need_settle: number }
+  alerts: Array<{ level: string; text: string }>
+  advice: string[]
+}
+
+export interface SupplyConfigResp {
+  ok: boolean
+  supply: { spread_warn_pct: number; aging_over30_d: number; aging_over60_d: number; low_level: number }
+  defaults?: Record<string, unknown>
+  rev?: number | string | null
+}
+
+export interface SupplyEnqueueResp {
+  ok: boolean
+  action_id?: string
+  rev?: number | string | null
+  note?: string
+  error?: string
+}
+
+/* ---------------- 损耗 M12 /api/loss/*（后场：GET 只读聚合 + POST 入队） ---------------- */
+
+export interface LossRecordRow {
+  id: number | null
+  date: string | null
+  name: string
+  qty: number
+  amount: number
+  reason: string
+}
+export interface LossRecordsResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: LossRecordRow[]
+  total_amount: number
+  total_qty: number
+  revenue: number
+  loss_rate_pct: number | null
+  by_reason_amount: Record<string, number>
+  by_reason_qty: Record<string, number>
+  top_ingredients: Array<{ name: string; amount: number }>
+  top_share_pct: number | null
+  warn_pct: number
+  redline_pct: number
+  advice: string[]
+}
+
+export interface LossReportRow {
+  id: number | null
+  date: string | null
+  ing_name: string
+  qty: number
+  amount: number | null
+  reason: string
+  reporter: string | null
+  status: string
+}
+export interface LossReportsResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: LossReportRow[]
+  counts: { pending: number; approved: number; rejected: number; big_pending: number }
+  big_amount: number
+  advice: string[]
+}
+
+export interface LossInventoryRow {
+  id: number | null
+  date: string | null
+  ing_name: string
+  book_qty: number | null
+  actual_qty: number | null
+  diff: number
+  note: string | null
+}
+export interface LossInventoryResp {
+  ok: boolean
+  rev?: number | string | null
+  rows: LossInventoryRow[]
+  diff_count: number
+  loss_qty: number
+  over_qty: number
+  advice: string[]
+}
+
+export interface LossOverviewResp {
+  ok: boolean
+  rev?: number | string | null
+  loss: { total_amount: number; loss_rate_pct: number | null; top_ingredient: { name: string; amount: number } | null; top_share_pct: number | null }
+  reports: { pending: number; approved: number; rejected: number; big_pending: number }
+  inventory: { diff_count: number; loss_qty: number; over_qty: number }
+  alerts: Array<{ level: string; text: string }>
+  advice: string[]
+}
+
+export interface LossConfigResp {
+  ok: boolean
+  loss: { loss_rate_warn: number; loss_rate_redline: number; big_amount: number; top_share_warn: number }
+  defaults?: Record<string, unknown>
+  rev?: number | string | null
+}
+
+export interface LossEnqueueResp {
+  ok: boolean
+  action_id?: string
+  rev?: number | string | null
+  note?: string
+  error?: string
 }
 
 /* 会员 GET /api/modules/vip */

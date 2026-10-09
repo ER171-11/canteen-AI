@@ -62,6 +62,7 @@ const ROUTES = [
   require('./routes/report'),
   require('./routes/inventory'),
   require('./routes/actions'),
+  require('./routes/sync'),
   require('./routes/agent'),
   require('./routes/inbox'),
   require('./routes/policies'),
@@ -70,6 +71,14 @@ const ROUTES = [
   require('./routes/admin'),
   require('./routes/kitchen'),
   require('./routes/modules'),
+  require('./routes/staff'),
+  require('./routes/foodsafe'),
+  require('./routes/equipment'),
+  require('./routes/finance'),
+  require('./routes/supply'),
+  require('./routes/loss'),
+  require('./routes/analysis'),
+  require('./routes/reserved'),
   // 结构测算「模拟态」只读推演（独立文件；零写库，见 ADR-007）
   require('./routes/analysis_sim'),
   require('./routes/app_release'),
@@ -270,7 +279,7 @@ server.listen(PORT, HOST, () => {
   console.log('[BFF] endpoints: GET / /health /api/health | POST /api/kimi/vision(/stream)'
     + ' | /api/auth/login /api/admin/login | /api/snapshot/push /api/snapshot/latest'
     + ' | /api/report/daily /api/report/briefing | /api/agent/chat(/stream) /api/inbox(/stream)'
-    + ' | /api/actions* | /api/admin/* | /api/app/release /api/app/download');
+    + ' | /api/actions* | /api/sync | /api/admin/* | /api/app/release /api/app/download');
   // 局域网可达地址：供手机扫码下载 App 安装包
   try {
     const ips = [];

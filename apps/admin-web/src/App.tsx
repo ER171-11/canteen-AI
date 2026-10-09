@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStore } from './store/auth'
 import { firstAccessiblePath } from './rbac/roles'
+import DemoSwitch from './components/DemoSwitch'
 import MainLayout from './layouts/MainLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
@@ -8,6 +9,11 @@ import ActionsPage from './pages/ActionsPage'
 import OrgPage from './pages/OrgPage'
 import ModuleBrowsePage from './pages/ModuleBrowsePage'
 import WeeklyReportPage from './pages/ops/WeeklyReportPage'
+import AnalysisTrendPage from './pages/ops/AnalysisTrendPage'
+import AnalysisHeatPage from './pages/ops/AnalysisHeatPage'
+import AnalysisMatrixPage from './pages/ops/AnalysisMatrixPage'
+import AnalysisEffPage from './pages/ops/AnalysisEffPage'
+import ReservedModulePage from './pages/ops/ReservedModulePage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import SystemConfigPage from './pages/SystemConfigPage'
 import AppReleasePage from './pages/AppReleasePage'
@@ -20,6 +26,7 @@ import StockPage from './pages/inventory/StockPage'
 import PurchasePage from './pages/inventory/PurchasePage'
 import InboundPage from './pages/inventory/InboundPage'
 import VendorsPage from './pages/inventory/VendorsPage'
+import LossPage from './pages/inventory/LossPage'
 import LedgerPage from './pages/inventory/LedgerPage'
 import RestockPage from './pages/inventory/RestockPage'
 import TablesPage from './pages/dinein/TablesPage'
@@ -27,9 +34,14 @@ import BookingPage from './pages/dinein/BookingPage'
 import SchedulePage from './pages/hr/SchedulePage'
 import AttendancePage from './pages/hr/AttendancePage'
 import PerformancePage from './pages/hr/PerformancePage'
+import TrainPage from './pages/hr/TrainPage'
 import LicensesPage from './pages/safety/LicensesPage'
 import TracePage from './pages/safety/TracePage'
+import SamplePage from './pages/safety/SamplePage'
+import DisinfectPage from './pages/safety/DisinfectPage'
+import DeviceEnergyPage from './pages/safety/DeviceEnergyPage'
 import InspectionBoardPage from './pages/safety/InspectionBoardPage'
+import FinancePage from './pages/finance/FinancePage'
 
 /** 路由守卫：未登录跳 /login */
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -61,6 +73,11 @@ export default function App() {
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="ops/analysis" element={<ModuleBrowsePage routeKey="ops/analysis" />} />
           <Route path="ops/weekly" element={<WeeklyReportPage />} />
+          <Route path="ops/an-trend" element={<AnalysisTrendPage />} />
+          <Route path="ops/an-heat" element={<AnalysisHeatPage />} />
+          <Route path="ops/an-mx" element={<AnalysisMatrixPage />} />
+          <Route path="ops/an-eff" element={<AnalysisEffPage />} />
+          <Route path="ops/reserved" element={<ReservedModulePage />} />
           <Route path="platform/actions" element={<ActionsPage />} />
           <Route path="platform/org" element={<OrgPage />} />
           <Route path="platform/system" element={<SystemConfigPage />} />
@@ -80,7 +97,7 @@ export default function App() {
           <Route path="inventory/ledger" element={<LedgerPage />} />
           <Route path="inventory/restock" element={<RestockPage />} />
           <Route path="inventory/vendors" element={<VendorsPage />} />
-          <Route path="inventory/loss" element={<ModuleBrowsePage routeKey="inventory/loss" />} />
+          <Route path="inventory/loss" element={<LossPage />} />
 
           {/* 堂食外卖 */}
           <Route path="dinein/tables" element={<TablesPage />} />
@@ -100,20 +117,22 @@ export default function App() {
           <Route path="hr/schedule" element={<SchedulePage />} />
           <Route path="hr/attendance" element={<AttendancePage />} />
           <Route path="hr/performance" element={<PerformancePage />} />
+          <Route path="hr/train" element={<TrainPage />} />
           <Route path="hr/health-cert" element={<ModuleBrowsePage routeKey="hr/health-cert" />} />
 
           {/* 食安设备 */}
           <Route path="safety/licenses" element={<LicensesPage />} />
           <Route path="safety/trace" element={<TracePage />} />
-          <Route path="safety/sample" element={<ModuleBrowsePage routeKey="safety/sample" />} />
-          <Route path="safety/devices" element={<ModuleBrowsePage routeKey="safety/devices" />} />
+          <Route path="safety/sample" element={<SamplePage />} />
+          <Route path="safety/disinfect" element={<DisinfectPage />} />
+          <Route path="safety/devices" element={<DeviceEnergyPage />} />
           <Route path="safety/inspection" element={<InspectionBoardPage />} />
 
           {/* 财务 */}
-          <Route path="finance/invoice" element={<ModuleBrowsePage routeKey="finance/invoice" />} />
-          <Route path="finance/tax" element={<ModuleBrowsePage routeKey="finance/tax" />} />
-          <Route path="finance/cashflow" element={<ModuleBrowsePage routeKey="finance/cashflow" />} />
-          <Route path="finance/split" element={<ModuleBrowsePage routeKey="finance/split" />} />
+          <Route path="finance/invoice" element={<FinancePage defaultTab="invoice" />} />
+          <Route path="finance/tax" element={<FinancePage defaultTab="tax" />} />
+          <Route path="finance/cashflow" element={<FinancePage defaultTab="cashflow" />} />
+          <Route path="finance/split" element={<FinancePage defaultTab="split" />} />
 
           {/* 平台 */}
           <Route path="platform/ai-audit" element={<ModuleBrowsePage routeKey="platform/ai-audit" />} />
@@ -123,6 +142,8 @@ export default function App() {
           <Route path="*" element={<PlaceholderPage title="" />} />
         </Route>
       </Routes>
+      {/* 过渡期临时工具：运行时演示数据开关（淘汰完成后移除） */}
+      <DemoSwitch />
     </BrowserRouter>
   )
 }

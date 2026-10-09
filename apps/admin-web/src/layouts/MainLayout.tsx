@@ -78,7 +78,12 @@ export default function MainLayout() {
         key: group.key,
         icon: group.icon,
         label: group.label,
-        children: children.map((leaf) => ({ key: leaf.path, label: leaf.title })),
+        children: children.map((leaf) => ({
+          key: leaf.path,
+          label: leaf.reserved
+            ? <span>{leaf.title}<Tag color="orange" style={{ marginInlineStart: 4 }}>接口预留</Tag></span>
+            : leaf.title,
+        })),
       }
     }).filter(Boolean) as MenuProps['items']
   }, [role])

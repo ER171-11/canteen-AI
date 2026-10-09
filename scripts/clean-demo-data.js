@@ -2,7 +2,8 @@
 /*
  * scripts/clean-demo-data.js — 清理真实门店库中的非正式/测试数据（保守规则）
  *
- * 用法：node scripts/clean-demo-data.js [--db PATH] [--dry]
+ * 用法：node scripts/clean-demo-data.js [--db PATH] [--dry] [--purge-source]
+ *   --purge-source  按来源标记整体删除演示行（source/src='demo_proto'），ADR-001 收口用
  *  1) 删除明显测试行（测试菜谱、E2E 券、测试客、smoke 记录、联调审计、E2E 动作）
  *  2) 归一化来源标记：demo_proto → init；操作人 e2e → 店长/后厨
  *  3) 清理 docs 主数据 JSON 中的测试菜/测试料/联调单据，并自增 rev
@@ -12,10 +13,11 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 
 function parseArgs(argv) {
-  const out = { db: path.join(__dirname, '..', 'store-inventory', 'data', '餐厅系统.db'), dry: false };
+  const out = { db: path.join(__dirname, '..', 'store-inventory', 'data', '餐厅系统.db'), dry: false, purgeSource: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--db') out.db = argv[++i];
     else if (argv[i] === '--dry') out.dry = true;
+    else if (argv[i] === '--purge-source') out.purgeSource = true;
   }
   return out;
 }
@@ -23,7 +25,7 @@ function parseArgs(argv) {
 const TESTISH = /demo_proto|E2E|e2e|smoke|联调|测试|批2|示例|占位/;
 
 function main() {
-  const { db: dbPath, dry } = parseArgs(process.argv.slice(2));
+  const { db: dbPath, dry, purgeSource } = parseArgs(process.argv.slice(2));
   const db = new DatabaseSync(dbPath);
   const counts = {};
 
@@ -39,8 +41,26 @@ function main() {
       if (r.changes) counts['改.' + table] = (counts['改.' + table] || 0) + Number(r.changes);
     } catch (e) { counts['ERR.' + table] = e.message; }
   };
+  const hasColumn = (table, col) => {
+    try {
+      return db.prepare('PRAGMA table_info("' + table + '")').all().some((c) => c.name === col);
+    } catch (e) { return false; }
+  };
 
   db.exec('BEGIN');
+
+  // 0) 按来源标记整体清除演示行（ADR-001 收口）：--purge-source
+  if (purgeSource) {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+    for (const t of tables) {
+      let cols;
+      try { cols = db.prepare('PRAGMA table_info("' + t + '")').all().map((c) => c.name); } catch (e) { continue; }
+      for (const col of ['source', 'src']) {
+        if (cols.indexOf(col) >= 0) del(t, '"' + col + '"' + "='demo_proto'");
+      }
+    }
+  }
+
   // 1) 删除明显测试行
   del('recipes', "sku_id='SKU-APP-D9679BA1' OR name LIKE '%测试%'");
   del('actions_queue', "payload LIKE '%E2E%' OR payload LIKE '%测试%' OR payload LIKE '%smoke%' OR payload LIKE '%联调%'");
@@ -54,6 +74,7 @@ function main() {
   // 2) 归一化来源与操作人
   for (const t of ['staff_shifts', 'staff_clock', 'staff_perf', 'staff_train',
     'fs_certs', 'fs_trace', 'fs_samples', 'fs_disinfect', 'eq_maintain', 'queue', 'bookings']) {
+    if (!hasColumn(t, 'source')) continue; // 无 source 列的表跳过（如 eq_maintain）
     upd(t, "source='init'", "source='demo_proto'");
   }
   upd('fs_disinfect', "operator='店长'", "operator='e2e'");

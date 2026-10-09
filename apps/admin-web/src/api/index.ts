@@ -11,8 +11,40 @@ import type {
   BookingResp,
   CalcQMode,
   CalcSimRowOverride,
+  CertConfigResp,
+  CertThresholds,
   Dish,
+  DisinfectResp,
+  EquipmentEnergyResp,
+  EquipmentEnqueueResp,
+  EquipmentConfigResp,
+  EquipmentMaintainResp,
+  EquipmentOverviewResp,
+  EquipmentTempsResp,
+  FinanceCashflowResp,
+  FinanceConfigResp,
+  FinanceEnqueueResp,
+  FinanceInvoicesResp,
+  FinanceOverviewResp,
+  FinanceSplitResp,
+  FinanceTaxResp,
+  FoodsafeCertsResp,
+  LossConfigResp,
+  LossEnqueueResp,
+  LossInventoryResp,
+  LossOverviewResp,
+  LossRecordsResp,
+  LossReportsResp,
+  SupplyAccountsResp,
+  SupplyCompareResp,
+  SupplyConfigResp,
+  SupplyEnqueueResp,
+  SupplyOverviewResp,
+  SupplyVendorsResp,
+  FoodsafeEnqueueResp,
+  FoodsafeOverviewResp,
   FoodsafeResp,
+  FoodsafeSamplesResp,
   Health,
   KitchenBoardResp,
   ListResp,
@@ -31,6 +63,12 @@ import type {
   SettleTemplateResp,
   Snapshot,
   StaffModuleResp,
+  StaffScheduleResp,
+  StaffClockResp,
+  StaffPerfResp,
+  StaffTrainResp,
+  SwapResp,
+  TraceResp,
   WorkorderResp,
   OrgOverview,
   OrgUser,
@@ -174,6 +212,114 @@ export interface AnalysisSimParams {
 export async function simulateAnalysis(body: AnalysisSimParams): Promise<AnalysisSimResp> {
   const { data } = await client.post<AnalysisSimResp>('/modules/analysis/sim', body)
   return data
+}
+
+/* ------------------------------------------------------------------ */
+/* docx M1 经营分析只读端点（/api/analysis/*，零写库）                 */
+/* ------------------------------------------------------------------ */
+export interface AnalysisTrendPoint {
+  date: string
+  revenue: number
+  orders: number
+}
+export interface AnalysisHeatPoint {
+  hour: number
+  weekday: number
+  orders: number
+  revenue: number
+}
+export interface AnalysisMatrixRow {
+  id: string | null
+  dish_id: string | null
+  name: string
+  price: number | null
+  volume: number
+  margin: number
+  quadrant: string
+  dish_type: string | null
+}
+export interface AnalysisEfficiency {
+  avg_ticket: number
+  daily_avg_revenue: number
+  total_orders: number
+  days: number
+  peak_hour: number | null
+  peak_weekday: number | null
+  turnover: number | null
+  revenue_per_sqm: number | null
+  revenue_per_staff: number | null
+  area: number | null
+  staff: number | null
+  seats: number | null
+  tables: number | null
+}
+export interface AnalysisWeather {
+  date: string
+  city: string
+  temp: number | null
+  desc: string | null
+  ttl_hours: number
+  sample: boolean
+  cached_at?: string
+}
+export interface AnalysisSuggestion {
+  title: string
+  content: string
+  priority: string
+}
+export interface AnalysisSuggestionsResp {
+  suggestions: AnalysisSuggestion[]
+  weather_conclusion: string
+  sample_weeks: number
+  ai_generated: boolean
+  note?: string
+}
+
+// 后端通用响应 {code,data,rev,msg} → 取 data
+function unwrap<T>(resp: { code?: number; data?: T; rev?: number | string; msg?: string } | undefined): T | null {
+  if (!resp) return null
+  if (resp.data !== undefined) return resp.data
+  return resp as unknown as T
+}
+
+/** GET /api/analysis/trend?start_date=&end_date= */
+export async function fetchAnalysisTrend(start?: string, end?: string): Promise<AnalysisTrendPoint[]> {
+  const { data } = await client.get('/analysis/trend', {
+    params: start || end ? { start_date: start, end_date: end } : undefined,
+  })
+  return unwrap<AnalysisTrendPoint[]>(data) ?? []
+}
+
+/** GET /api/analysis/heat?date= */
+export async function fetchAnalysisHeat(date?: string): Promise<AnalysisHeatPoint[]> {
+  const { data } = await client.get('/analysis/heat', { params: date ? { date } : undefined })
+  return unwrap<AnalysisHeatPoint[]>(data) ?? []
+}
+
+/** GET /api/analysis/matrix?date= */
+export async function fetchAnalysisMatrix(date?: string): Promise<AnalysisMatrixRow[]> {
+  const { data } = await client.get('/analysis/matrix', { params: date ? { date } : undefined })
+  return unwrap<AnalysisMatrixRow[]>(data) ?? []
+}
+
+/** GET /api/analysis/efficiency?date= */
+export async function fetchAnalysisEfficiency(date?: string): Promise<AnalysisEfficiency | null> {
+  const { data } = await client.get('/analysis/efficiency', { params: date ? { date } : undefined })
+  return unwrap<AnalysisEfficiency>(data) ?? null
+}
+
+/** GET /api/analysis/weather?date=&city= */
+export async function fetchAnalysisWeather(date?: string, city?: string): Promise<AnalysisWeather | null> {
+  const { data } = await client.get('/analysis/weather', {
+    params: date || city ? { date, city } : undefined,
+  })
+  return unwrap<AnalysisWeather>(data) ?? null
+}
+
+/** POST /api/analysis/ai-suggestions */
+export async function postAnalysisSuggestions(): Promise<AnalysisSuggestionsResp | null> {
+  const { data } = await client.post('/analysis/ai-suggestions', {})
+  return unwrap<AnalysisSuggestionsResp>(data) ?? null
 }
 
 /** 服务端补货建议项（GET /api/inventory/restock-suggest） */
@@ -373,6 +519,104 @@ export async function fetchModulesStaff(): Promise<StaffModuleResp> {
   return data
 }
 
+/* ---------------- M2 排班员工：/api/staff/*（后端聚合 ext.staff_*，只读） ---------------- */
+
+/** GET /api/staff/schedule?week=YYYY-MM-DD */
+export async function fetchStaffSchedule(week?: string): Promise<StaffScheduleResp> {
+  const { data } = await client.get<StaffScheduleResp>('/staff/schedule', {
+    params: week ? { week } : undefined,
+  })
+  return data
+}
+
+/** GET /api/staff/clock?date=YYYY-MM-DD */
+export async function fetchStaffClock(date?: string): Promise<StaffClockResp> {
+  const { data } = await client.get<StaffClockResp>('/staff/clock', {
+    params: date ? { date } : undefined,
+  })
+  return data
+}
+
+/** GET /api/staff/perf */
+export async function fetchStaffPerf(): Promise<StaffPerfResp> {
+  const { data } = await client.get<StaffPerfResp>('/staff/perf')
+  return data
+}
+
+/** GET /api/staff/train */
+export async function fetchStaffTrain(): Promise<StaffTrainResp> {
+  const { data } = await client.get<StaffTrainResp>('/staff/train')
+  return data
+}
+
+/** GET /api/staff/config — 迟到/缺勤阈值（生效值） */
+export async function fetchStaffConfig(): Promise<{
+  ok: boolean
+  attendance: { late_min: number; absent_min: number }
+}> {
+  const { data } = await client.get('/staff/config')
+  return data
+}
+
+/** POST /api/staff/config — 阈值可配 */
+export async function saveStaffConfig(attendance: {
+  late_min: number
+  absent_min: number
+}): Promise<{ ok: boolean; attendance: { late_min: number; absent_min: number } }> {
+  const { data } = await client.post('/staff/config', { attendance })
+  return data
+}
+
+/** GET /api/staff/swaps?status= */
+export async function fetchStaffSwaps(status?: string): Promise<SwapResp> {
+  const { data } = await client.get<SwapResp>('/staff/swaps', {
+    params: status ? { status } : undefined,
+  })
+  return data
+}
+
+/** POST /api/staff/swaps/request — A 发起换班 */
+export async function requestShiftSwap(body: {
+  date: string
+  shift: string
+  from_staff: string
+  from_name?: string
+  to_staff: string
+  to_name?: string
+  start_time?: string
+  end_time?: string
+  role?: string
+  reason?: string
+}): Promise<SwapResp> {
+  const { data } = await client.post<SwapResp>('/staff/swaps/request', body)
+  return data
+}
+
+/** 换班单动作：accept / reject / approve（均带 rev，后端做乐观锁） */
+export async function actShiftSwap(
+  id: string,
+  action: 'accept' | 'reject' | 'approve',
+  body: { rev?: string | number; reason?: string } = {},
+): Promise<SwapResp> {
+  const { data } = await client.post<SwapResp>(
+    `/staff/swaps/${encodeURIComponent(id)}/${action}`,
+    body,
+  )
+  return data
+}
+
+/** POST /api/staff/uniform — 着装合规入档（uniform.log 入队） */
+export async function postStaffUniform(body: {
+  staff_id: string
+  staff_name?: string
+  pass?: string | boolean
+  score?: number
+  note?: string
+}): Promise<{ ok: boolean; data?: { id: string; status: string }; note?: string }> {
+  const { data } = await client.post('/staff/uniform', body)
+  return data
+}
+
 /** GET /api/modules/booking?date= */
 export async function fetchBooking(date: string): Promise<BookingResp> {
   const { data } = await client.get<BookingResp>('/modules/booking', {
@@ -384,6 +628,121 @@ export async function fetchBooking(date: string): Promise<BookingResp> {
 /** GET /api/modules/foodsafe */
 export async function fetchFoodsafe(): Promise<FoodsafeResp> {
   const { data } = await client.get<FoodsafeResp>('/modules/foodsafe')
+  return data
+}
+
+/* ---------------- 食安证照 v2（M4 后场：GET 只读聚合 + POST 入队） ---------------- */
+
+/** GET /api/foodsafe/certs?level= — 证照台账（分级/禁岗/停业风险） */
+export async function fetchFoodsafeCerts(
+  params: { level?: string } = {},
+): Promise<FoodsafeCertsResp> {
+  const { data } = await client.get<FoodsafeCertsResp>('/foodsafe/certs', { params })
+  return data
+}
+
+/** GET /api/foodsafe/trace?batch= — 溯源批次；带 batch 下钻进货/销售 */
+export async function fetchFoodsafeTrace(
+  params: { batch?: string } = {},
+): Promise<TraceResp> {
+  const { data } = await client.get<TraceResp>('/foodsafe/trace', { params })
+  return data
+}
+
+/** GET /api/foodsafe/samples — 留样 48h 状态机 + 克重合规 */
+export async function fetchFoodsafeSamples(): Promise<FoodsafeSamplesResp> {
+  const { data } = await client.get<FoodsafeSamplesResp>('/foodsafe/samples')
+  return data
+}
+
+/** GET /api/foodsafe/disinfect?date=&span= — 消毒记录 + 7 日达标率 */
+export async function fetchFoodsafeDisinfect(params: { date?: string; span?: number } = {}): Promise<DisinfectResp> {
+  const { data } = await client.get<DisinfectResp>('/foodsafe/disinfect', { params })
+  return data
+}
+
+/** GET /api/foodsafe/overview — 食安看板汇总 */
+export async function fetchFoodsafeOverview(): Promise<FoodsafeOverviewResp> {
+  const { data } = await client.get<FoodsafeOverviewResp>('/foodsafe/overview')
+  return data
+}
+
+/** GET /api/foodsafe/config — 证照临期阈值（可配） */
+export async function fetchFoodsafeConfig(): Promise<CertConfigResp> {
+  const { data } = await client.get<CertConfigResp>('/foodsafe/config')
+  return data
+}
+
+/** POST /api/foodsafe/config — 保存临期阈值（需 逾期禁营 ≤ 红 ≤ 橙 ≤ 黄） */
+export async function saveFoodsafeConfig(
+  cert: Partial<CertThresholds>,
+): Promise<CertConfigResp> {
+  const { data } = await client.post<CertConfigResp>('/foodsafe/config', { cert })
+  return data
+}
+
+/** POST /api/foodsafe/certs — 证照登记/续期 → fs.cert.upsert 入队 */
+export async function upsertFoodsafeCert(body: {
+  id?: string | number
+  cert_type: string
+  holder: string
+  cert_no?: string
+  issued_at?: string
+  expire_at: string
+  status?: string
+}): Promise<FoodsafeEnqueueResp> {
+  const { data } = await client.post<FoodsafeEnqueueResp>('/foodsafe/certs', body)
+  return data
+}
+
+/** POST /api/foodsafe/samples — 留样登记（克重不足 422 拦截）→ sample.log 入队 */
+export async function logFoodsafeSample(body: {
+  date?: string
+  meal?: string
+  dish: string
+  weight_g: number
+  keeper?: string
+  kept_at?: string
+}): Promise<FoodsafeEnqueueResp> {
+  const { data } = await client.post<FoodsafeEnqueueResp>('/foodsafe/samples', body)
+  return data
+}
+
+/** POST /api/foodsafe/samples/ingest — Kimi 识别入档（≥91% 自动入档 / <91% 待复核） */
+export async function ingestFoodsafeSample(body: {
+  date?: string
+  meal?: string
+  dish: string
+  weight_g: number
+  conf: number
+  keeper?: string
+  source?: string
+}): Promise<FoodsafeEnqueueResp> {
+  const { data } = await client.post<FoodsafeEnqueueResp>('/foodsafe/samples/ingest', body)
+  return data
+}
+
+/** POST /api/foodsafe/samples/clear — 销毁登记 → fs.sample_clear 入队 */
+export async function clearFoodsafeSample(body: {
+  id: string | number
+  dish?: string
+  cleared_at?: string
+  note?: string
+}): Promise<FoodsafeEnqueueResp> {
+  const { data } = await client.post<FoodsafeEnqueueResp>('/foodsafe/samples/clear', body)
+  return data
+}
+
+/** POST /api/foodsafe/disinfect — 消毒登记 → fs.disinfect 入队 */
+export async function logFoodsafeDisinfect(body: {
+  date?: string
+  area: string
+  method?: string
+  operator?: string
+  ts?: string
+  result?: string
+}): Promise<FoodsafeEnqueueResp> {
+  const { data } = await client.post<FoodsafeEnqueueResp>('/foodsafe/disinfect', body)
   return data
 }
 
@@ -409,5 +768,344 @@ export async function fetchSettleTemplate(): Promise<SettleTemplateResp> {
  */
 export async function saveSettleTemplate(tpl: SettleTemplate): Promise<SettleTemplateResp> {
   const { data } = await client.put<SettleTemplateResp>('/settle/template', { template: tpl })
+  return data
+}
+
+/* ---------------- 设备温度/维保/能耗 v2（M8 后场：GET 只读聚合 + POST 入队） ---------------- */
+
+/** GET /api/equipment/temps — 冷柜温度台账（分级/超温告警） */
+export async function fetchEquipmentTemps(): Promise<EquipmentTempsResp> {
+  const { data } = await client.get<EquipmentTempsResp>('/equipment/temps')
+  return data
+}
+
+/** GET /api/equipment/maintain — 维保记录 + 计划（逾期/临期） */
+export async function fetchEquipmentMaintain(): Promise<EquipmentMaintainResp> {
+  const { data } = await client.get<EquipmentMaintainResp>('/equipment/maintain')
+  return data
+}
+
+/** GET /api/equipment/energy — 能耗汇总（燃气/水/电 + 营收占比 + 预算） */
+export async function fetchEquipmentEnergy(): Promise<EquipmentEnergyResp> {
+  const { data } = await client.get<EquipmentEnergyResp>('/equipment/energy')
+  return data
+}
+
+/** GET /api/equipment/overview — 设备看板汇总 */
+export async function fetchEquipmentOverview(): Promise<EquipmentOverviewResp> {
+  const { data } = await client.get<EquipmentOverviewResp>('/equipment/overview')
+  return data
+}
+
+/** GET /api/equipment/config — 温度上限/维保周期/能耗预算（可配） */
+export async function fetchEquipmentConfig(): Promise<EquipmentConfigResp> {
+  const { data } = await client.get<EquipmentConfigResp>('/equipment/config')
+  return data
+}
+
+/** POST /api/equipment/config — 保存设备配置 */
+export async function saveEquipmentConfig(
+  equipment: Partial<EquipmentConfigResp['equipment']>,
+): Promise<EquipmentConfigResp> {
+  const { data } = await client.post<EquipmentConfigResp>('/equipment/config', { equipment })
+  return data
+}
+
+/** POST /api/equipment/maintain — 维保登记 → equipment.maintain 入队 */
+export async function logEquipmentMaintain(body: {
+  device: string
+  kind?: string
+  ts?: string
+  cost?: number
+  next_due?: string
+  note?: string
+}): Promise<EquipmentEnqueueResp> {
+  const { data } = await client.post<EquipmentEnqueueResp>('/equipment/maintain', body)
+  return data
+}
+
+/** POST /api/equipment/temp — 温度登记 → equipment.temp_log 入队（高频表，不进 rev） */
+export async function logEquipmentTemp(body: {
+  device: string
+  temp: number
+  ts?: string
+}): Promise<EquipmentEnqueueResp> {
+  const { data } = await client.post<EquipmentEnqueueResp>('/equipment/temp', body)
+  return data
+}
+
+/** POST /api/equipment/energy — 能耗抄表 → equipment.energy_log 入队 */
+export async function logEquipmentEnergy(body: {
+  date?: string
+  device: string
+  kind: string
+  reading?: number
+  usage?: number
+}): Promise<EquipmentEnqueueResp> {
+  const { data } = await client.post<EquipmentEnqueueResp>('/equipment/energy', body)
+  return data
+}
+
+/* ---------------- 财务 v2（M9 后场：GET 只读聚合 + POST 入队） ---------------- */
+
+/** GET /api/finance/invoices — 发票台账 + 月度销项额度 */
+export async function fetchFinanceInvoices(): Promise<FinanceInvoicesResp> {
+  const { data } = await client.get<FinanceInvoicesResp>('/finance/invoices')
+  return data
+}
+
+/** GET /api/finance/tax — 税务申报（待申报/逾期） */
+export async function fetchFinanceTax(): Promise<FinanceTaxResp> {
+  const { data } = await client.get<FinanceTaxResp>('/finance/tax')
+  return data
+}
+
+/** GET /api/finance/cashflow — 现金流水（收入/支出/净额） */
+export async function fetchFinanceCashflow(): Promise<FinanceCashflowResp> {
+  const { data } = await client.get<FinanceCashflowResp>('/finance/cashflow')
+  return data
+}
+
+/** GET /api/finance/split — 分账（冻结红线/可解冻） */
+export async function fetchFinanceSplit(): Promise<FinanceSplitResp> {
+  const { data } = await client.get<FinanceSplitResp>('/finance/split')
+  return data
+}
+
+/** GET /api/finance/overview — 财务看板汇总 */
+export async function fetchFinanceOverview(): Promise<FinanceOverviewResp> {
+  const { data } = await client.get<FinanceOverviewResp>('/finance/overview')
+  return data
+}
+
+/** GET /api/finance/config — 发票额度/冻结期/申报日（可配） */
+export async function fetchFinanceConfig(): Promise<FinanceConfigResp> {
+  const { data } = await client.get<FinanceConfigResp>('/finance/config')
+  return data
+}
+
+/** POST /api/finance/config — 保存财务配置 */
+export async function saveFinanceConfig(
+  finance: Partial<FinanceConfigResp['finance']>,
+): Promise<FinanceConfigResp> {
+  const { data } = await client.post<FinanceConfigResp>('/finance/config', { finance })
+  return data
+}
+
+/** POST /api/finance/invoice — 开票登记 → finance.invoice 入队 */
+export async function logFinanceInvoice(body: {
+  invoice_no?: string
+  kind?: string
+  direction?: string
+  amount: number
+  tax?: number
+  ts?: string
+}): Promise<FinanceEnqueueResp> {
+  const { data } = await client.post<FinanceEnqueueResp>('/finance/invoice', body)
+  return data
+}
+
+/** POST /api/finance/tax — 税务申报登记 → finance.tax 入队 */
+export async function logFinanceTax(body: {
+  period?: string
+  kind: string
+  amount: number
+  status?: string
+  filed_at?: string
+}): Promise<FinanceEnqueueResp> {
+  const { data } = await client.post<FinanceEnqueueResp>('/finance/tax', body)
+  return data
+}
+
+/** POST /api/finance/cash — 现金流水登记 → finance.cash 入队 */
+export async function logFinanceCash(body: {
+  ts?: string
+  kind: string
+  amount: number
+  account?: string
+  note?: string
+}): Promise<FinanceEnqueueResp> {
+  const { data } = await client.post<FinanceEnqueueResp>('/finance/cash', body)
+  return data
+}
+
+/** POST /api/finance/split — 分账冻结登记 → finance.freeze 入队 */
+export async function freezeFinanceSplit(body: {
+  period?: string
+  party: string
+  amount: number
+  ratio?: number
+  frozen_until?: string
+}): Promise<FinanceEnqueueResp> {
+  const { data } = await client.post<FinanceEnqueueResp>('/finance/split', body)
+  return data
+}
+
+/** POST /api/finance/split/approve — 分账解冻/结算 → finance.approve 入队 */
+export async function approveFinanceSplit(body: {
+  id: number | string
+  party?: string
+  amount?: number
+  status?: string
+}): Promise<FinanceEnqueueResp> {
+  const { data } = await client.post<FinanceEnqueueResp>('/finance/split/approve', body)
+  return data
+}
+
+/** POST /api/finance/recon — 三方勾兑确认 → finance.recon 入队 */
+export async function reconFinance(body: {
+  date?: string
+  dine_in?: number
+  takeout?: number
+  purchase?: number
+  note?: string
+}): Promise<FinanceEnqueueResp> {
+  const { data } = await client.post<FinanceEnqueueResp>('/finance/recon', body)
+  return data
+}
+
+/* ---------------- 供应链 v2（M10 后场：GET 只读聚合 + POST 入队） ---------------- */
+
+/** GET /api/supply/vendors — 供应商档案（品类/状态/账期/评级） */
+export async function fetchSupplyVendors(): Promise<SupplyVendorsResp> {
+  const { data } = await client.get<SupplyVendorsResp>('/supply/vendors')
+  return data
+}
+
+/** GET /api/supply/compare — 比价（同原料多供应商 + 价差） */
+export async function fetchSupplyCompare(): Promise<SupplyCompareResp> {
+  const { data } = await client.get<SupplyCompareResp>('/supply/compare')
+  return data
+}
+
+/** GET /api/supply/accounts — 往来账龄（0-30/31-60/>60/逾期） */
+export async function fetchSupplyAccounts(): Promise<SupplyAccountsResp> {
+  const { data } = await client.get<SupplyAccountsResp>('/supply/accounts')
+  return data
+}
+
+/** GET /api/supply/overview — 供应链看板汇总 */
+export async function fetchSupplyOverview(): Promise<SupplyOverviewResp> {
+  const { data } = await client.get<SupplyOverviewResp>('/supply/overview')
+  return data
+}
+
+/** GET /api/supply/config — 价差阈值/账龄分档/低评级线（可配） */
+export async function fetchSupplyConfig(): Promise<SupplyConfigResp> {
+  const { data } = await client.get<SupplyConfigResp>('/supply/config')
+  return data
+}
+
+/** POST /api/supply/config — 保存供应链配置 */
+export async function saveSupplyConfig(
+  supply: Partial<SupplyConfigResp['supply']>,
+): Promise<SupplyConfigResp> {
+  const { data } = await client.post<SupplyConfigResp>('/supply/config', { supply })
+  return data
+}
+
+/** POST /api/supply/vendor — 供应商档案 upsert → vendor.upsert 入队 */
+export async function upsertSupplyVendor(body: {
+  name?: string
+  vendor_id?: string
+  contact?: string
+  phone?: string
+  category?: string
+  level?: number
+  status?: string
+  period?: string
+  note?: string
+}): Promise<SupplyEnqueueResp> {
+  const { data } = await client.post<SupplyEnqueueResp>('/supply/vendor', body)
+  return data
+}
+
+/** POST /api/supply/quote — 供应商报价 → quote.upsert 入队 */
+export async function logSupplyQuote(body: {
+  ing: string
+  src: string
+  price: number
+  per?: string
+  unit?: string
+  note?: string
+  set_default_sup?: boolean
+}): Promise<SupplyEnqueueResp> {
+  const { data } = await client.post<SupplyEnqueueResp>('/supply/quote', body)
+  return data
+}
+
+/** POST /api/supply/po — 采购应付登记 → supply.po 入队 */
+export async function logSupplyPo(body: {
+  vendor_id: string
+  amount: number
+  ref_no?: string
+  ts?: string
+}): Promise<SupplyEnqueueResp> {
+  const { data } = await client.post<SupplyEnqueueResp>('/supply/po', body)
+  return data
+}
+
+/* ---------------- 损耗 v2（M12 后场：GET 只读聚合 + POST 入队） ---------------- */
+
+/** GET /api/loss/records — 损耗流水归因（损耗率/原因/原料） */
+export async function fetchLossRecords(): Promise<LossRecordsResp> {
+  const { data } = await client.get<LossRecordsResp>('/loss/records')
+  return data
+}
+
+/** GET /api/loss/reports — 报损单（待审批/大额） */
+export async function fetchLossReports(): Promise<LossReportsResp> {
+  const { data } = await client.get<LossReportsResp>('/loss/reports')
+  return data
+}
+
+/** GET /api/loss/inventory — 盘点差异（盘亏/盘盈） */
+export async function fetchLossInventory(): Promise<LossInventoryResp> {
+  const { data } = await client.get<LossInventoryResp>('/loss/inventory')
+  return data
+}
+
+/** GET /api/loss/overview — 损耗看板汇总 */
+export async function fetchLossOverview(): Promise<LossOverviewResp> {
+  const { data } = await client.get<LossOverviewResp>('/loss/overview')
+  return data
+}
+
+/** GET /api/loss/config — 损耗率红线/大额阈值（可配） */
+export async function fetchLossConfig(): Promise<LossConfigResp> {
+  const { data } = await client.get<LossConfigResp>('/loss/config')
+  return data
+}
+
+/** POST /api/loss/config — 保存损耗配置 */
+export async function saveLossConfig(
+  loss: Partial<LossConfigResp['loss']>,
+): Promise<LossConfigResp> {
+  const { data } = await client.post<LossConfigResp>('/loss/config', { loss })
+  return data
+}
+
+/** POST /api/loss/report — 报损登记（待审核）→ loss.report 入队 */
+export async function logLossReport(body: {
+  date?: string
+  ing_name: string
+  qty: number
+  reason?: string
+  reporter?: string
+  amount?: number
+}): Promise<LossEnqueueResp> {
+  const { data } = await client.post<LossEnqueueResp>('/loss/report', body)
+  return data
+}
+
+/** POST /api/loss/approve — 报损审批（扣库存）→ loss.approve 入队 */
+export async function approveLossReport(body: { id: number | string }): Promise<LossEnqueueResp> {
+  const { data } = await client.post<LossEnqueueResp>('/loss/approve', body)
+  return data
+}
+
+/** POST /api/loss/reject — 报损驳回（不扣库存）→ loss.reject 入队 */
+export async function rejectLossReport(body: { id: number | string; reason?: string }): Promise<LossEnqueueResp> {
+  const { data } = await client.post<LossEnqueueResp>('/loss/reject', body)
   return data
 }

@@ -14,6 +14,8 @@ import {
 export interface MenuLeaf {
   path: string
   title: string
+  /** 前厅接口预留：与美团深度合作，相关模块暂缓开发、仅预留切换接口 */
+  reserved?: boolean
 }
 
 export interface MenuGroup {
@@ -35,7 +37,12 @@ export const MENU: MenuGroup[] = [
     children: [
       { path: '/dashboard', title: '经营看板' },
       { path: '/ops/analysis', title: '经营分析' },
+      { path: '/ops/an-trend', title: '趋势分析' },
+      { path: '/ops/an-heat', title: '时段热力' },
+      { path: '/ops/an-mx', title: '波士顿矩阵' },
+      { path: '/ops/an-eff', title: '效率仪表盘' },
       { path: '/ops/weekly', title: '经营周报' },
+      { path: '/ops/reserved', title: '接口预留总览', reserved: true },
     ],
   },
   {
@@ -69,11 +76,11 @@ export const MENU: MenuGroup[] = [
     label: '堂食外卖',
     icon: <ShoppingOutlined />,
     children: [
-      { path: '/dinein/tables', title: '桌台管理' },
-      { path: '/dinein/booking', title: '预订排队' },
-      { path: '/dinein/orders', title: '外卖订单' },
-      { path: '/dinein/delivery', title: '外卖对账' },
-      { path: '/dinein/reviews', title: '差评管理' },
+      { path: '/dinein/tables', title: '桌台管理', reserved: true },
+      { path: '/dinein/booking', title: '预订排队', reserved: true },
+      { path: '/dinein/orders', title: '外卖订单', reserved: true },
+      { path: '/dinein/delivery', title: '外卖对账', reserved: true },
+      { path: '/dinein/reviews', title: '差评管理', reserved: true },
     ],
   },
   {
@@ -81,10 +88,10 @@ export const MENU: MenuGroup[] = [
     label: '会员营销',
     icon: <GiftOutlined />,
     children: [
-      { path: '/member/list', title: '会员列表' },
-      { path: '/member/stored', title: '储值余额' },
-      { path: '/member/coupons', title: '优惠券' },
-      { path: '/member/birthday', title: '生日营销' },
+      { path: '/member/list', title: '会员列表', reserved: true },
+      { path: '/member/stored', title: '储值余额', reserved: true },
+      { path: '/member/coupons', title: '优惠券', reserved: true },
+      { path: '/member/birthday', title: '生日营销', reserved: true },
     ],
   },
   {
@@ -96,6 +103,7 @@ export const MENU: MenuGroup[] = [
       { path: '/hr/schedule', title: '排班登记' },
       { path: '/hr/attendance', title: '打卡补录' },
       { path: '/hr/performance', title: '绩效人效' },
+      { path: '/hr/train', title: '培训考核' },
       { path: '/hr/health-cert', title: '健康证' },
     ],
   },
@@ -106,7 +114,8 @@ export const MENU: MenuGroup[] = [
     children: [
       { path: '/safety/licenses', title: '证照合规' },
       { path: '/safety/trace', title: '溯源批次' },
-      { path: '/safety/sample', title: '留样消毒' },
+      { path: '/safety/sample', title: '留样登记' },
+      { path: '/safety/disinfect', title: '消毒记录' },
       { path: '/safety/devices', title: '设备维保能耗' },
       { path: '/safety/inspection', title: '巡检统筹' },
     ],
@@ -180,7 +189,8 @@ export function resolveDeepLink(
   if (/差评|口碑|评价/.test(t)) return '/dinein/reviews'
   if (/外卖|对账/.test(t)) return '/dinein/delivery'
   if (/健康证/.test(t)) return '/hr/health-cert'
-  if (/留样|消毒/.test(t)) return '/safety/sample'
+  if (/消毒/.test(t)) return '/safety/disinfect'
+  if (/留样/.test(t)) return '/safety/sample'
   if (/证照/.test(t)) return '/safety/licenses'
   if (/分账|财务/.test(t)) return '/finance/split'
   if (/生日|发券/.test(t)) return '/member/birthday'

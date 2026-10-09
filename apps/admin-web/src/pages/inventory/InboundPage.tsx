@@ -39,7 +39,6 @@ import type {
 } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
 import MockAlert from '../kitchen/components/MockAlert'
-import { MOCK_RECV } from './mock'
 import { docDebt, docPaid, formatLinesSummary, lineAmount } from './utils'
 import { COLORS } from '../../theme'
 import SettleModal from './settle/SettleModal'
@@ -146,7 +145,7 @@ export default function InboundPage() {
           setIsMock(false)
         })
         .catch(() => {
-          setDocs(MOCK_RECV)
+          setDocs([])
           setOrders([])
           setIsMock(true)
         }),

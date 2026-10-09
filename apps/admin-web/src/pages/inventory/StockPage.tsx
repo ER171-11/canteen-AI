@@ -19,7 +19,6 @@ import type { ColumnsType } from 'antd/es/table'
 import { fetchSnapshot, submitConfirmedAction } from '../../api'
 import type { IngItem } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
-import { MOCK_INGS } from './mock'
 import { fmtNum, safetyLine, stockStatus, stockValue } from './utils'
 import { COLORS } from '../../theme'
 
@@ -52,7 +51,7 @@ export default function StockPage() {
         setIsMock(false)
       })
       .catch(() => {
-        setItems(MOCK_INGS as IngRow[])
+        setItems([])
         setIsMock(true)
       })
       .finally(() => setLoading(false))

@@ -23,7 +23,6 @@ import { fetchBooking, postAction } from '../../api'
 import type { BookingItem, QueueItem } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
 import MockAlert from '../kitchen/components/MockAlert'
-import { MOCK_BOOKING } from '../../mock/modules'
 import { COLORS } from '../../theme'
 
 function guest(b: BookingItem) {
@@ -59,9 +58,9 @@ export default function BookingPage() {
         setIsMock(false)
       })
       .catch(() => {
-        setBookings(MOCK_BOOKING.bookings)
-        setQueue(MOCK_BOOKING.queue)
-        setRev('mock')
+        setBookings([])
+        setQueue([])
+        setRev(undefined)
         setIsMock(true)
       })
       .finally(() => setLoading(false))

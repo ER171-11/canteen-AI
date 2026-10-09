@@ -6,7 +6,6 @@ import { fetchRestockSuggest, fetchSnapshot, postAction } from '../../api'
 import type { IngItem } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
 import MockAlert from '../kitchen/components/MockAlert'
-import { MOCK_INGS } from './mock'
 import { safetyLine, stockStatus, suggestRestockQty } from './utils'
 import { COLORS } from '../../theme'
 
@@ -83,7 +82,7 @@ export default function RestockPage() {
             setBanner('服务端补货端点不可用，已回退本地安全线算法')
           })
           .catch(() => {
-            setRows(localRows(MOCK_INGS))
+            setRows([])
             setIsMock(true)
           })
       })

@@ -31,19 +31,14 @@ function recordAmount(r) {
 }
 
 function mockReport(date) {
-  // mock 分支也给保本口径：be_day 取自静态价盘（真算法），today_rev 为演示值（mock:true 标注）
+  // 无快照时的真实空态：不编造 KPI / 热度 / 日结；仅保留保本口径（be_day 取自静态价盘，真算法）
   let breakeven = null;
   try {
     const { computeBaobenSummary } = require('../lib/menu_baoben');
     const summary = computeBaobenSummary();
     const beDay = summary && summary.kpi ? summary.kpi.be_day : null;
     if (beDay != null && beDay > 0) {
-      breakeven = {
-        be_day: beDay,
-        today_rev: 12580,
-        attain_pct: Math.round((12580 / beDay) * 1000) / 10,
-        mock: true
-      };
+      breakeven = { be_day: beDay, today_rev: null, attain_pct: null, mock: true };
     }
   } catch (e) { breakeven = null; }
   return {
@@ -53,29 +48,15 @@ function mockReport(date) {
     rev: null,
     generated_at: null,
     banner: '暂无店内数据：云端未收到门店快照',
-    kpi: [
-      { label: '营收', value: '¥12,580', delta: '+8.2%' },
-      { label: '订单数', value: '286', delta: '+5.1%' },
-      { label: '客单价', value: '¥43.99', delta: '+2.9%' },
-      { label: '水饺销量', value: '1,820 只', delta: '+6.4%' },
-      { label: '毛利率', value: '62.3%', delta: '+1.1%' },
-      { label: '会员消费占比', value: '38%', delta: '+3.0%' },
-      { label: '原料损耗率', value: '2.1%', delta: '-0.4%' },
-      { label: '差评数', value: '1', delta: '-2' }
-    ],
-    heat_mini: [11, 12, 13, 17, 18, 19, 20].map((h, i) => ({ hour: h, orders: [32, 58, 41, 22, 49, 76, 53][i] })),
+    kpi: [],
+    heat_mini: [],
     todos: [
       { kind: 'restock', route: 'inventory/restock', text: '推送店内快照后可生成断货补货待办', done: false },
       { kind: 'prep', route: 'kitchen', text: '有快照后将汇总今日建议备料工单', done: false }
     ],
     alerts: [{ level: 'info', text: '云端未收到门店快照' }],
     breakeven,
-    day_close: {
-      sold: { label: '售出', count: 286, amount: 12580, route: 'm/pos' },
-      inbound: { label: '入库', count: 3, amount: 1860, route: 'inventory/recv' },
-      loss: { label: '报损', count: 1, amount: 86, route: 'm/loss' },
-      workorders_open: 0
-    }
+    day_close: null
   };
 }
 

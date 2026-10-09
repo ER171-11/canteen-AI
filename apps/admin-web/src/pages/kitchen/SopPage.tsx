@@ -18,7 +18,6 @@ import type { RecipeItem, SopStep, SopVideo } from '../../api/types'
 import ColorBadge from './components/ColorBadge'
 import MockAlert from './components/MockAlert'
 import { STAGE_ORDER } from './colorMeta'
-import { MOCK_RECIPES, MOCK_SOP_STEPS } from './mock'
 import { COLORS } from '../../theme'
 
 export default function SopPage() {
@@ -37,7 +36,7 @@ export default function SopPage() {
     fetchKitchenRecipe(sku)
       .then((resp) => setSteps(resp.steps ?? []))
       .catch(() => {
-        setSteps(MOCK_SOP_STEPS)
+        setSteps([])
         setIsMock(true)
       })
       .finally(() => setLoading(false))
@@ -54,12 +53,8 @@ export default function SopPage() {
         }
       })
       .catch(() => {
-        setRecipes(MOCK_RECIPES)
+        setRecipes([])
         setIsMock(true)
-        if (MOCK_RECIPES.length > 0) {
-          setSkuId(MOCK_RECIPES[0].sku_id)
-          setSteps(MOCK_SOP_STEPS)
-        }
       })
   }, [loadSteps])
 

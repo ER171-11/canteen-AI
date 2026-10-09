@@ -17,7 +17,6 @@ import type { ColumnsType } from 'antd/es/table'
 import { fetchAdminDishes, fetchSnapshot, submitConfirmedAction } from '../../api'
 import type { Dish } from '../../api/types'
 import MockAlert from './components/MockAlert'
-import { MOCK_DISHES } from './mock'
 import { COLORS } from '../../theme'
 
 export default function DishesPage() {
@@ -48,12 +47,12 @@ export default function DishesPage() {
               setItems(dishes)
               setIsMock(false)
             } else {
-              setItems(MOCK_DISHES)
+              setItems([])
               setIsMock(true)
             }
           })
           .catch(() => {
-            setItems(MOCK_DISHES)
+            setItems([])
             setIsMock(true)
           }),
       )

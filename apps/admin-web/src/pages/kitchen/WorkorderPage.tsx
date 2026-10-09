@@ -25,7 +25,6 @@ import { useAuthStore } from '../../store/auth'
 import ColorBadge from './components/ColorBadge'
 import MockAlert from './components/MockAlert'
 import { colorMeta } from './colorMeta'
-import { MOCK_WORKORDERS } from './mock'
 import { COLORS } from '../../theme'
 
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
@@ -206,7 +205,7 @@ export default function WorkorderPage() {
         setIsMock(false)
       })
       .catch(() => {
-        setItems(MOCK_WORKORDERS)
+        setItems([])
         setIsMock(true)
       })
       .finally(() => setLoading(false))

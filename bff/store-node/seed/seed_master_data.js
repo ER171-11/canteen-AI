@@ -259,6 +259,12 @@ async function main(argv) {
 
 module.exports = { today, pyRound, seedSqlite, seedStoreJson, DEFAULT_DB, STORE_URL, main };
 
+/* 演示种子注入已停用（ADR-001 真实数据基线）；确需演示请显式设置 CANTEEN_SEED_DEMO=1 */
+if (require.main === module && process.env.CANTEEN_SEED_DEMO !== '1') {
+  console.error('[停用] 演示种子注入已停用（ADR-001 真实数据基线）。如确需演示，请设置 CANTEEN_SEED_DEMO=1 后重试。');
+  process.exit(1);
+}
+
 if (require.main === module) {
   main().catch((e) => { console.error(e); process.exit(1); });
 }

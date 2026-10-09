@@ -18,7 +18,6 @@ import {
 import { fetchSnapshot, submitConfirmedAction } from '../../api'
 import type { PosTable } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
-import { MOCK_TABLES } from './mock'
 import { COLORS } from '../../theme'
 
 const STATUS_STYLE: Record<string, { bg: string; label: string; wire: string }> = {
@@ -77,12 +76,12 @@ export default function TablesPage() {
           )
           setIsMock(false)
         } else {
-          setTables(MOCK_TABLES)
+          setTables([])
           setIsMock(true)
         }
       })
       .catch(() => {
-        setTables(MOCK_TABLES)
+        setTables([])
         setIsMock(true)
       })
       .finally(() => setLoading(false))

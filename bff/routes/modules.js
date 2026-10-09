@@ -459,11 +459,8 @@ function equipmentTemps(ext) {
     };
   }
   if (raw.length) return raw.map(withHistory);
-  return [
-      withHistory({ device: '冷柜 A', kind: '冷藏', temp: 4.2, max: 5, status: 'ok' }),
-      withHistory({ device: '冷柜 B', kind: '冷冻', temp: -10.5, max: -15, status: 'over', minutes: 18 }),
-      withHistory({ device: '冷柜 C', kind: '蔬菜', temp: 3.8, max: 8, status: 'ok' })
-  ];
+  /* 无 IoT 温度数据即空态，不再合成演示曲线 */
+  return [];
 }
 
 function equipmentEnergySummary(ext, energyRows) {
@@ -479,18 +476,7 @@ function equipmentEnergySummary(ext, energyRows) {
   }
   const has = Object.values(buckets).some((v) => v > 0);
   if (!has) {
-    return {
-      mock: true,
-      items: [
-        { kind: '燃气', amount: 2180, pct: 75 },
-        { kind: '水', amount: 320, pct: 30 },
-        { kind: '电', amount: 1680, pct: 62 }
-      ],
-      total: 4180,
-      yoy: '+6.2%',
-      mom: '-3.1%',
-      ratio: '4.8%'
-    };
+    return { mock: true, items: [], total: 0, yoy: null, mom: null, ratio: null };
   }
   const total = buckets['燃气'] + buckets['水'] + buckets['电'];
   const max = Math.max(buckets['燃气'], buckets['水'], buckets['电'], 1);
@@ -508,30 +494,13 @@ function equipmentEnergySummary(ext, energyRows) {
   };
 }
 
-// 演示数据：落自原型 p-m-analysis（W35→W38 趋势、五色周表现、矩阵图例、效率环）
+// 无销售流水时的分析空态：不编造流水/趋势/效率，仅保留基于保本价盘的真实算法结果
 function mockAnalysis(paramOverrides) {
-  const heatmap = [];
-  for (let wd = 0; wd < 7; wd++) {
-    for (const h of [11, 12, 18, 19]) {
-      const weekend = wd === 0 || wd === 6;
-      heatmap.push({
-        hour: h,
-        weekday: wd,
-        orders: (h >= 18 ? 30 : 20) + (weekend ? 15 : 0),
-        revenue: ((h >= 18 ? 30 : 20) + (weekend ? 15 : 0)) * 44
-      });
-    }
-  }
   return {
     mock: true,
     note: '暂无销售流水，未生成分析；菜单矩阵仍按保本价盘展示',
-    trend: [
-      { week: 'W35', revenue: 52000, gross_rate: 39.2 },
-      { week: 'W36', revenue: 53800, gross_rate: 39.8 },
-      { week: 'W37', revenue: 55900, gross_rate: 40.0 },
-      { week: 'W38', revenue: 58210, gross_rate: 40.1 }
-    ],
-    heatmap,
+    trend: [],
+    heatmap: [],
     calc_dishes: (() => {
       try {
         const { mergeDishesWithBaoben, toCalcRows } = require('../lib/menu_baoben');
@@ -561,33 +530,11 @@ function mockAnalysis(paramOverrides) {
           return { name: d.name, price: d.price, volume: d.volume, margin: d.margin, quadrant, dish_type: d.dish_type };
         });
       } catch (e) {
-        return [
-          { name: '红·长寿', quadrant: 'star', volume: 486, margin: 0.62 },
-          { name: '狮·醒狮', quadrant: 'star', volume: 301, margin: 0.65 },
-          { name: '黑·聚财', quadrant: 'puzzle', volume: 413, margin: 0.38 },
-          { name: '凉·凉拌', quadrant: 'puzzle', volume: 268, margin: 0.35 },
-          { name: '白·团圆', quadrant: 'cow', volume: 315, margin: 0.58 },
-          { name: '紫·好德', quadrant: 'dog', volume: 289, margin: 0.33 }
-        ];
+        return [];
       }
     })(),
-    efficiency: {
-      avg_ticket: 44.2,
-      daily_avg_revenue: 8315.7,
-      total_orders: 1320,
-      翻台率: 3.2,
-      坪效: 680,
-      人效: 648,
-      营收环比: '+4.2%',
-      营收同比: '+11.6%',
-      毛利环比: '+0.8pct'
-    },
-    forecast: buildForecast({ data: {} }, [
-      { date: 'W35', revenue: 52000 },
-      { date: 'W36', revenue: 53800 },
-      { date: 'W37', revenue: 55900 },
-      { date: 'W38', revenue: 58210 }
-    ], { daily_avg_revenue: 8315.7 }),
+    efficiency: {},
+    forecast: null,
     baoben_summary: (() => {
       try { return require('../lib/menu_baoben').computeBaobenSummary(paramOverrides); } catch (e) { return null; }
     })()
@@ -1830,4 +1777,4 @@ async function handle(req, res, ctx, pathname) {
   return false;
 }
 
-module.exports = { handle, equipmentTemps, buildForecast, equipmentEnergySummary, bookingInsight, takeoutInsight, vipInsight, staffInsight, foodsafeInsight, financeInsight, lossInsight, reviewInsight, supplyInsight, posInsight };
+module.exports = { handle, equipmentTemps, buildForecast, equipmentEnergySummary, bookingInsight, takeoutInsight, vipInsight, staffInsight, foodsafeInsight, financeInsight, lossInsight, reviewInsight, supplyInsight, posInsight, realAnalysis, mockAnalysis };

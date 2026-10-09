@@ -1,9 +1,12 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/auth'
+import { demoEnabled } from '../store/demo'
+import { suppressDemoData } from '../utils/demoGate'
 
 /*
  * 统一 axios 实例：baseURL=/api（vite dev proxy 转发至 127.0.0.1:8787）。
  * 请求拦截器注入 Bearer token；401 自动登出并跳登录页。
+ * 演示开关关闭时，响应拦截器会中和 BFF 侧 mock:true 合成数据并剔除 demo_proto 演示行。
  */
 export const client = axios.create({
   baseURL: '/api',
@@ -31,7 +34,13 @@ client.interceptors.request.use((config) => {
 })
 
 client.interceptors.response.use(
-  (resp) => resp,
+  (resp) => {
+    /* 演示开关关闭：去除响应中的演示数据，使界面呈现真实空态 */
+    if (!demoEnabled() && resp && resp.data !== undefined) {
+      resp.data = suppressDemoData(resp.data)
+    }
+    return resp
+  },
   (error) => {
     if (error.response?.status === 401) {
       useAuthStore.getState().logout()
