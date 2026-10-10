@@ -145,16 +145,17 @@ export default function RestockPage() {
     },
   ]
 
-  const onSubmit = async () => {
+  /* FP-PO-18：勾选建议行 → 按供应商拆单生成正式采购单（order.fromRestock） */
+  const onToOrders = async () => {
     const picked = rows.filter((r) => selected.includes(r.id))
     if (!picked.length) {
-      message.warning('没有需要提交的补货项')
+      message.warning('请先勾选要转采购单的原料')
       return
     }
     setSubmitting(true)
     try {
       const res = await postAction({
-        type: 'stock.replenish',
+        type: 'order.fromRestock',
         operator: role ?? account ?? '管理员',
         payload: {
           source: 'admin-web/inventory/restock',
@@ -163,15 +164,13 @@ export default function RestockPage() {
             name: r.name,
             qty: r.suggestQty,
             unit: r.unit,
-            safety: r.safety,
-            stock: r.stock,
           })),
         },
       })
       message.success(
         res.dedup
           ? `已入队（幂等）：${res.id}，请到审批中心确认`
-          : `补货确认已入队：${res.id}，请到审批中心确认执行`,
+          : `转采购单已入队：${res.id}，请到审批中心确认执行`,
       )
     } catch {
       message.error('提交失败，请检查 BFF 与登录态')
@@ -190,7 +189,7 @@ export default function RestockPage() {
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="只读建议：优先服务端 est/plans 口径，端点不可用时回退本地安全线计算；提交后进入 actions 队列，由审批中心 confirm/execute，不会直连店内 8765。"
+        message="只读建议：优先服务端 est/plans 口径，端点不可用时回退本地安全线计算；勾选后「转采购单」按供应商拆单生成正式采购单（不入库，收货请到「进货入库」登记），经审批中心 confirm/execute 生效，不会直连店内 8765。"
         action={
           <Link to="/platform/actions">审批中心</Link>
         }
@@ -205,9 +204,9 @@ export default function RestockPage() {
               loading={submitting}
               disabled={!rows.length || !canWrite}
               title={canWrite ? undefined : '当前角色无写权限，仅可查看'}
-              onClick={onSubmit}
+              onClick={onToOrders}
             >
-              提交补货确认
+              转采购单
             </Button>
           </Space>
         }

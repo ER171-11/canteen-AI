@@ -346,6 +346,53 @@ function main() {
     console.log('  PASS rest.update (standalone)');
   }
 
+  /* ---------- order.fromRestock：新增动作（旧版无 Python 队列动作，仅 Node 单测） ---------- */
+  {
+    const data = {
+      ings: [
+        { id: 'g1', name: '面粉', unit: '袋', sup: '供应商A', avg: 50, last: 48, conv: 25 },
+        { id: 'g2', name: '猪肉', unit: '斤', sup: '供应商B', avg: 18, last: 20, conv: 1 },
+        { id: 'g3', name: '大米', unit: '袋', sup: '供应商A', avg: 120, last: 0, conv: 50 }
+      ],
+      suppliers: [],
+      orders: []
+    };
+    const msg = inv.applyRestockToOrders(data, {
+      date: '2026-10-10',
+      items: [
+        { ing_id: 'g1', name: '面粉', qty: 2, unit: '袋' },
+        { ing_id: 'g2', name: '猪肉', qty: 5, unit: '斤' },
+        { ing_id: 'g3', name: '大米', qty: 1, unit: '袋' }
+      ]
+    });
+    // 按供应商拆单：供应商A 2 行、供应商B 1 行 → 2 张 CG 单
+    assert.strictEqual(data.orders.length, 2, '应按供应商拆成 2 张采购单');
+    const oa = data.orders.find((o) => o.supplier === '供应商A');
+    const ob = data.orders.find((o) => o.supplier === '供应商B');
+    assert.ok(oa && ob, '两张单供应商应正确');
+    assert.strictEqual(oa.lines.length, 2, '供应商A 单应含 2 行');
+    assert.strictEqual(ob.lines.length, 1, '供应商B 单应含 1 行');
+    assert.strictEqual(oa.status, 'normal', '正式采购单 status=normal');
+    // 单价回落 avg：面粉 50、猪肉 18、大米 120；payable = 50*2 + 120*1 = 220（A 单）
+    assert.strictEqual(oa.payable, 220, 'A 单应付 = 面粉 100 + 大米 120');
+    assert.strictEqual(ob.payable, 90, 'B 单应付 = 猪肉 18*5');
+    // unitCost = price/conv：面粉 50/25 = 2；大米 120/50 = 2.4
+    assert.deepStrictEqual(oa.lines.map((l) => l.unitCost), [2, 2.4], 'unitCost 按换算率折算');
+    // 红线：绝不 rebuildStock —— data 上无 stock 变动字段
+    assert.strictEqual(data.stock, undefined, '转单不得触碰库存（不 rebuildStock）');
+    // 新供应商并入 suppliers
+    assert.deepStrictEqual(data.suppliers.sort(), ['供应商A', '供应商B'], '新供应商应并入 data.suppliers');
+    // msg 应含拆单结果
+    assert.ok(msg.indexOf('2 张采购单') >= 0 && msg.indexOf('3 个品项') >= 0, 'msg 应描述拆单结果');
+
+    // 空明细 → 抛错
+    let threw2 = false;
+    try { inv.applyRestockToOrders({ orders: [] }, { items: [{ ing_id: 'x', qty: 0 }] }); } catch (e) { threw2 = true; }
+    assert.ok(threw2, '无有效明细行应抛错');
+    pass++;
+    console.log('  PASS order.fromRestock (standalone)');
+  }
+
   console.log('[inventory.test] PASS ' + pass + ' cases');
 }
 

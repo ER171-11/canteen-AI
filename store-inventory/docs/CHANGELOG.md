@@ -1481,3 +1481,44 @@
 - 后续: W2 余 **20 张**；全局欠账 **⬆️ 104 / ⬜ 47**（合计 151）。
   W2 头部转为 `FP-PO-18`（建议转正式采购单）；其余大量 W2 卡仍被「销售应收模型」「服务端快照」两个 ADR 阻塞。
 
+## [2026-10-10] W2 第四批 - 补货建议转正式采购单（阶段 24 / FP-PO-18）
+
+- 目标: W2 业务闭环核心。补货建议清单勾选行 → 按供应商拆单生成正式采购单（旧版 `#rsToOrder` → `restockToOrders()`）。
+  此前 RestockPage「提交补货确认」误用未注册动作 `stock.replenish`（会被 consumer 判 need-manual 驳回），且不生成 CG 单。
+- 决策（落点）: **新增 `order.fromRestock` 动作**（执行器 `applyRestockToOrders`），服务端按原料 `sup` 拆单；
+  单价回落 `avg→last→0`、换算率回落 `conv`、供应商回落 `sup`、缺供应商归「未指定供应商」；新供应商并入 `data.suppliers`。
+- 变更（BFF）:
+  - `bff/lib/algorithms/inventory.js`: 新增并导出 `applyRestockToOrders`——解析 `payload.items`（ing_id/qty/unit/name），
+    按供应商分组生成 CG 单（`status='normal'`、`no=CG+日期+序号`、`unitCost=price/conv`）；
+    **红线：只 push `data.orders`，绝不调 `rebuildStock`**（采购单不入库）；空明细抛错。
+  - `bff/lib/algorithms/registry.js`: 登记 `'order.fromRestock'`。
+- 变更（admin-web `apps/admin-web/src/pages/inventory/RestockPage.tsx`）:
+  - 「提交补货确认」（`stock.replenish`）改为「转采购单」（`order.fromRestock`）；payload 只传 `{ing_id,name,qty,unit}`；
+    勾选为空前端拦截；提示文案更新为「按供应商拆单生成正式采购单（不入库，收货请到进货入库登记）」。
+- 验证（实际跑过）:
+  - `node bff/lib/algorithms/inventory.test.js` → **29/29 通过**（新增 `order.fromRestock` 单测：按供应商拆 2 单、
+    单价回落 avg、unitCost 折算、payable 正确、绝不触碰库存、新供应商并入、空明细抛错）。
+  - `npm test`（bff 全量）→ **exit 0**；`node scripts/lint-zero-dep.js` → 通过。
+  - `apps/admin-web` `npx tsc --noEmit` → **exit 0**；`read_lints` → **0 错**。
+  - `powershell -File ci/redline_guard.ps1` → 全通过。
+  - `powershell -File scripts/gen-debt-table.ps1` → 151 项 **⬆️ 105 / ⬜ 46**（欠账卡 46：W1 1 / W2 **19** / W3 19 / W4 7）；
+    `-Check` **exit 0**（无漂移）；`node scripts/gen-progress-board.js` → 漂移校验 ok、数字一致性 OK。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **未在浏览器手工冒烟**：转采购单按钮仅静态类型检查，未点击核对；落库链路由 consumer 执行器保证，本机未跑「审批执行 → 快照变化」完整 HTTP 闭环。
+  2. **计划行状态不回收**：`order.fromRestock` 不写回 `data.plans` 行 `st='done'`（旧版 `restockToOrders` 会写），
+     故同一建议行跨 5min 幂等窗后仍可再次转单（重复采购单风险）。该回收属 FP-PO-16 的 `syncPlanStatus` 范畴，暂缓。
+  3. `order.fromRestock` 是**新增动作类型**，旧版为浏览器内 JS（`restockToOrders`），无 Python 队列动作，故无 Node↔Python 平价对照，仅 Node 单测覆盖。
+- 影响范围: `bff/lib/algorithms/{inventory.js,registry.js,inventory.test.js}`、`apps/admin-web/src/pages/inventory/RestockPage.tsx`、
+  `docs/迁移基线/FP-采购管理.md`、`docs/下一步任务清单_2026-09-28.md`、本文件。
+  **未触碰**受保护哈希文件（`bff/store-node/{db,merge}.js`、`bff/lib/algorithms/stock.js`）。
+- AI避坑提示:
+  - **转单绝不 rebuildStock**：`order.fromRestock` 只生成采购单、不增库存；真正入库走「进货入库」`recv.inbound`。
+    误把转单当入库会双计库存（采购单 + 进货入库各加一次）。
+  - **空明细必须抛错**：勾选行数量全为 0 时抛错 → 审批中心可见失败，前端已前置拦截「请先勾选」；不要静默生成空单。
+  - **供应商/单价回落顺序**：供应商 `payload.supplier > ings[].sup > '未指定供应商'`；单价 `payload.price > ings[].avg > ings[].last > 0`；
+    unitCost 必须按 `price/conv` 折算，否则进货入库核算口径与采购单不一致。
+- 回档方案: `git revert` 本提交即可——去掉 `applyRestockToOrders` + `order.fromRestock` 注册 + 前端「转采购单」按钮。
+  已入队未执行的 `order.fromRestock` 动作会判 need-manual，需人工处理。
+- 后续: W2 余 **19 张**；全局欠账 **⬆️ 105 / ⬜ 46**（合计 151）。
+  W2 头部转为 `FP-SET-07/10`（快照备份/回滚，受「服务端快照」ADR 阻塞）与 `FP-SALE-07`（销售单列表，受「销售应收模型」ADR 阻塞）。
+

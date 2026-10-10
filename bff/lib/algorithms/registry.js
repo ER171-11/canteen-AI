@@ -22,6 +22,7 @@ registerAll({
 registerAll({
   'restock.create': (ctx, data, payload) => inv.applyRestock(data, payload),
   'analysis.restock': (ctx, data, payload) => inv.applyRestock(data, payload),
+  'order.fromRestock': (ctx, data, payload) => inv.applyRestockToOrders(data, payload),
   'config.update': (ctx, data, payload) => inv.applyConfig(data, payload),
   'rest.update': (ctx, data, payload) => inv.applyRest(data, payload),
   'ing.upsert': (ctx, data, payload) => inv.applyIngUpsert(data, payload),

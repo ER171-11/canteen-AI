@@ -4,6 +4,7 @@
  *
  * 覆盖动作：
  *   restock.create / analysis.restock → applyRestock
+ *   order.fromRestock                 → applyRestockToOrders（勾选建议行按供应商拆单生成正式 CG 单）
  *   config.update                     → applyConfig
  *   rest.update                       → applyRest（写顶层 data.rest 餐厅名）
  *   ing.upsert                        → applyIngUpsert
@@ -182,6 +183,91 @@ function applyRestock(data, payload) {
   };
   orders.push(draft);
   return 'orders 追加采购草稿 ' + draft.no + '（' + lines.length + ' 行，应付 ' + payable.toFixed(2) + '）';
+}
+
+/* ---------- order.fromRestock（FP-PO-18） ---------- */
+
+/**
+ * order.fromRestock：勾选补货建议行 → 按供应商拆单生成正式采购单（CG 单，status='normal'）。
+ * 对齐旧版 restockToOrders()（HTML:1995-2022）：**只 push data.orders，绝不调 rebuildStock**（采购单不进库存）；
+ * 新供应商并入 data.suppliers。单价/供应商/换算率优先取 payload 逐行，缺失时回落原料主数据（sup/avg/last/conv）。
+ */
+function applyRestockToOrders(data, payload) {
+  const orders = _ordersArr(data);
+  const ings = arr(data.ings);
+  const ingById = new Map();
+  for (const g of ings) if (g && g.id != null) ingById.set(String(g.id), g);
+
+  const items = arr(payload.items);
+  const date = payload.date || today();
+
+  const rows = [];
+  for (const it of items) {
+    const id = String(it.ing_id || it.ing || it.name || '').trim();
+    if (!id) continue;
+    const g = ingById.get(id) || {};
+    const qty = parseLineQty(it.qty)[0];
+    if (!(qty > 0)) continue;
+    const supplier = String(it.supplier || g.sup || '').trim() || '未指定供应商';
+    let price = 0;
+    if (it.price != null && it.price !== '' && num(it.price, 0) > 0) price = num(it.price, 0);
+    else if (num(g.avg, 0) > 0) price = num(g.avg, 0);
+    else if (num(g.last, 0) > 0) price = num(g.last, 0);
+    const conv = num(g.conv, 0) > 0 ? num(g.conv, 0) : 1;
+    rows.push({
+      id: id,
+      name: String(it.name || g.name || id).trim(),
+      qty: qty,
+      unit: pt(it.unit || g.unit || ''),
+      price: r2(price),
+      conv: conv,
+      supplier: supplier
+    });
+  }
+  if (!rows.length) throw new Error('order.fromRestock 无有效明细行（请勾选数量 > 0 的原料）');
+
+  const bySup = new Map();
+  for (const r of rows) {
+    if (!bySup.has(r.supplier)) bySup.set(r.supplier, []);
+    bySup.get(r.supplier).push(r);
+  }
+
+  const sameDay = orders.filter((o) => o && o.date === date).length;
+  let i = 0;
+  const created = [];
+  for (const [supplier, rs] of bySup) {
+    const lines = rs.map((r) => ({
+      ing: r.id,
+      name: r.name,
+      qty: r.qty,
+      unit: r.unit,
+      price: r.price,
+      conv: r.conv,
+      amount: r2(r.qty * r.price),
+      unitCost: r3(r.price / r.conv)
+    }));
+    const payable = r2(lines.reduce((s, l) => s + l.amount, 0));
+    i += 1;
+    const o = {
+      id: uid('O', 10),
+      no: 'CG' + String(date).replace(/-/g, '') + '-' + String(sameDay + i).padStart(2, '0'),
+      date: date,
+      supplier: supplier,
+      lines: lines,
+      payable: payable,
+      payments: [],
+      note: '由补货建议生成（采购单不入库，收货请到「进货入库」登记）',
+      method: '',
+      status: 'normal'
+    };
+    orders.push(o);
+    created.push(o.no);
+  }
+
+  if (!Array.isArray(data.suppliers)) data.suppliers = [];
+  for (const s of bySup.keys()) if (data.suppliers.indexOf(s) < 0) data.suppliers.push(s);
+
+  return 'orders 按供应商拆单生成 ' + created.length + ' 张采购单（' + rows.length + ' 个品项）：' + created.join(', ');
 }
 
 /* ---------- config.update ---------- */
@@ -1334,6 +1420,7 @@ module.exports = {
   applyRecvUpdate,
   applyRecvVoid,
   applyRecvImport,
+  applyRestockToOrders,
   applyStockCount,
   insertStockCount,
   applyOrderMark,
