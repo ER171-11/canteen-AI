@@ -18,6 +18,7 @@ import {
   Tag,
   Tooltip,
   Typography,
+  Upload,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -25,6 +26,7 @@ import dayjs, { Dayjs } from 'dayjs'
 import {
   fetchFoodsafeCerts,
   fetchFoodsafeConfig,
+  recognizeCert,
   saveFoodsafeConfig,
   upsertFoodsafeCert,
 } from '../../api'
@@ -66,6 +68,52 @@ export default function LicensesPage() {
   const [certForm] = Form.useForm()
   const [cfgOpen, setCfgOpen] = useState(false)
   const [cfgForm] = Form.useForm()
+  const [recognizing, setRecognizing] = useState(false)
+
+  const readAsBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const fr = new FileReader()
+      fr.onload = () => {
+        const s = String(fr.result || '')
+        resolve(s.slice(s.indexOf(',') + 1))
+      }
+      fr.onerror = () => reject(fr.error || new Error('read failed'))
+      fr.readAsDataURL(file)
+    })
+
+  const handleCertImage = async (file: File) => {
+    setRecognizing(true)
+    try {
+      const imageBase64 = await readAsBase64(file)
+      const res = await recognizeCert(imageBase64)
+      if (!res.ok || !res.result) {
+        message.error(res.error || '识别失败，请重试或手工填写')
+        return
+      }
+      const f = res.result.fields
+      if (f) {
+        const patch: Record<string, unknown> = {}
+        if (f.cert_type) patch.cert_type = f.cert_type
+        if (f.holder) patch.holder = f.holder
+        if (f.cert_no) patch.cert_no = f.cert_no
+        if (f.status) patch.status = f.status
+        if (/^\d{4}-\d{2}-\d{2}$/.test(f.issued_at)) patch.issued_at = dayjs(f.issued_at)
+        if (/^\d{4}-\d{2}-\d{2}$/.test(f.expire_at)) patch.expire_at = dayjs(f.expire_at)
+        certForm.setFieldsValue(patch)
+      }
+      const conf = parseInt(res.result.conf, 10)
+      if (Number.isFinite(conf) && conf < 70) {
+        message.warning(`识别置信度 ${res.result.conf}，请人工核对后再确认`)
+      } else {
+        message.success('已自动回填，请核对后确认')
+      }
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '识别失败（Kimi 未连通或超时）')
+    } finally {
+      setRecognizing(false)
+    }
+  }
 
   const load = useCallback(() => {
     setLoading(true)
@@ -393,6 +441,23 @@ export default function LicensesPage() {
         onOk={submitCert}
       >
         <Form form={certForm} layout="vertical" preserve={false}>
+          <Form.Item label="拍照 / 上传自动识别（可选）">
+            <Space wrap>
+              <Upload
+                accept="image/*"
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  void handleCertImage(file as File)
+                  return false
+                }}
+              >
+                <Button loading={recognizing}>拍照 / 选图识别</Button>
+              </Upload>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                识别结果仅自动回填下方字段，最终仍需人工核对后点「确定」入审批。
+              </Typography.Text>
+            </Space>
+          </Form.Item>
           <Form.Item name="id" hidden>
             <Input />
           </Form.Item>

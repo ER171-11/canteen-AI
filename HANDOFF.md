@@ -40,6 +40,11 @@ AI Agent / KMP 共享层 / Android + iOS 双端 / admin-web 应用发布页）�
 - 现场管理四块能力（品控台账 / 桌态看板 / 巡检 / 水印相机，移动端 + 云端只读镜像）
 - T11 结构测算（FP-CALC 系列，阶段 8/9/10/11/12 共 20 项，本页已闭合）
 - W1 只读速补 · 经营概览（FP-DASH-01/06/07/11，阶段 13）
+- W1 只读速补 · 设置「四类导出 + 模块通道一览」（FP-SET-01/11/12/13/14，阶段 14）
+- W1 只读速补 · 采购「状态列/筛选/行级标记/KPI」（FP-PO-10/12/14/15，阶段 15）
+- W1 只读速补 · 菜品「近30天销量/毛利额」（FP-DISH-11/12，阶段 16）
+- W1 只读速补 · 外接比价「本店均价 vs 外部报价」（FP-PRICE-01/02/03/13/14，阶段 17）
+- W1 第六批 · 出成率 + 配方编辑实时成本（FP-ING-04 → FP-DISH-08，阶段 18）
 
 **不要凭本文件描述工作，以仓库内文档为准：**
 
@@ -133,8 +138,20 @@ node scripts/gen-progress-board.js                    # 刷新进度看板
   **未替换**；口径 = 保本价盘，随页面分界切换到本店在售菜品）
 - ✅ 经营概览 **5/15**（阶段 13 补齐 `FP-DASH-01` 统计周期 / `06` 采购应付 / `07` 库存总值 /
   `11` 低库存明细；`FP-DASH-08` 折扣抹零**缺数据源**，随销售模型一起做）
-- **下一批（W1 只读速补，余 20 张）**：按欠账总表 W1 顺序推进
-  —— DASH 1 / SET 5 / PO 4 / DISH 3 / PRICE 6 / SALE 1（口径与红线分级见 `docs/迁移颗粒度规范.md`）
+- ✅ 设置 **7/19**（阶段 14 补齐 W1 只读 5 项：`FP-SET-11/12/13/14` 四类导出 +
+  `FP-SET-01` 模块数据输入通道一览；新增只读端点 `bff/routes/export.js`，零写库）
+- ✅ 采购管理 **9/20**（阶段 15 补齐 W1 只读 4 项：`FP-PO-10/12/14/15` 状态列/筛选/行级标记/KPI；
+  纯前端 `PurchasePage.tsx` + `utils.ts` 纯函数，状态由既有数据推导，不依赖结案/作废写动作）
+- ✅ 原料库存 **11/15**（阶段 18 补齐 `FP-ING-04` 出成率：`applyIngUpsert` 白名单 `yld`（0.05~1 钳制）+ 编辑弹窗字段/列表列，
+  Node/Python 平价同步；`recipe_cost.js` 行成本同步做 `qty/yld` 毛料还原）
+- ✅ 菜品配方 **14/18**（阶段 16 补齐 W1 只读 2 项：`FP-DISH-11/12` 近30天销量/毛利额；
+  新增 `export.dishSalesAgg` 纯函数 + `/api/admin/dishes` 附 `q30/gp30`，复用 `dishCostMap`+`near30Agg` 同口径；
+  阶段 18 补齐 `FP-DISH-08` 配方编辑实时成本 + 毛料还原，`calcLine()` 净料/出成率×均价 + `Form.useWatch` 实时条）
+- ✅ 外接比价 **9/15**（阶段 17 补齐 W1 只读 5 项：`FP-PRICE-01/02/03/13/14` 搜索/筛选/比价主表/待比价清单/统计；
+  新增 `lib/price.js` 纯聚合（`priceReport`/`pricePlan`/`bestQuote`/`quotePerStock`/`quoteKeyword`）+ `GET /api/admin/price`，
+  口径对齐旧版 `renderPrice`/`openQuotePlan`/`quoteTaskText`）
+- **下一批（W1 只读速补，余 3 张）**：按欠账总表 W1 顺序推进
+  —— DASH 1 / PRICE 1（FP-PRICE-05 折算口径，与写路径纠缠）/ SALE 1（口径与红线分级见 `docs/迁移颗粒度规范.md`）
 - ⚠️ 已知数据缺口：快照 `sales[]` 只有 `amount/qty/date/hour/channel/method`，
   **没有 `discount/receivable/payments`**，`FP-DASH-02/03/04/08` 因此全部阻塞，
   须与 FP-SALE-07/08/11 同批建销售应收模型

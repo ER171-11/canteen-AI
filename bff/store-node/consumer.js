@@ -28,6 +28,7 @@ require('../lib/algorithms/registry');
 const algorithms = require('../lib/algorithms/index');
 const pusher = require('./pusher');
 const provider = require('../lib/provider');
+const envGuard = require('../lib/env-guard');
 
 const DEFAULT_STORE_URL = 'http://127.0.0.1:8765';
 const DEFAULT_BFF_URL = 'http://127.0.0.1:8787';
@@ -451,10 +452,21 @@ async function main(argv) {
   let token = values.token || process.env.BFF_TOKEN || '';
   const account = values.account || process.env.BFF_ACCOUNT || 'boss';
   const password = values.password || process.env.BFF_PASSWORD || process.env.BFF_DEFAULT_PASSWORD || 'wufu123';
-  const dbPath = values.db || DEFAULT_DB_PATH;
+  /* 环境守卫：声明 sandbox 却指向真实主库时直接退出，避免测试数据写进真实库 */
+  let envInfo;
+  try {
+    envInfo = envGuard.assertEnvSafe(values.db || DEFAULT_DB_PATH, log);
+  } catch (e) {
+    log.error(e.message);
+    return 1;
+  }
+  const dbPath = envInfo.dbPath;
 
-  log.info('启动 store=' + storeUrl + ' bff=' + bffUrl + ' interval=' + interval
+  log.info('启动 env=' + envInfo.env + ' store=' + storeUrl + ' bff=' + bffUrl + ' interval=' + interval
     + 's once=' + once + ' db=' + dbPath + ' account=' + account);
+  if (envInfo.env === 'sandbox') {
+    log.info('演练模式：写入 ' + dbPath + '（真实主库不受影响）');
+  }
   if (!token) {
     log.warn('未提供 BFF token，尝试用账号登录: ' + account);
     try { token = await loginToken(bffUrl, account, password); log.info('已登录获取 token'); }

@@ -137,7 +137,9 @@ function buildCostCard(recipe, data) {
         const last = ing ? (parseFloat(ing.last) || 0) : 0;
         const perUnit = avg > 0 ? avg : last; // 均价优先，最近采购价兜底
         const unitPrice = gpu ? perUnit / gpu : null; // 元/克
-        const lineCost = unitPrice != null ? r4(e.qty_g * unitPrice) : null;
+        // 出成率还原：净料用量 / 出成率 = 毛料消耗（对齐旧版 dishRecipeCost 的 qty/yld）
+        const yld = ing && parseFloat(ing.yld) > 0 ? parseFloat(ing.yld) : 1;
+        const lineCost = unitPrice != null ? r4((e.qty_g * unitPrice) / yld) : null;
         const matched = !!(ing && unitPrice != null && perUnit > 0);
         if (matched) batchCost += lineCost;
         else if (missing.indexOf(e.name) < 0) missing.push(e.name);

@@ -115,9 +115,8 @@ export const MENU: MenuGroup[] = [
       { path: '/safety/licenses', title: '证照合规' },
       { path: '/safety/trace', title: '溯源批次' },
       { path: '/safety/sample', title: '留样登记' },
-      { path: '/safety/disinfect', title: '消毒记录' },
+      { path: '/safety/points', title: '食安点位统筹' },
       { path: '/safety/devices', title: '设备维保能耗' },
-      { path: '/safety/inspection', title: '巡检统筹' },
     ],
   },
   {
@@ -156,7 +155,7 @@ const ROUTE_MAP: Record<string, string> = {
   'm/booking': '/dinein/booking',
   'm/vip': '/member/birthday',
   'm/equipment': '/safety/devices',
-  'm/inspection': '/safety/inspection',
+  'm/inspection': '/safety/points',
   'm/pos': '/dinein/tables',
   'm/loss': '/inventory/loss',
   'm/review': '/dinein/reviews',
@@ -189,7 +188,7 @@ export function resolveDeepLink(
   if (/差评|口碑|评价/.test(t)) return '/dinein/reviews'
   if (/外卖|对账/.test(t)) return '/dinein/delivery'
   if (/健康证/.test(t)) return '/hr/health-cert'
-  if (/消毒/.test(t)) return '/safety/disinfect'
+  if (/消毒|巡检/.test(t)) return '/safety/points'
   if (/留样/.test(t)) return '/safety/sample'
   if (/证照/.test(t)) return '/safety/licenses'
   if (/分账|财务/.test(t)) return '/finance/split'

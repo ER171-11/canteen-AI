@@ -6,6 +6,7 @@ import {
   Col,
   DatePicker,
   Descriptions,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -31,12 +32,16 @@ import {
   fetchSupplyAccounts,
   fetchSupplyOverview,
   fetchSupplyConfig,
+  fetchAdminPrice,
   saveSupplyConfig,
   upsertSupplyVendor,
   logSupplyQuote,
   logSupplyPo,
 } from '../../api'
 import type {
+  PricePlanItem,
+  PriceReportRow,
+  PriceResp,
   SupplyAccountRow,
   SupplyAccountsResp,
   SupplyCompareResp,
@@ -46,9 +51,13 @@ import type {
   SupplyVendorsResp,
 } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
+import { client } from '../../api/client'
+import { comparePlatformUrl, DEF_COMPARE_PLATFORMS, normalizeComparePlatforms } from './comparePlatforms'
+import type { ComparePlatform } from './comparePlatforms'
 import { COLORS } from '../../theme'
 
-type SupplyTab = 'vendors' | 'compare' | 'accounts'
+type SupplyTab = 'vendors' | 'compare' | 'accounts' | 'price'
+type PriceFilter = 'all' | 'better' | 'worse' | 'none'
 
 const DEFAULT_CFG: SupplyConfigResp['supply'] = {
   spread_warn_pct: 10,
@@ -68,6 +77,12 @@ export default function VendorsPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [tab, setTab] = useState<SupplyTab>('vendors')
+  const [price, setPrice] = useState<PriceResp | null>(null)
+  const [priceQ, setPriceQ] = useState('')
+  const [priceF, setPriceF] = useState<PriceFilter>('all')
+  const [planOpen, setPlanOpen] = useState(false)
+  /* FP-PRICE-09：「去比价」外链所用的平台表（`config.compare_platforms`，缺省用旧版 DEF_PLATFORMS） */
+  const [platforms, setPlatforms] = useState<ComparePlatform[]>(DEF_COMPARE_PLATFORMS.map((p) => ({ ...p })))
 
   const [vOpen, setVOpen] = useState(false)
   const [vForm] = Form.useForm()
@@ -86,13 +101,17 @@ export default function VendorsPage() {
       fetchSupplyAccounts(),
       fetchSupplyOverview(),
       fetchSupplyConfig().catch(() => null),
+      fetchAdminPrice().catch(() => null),
+      client.get<{ config?: Record<string, unknown> }>('/admin/config').catch(() => null),
     ])
-      .then(([v, c, a, o, cf]) => {
+      .then(([v, c, a, o, cf, pr, cfg]) => {
         setVendors(v)
         setCompare(c)
         setAccounts(a)
         setOverview(o)
         if (cf?.supply) setCfg(cf.supply)
+        if (pr) setPrice(pr)
+        if (cfg?.data?.config) setPlatforms(normalizeComparePlatforms(cfg.data.config.compare_platforms))
         setIsMock(false)
       })
       .catch(() => {
@@ -151,6 +170,100 @@ export default function VendorsPage() {
     [],
   )
 
+  /* FP-PRICE-03 比价主表：本店均价 vs 外部最低报价（差价 / 节省%） */
+  const priceCols: ColumnsType<PriceReportRow> = useMemo(
+    () => [
+      {
+        title: '原料', dataIndex: 'name', width: 170,
+        render: (x, r) => (
+          <>
+            <strong>{x}</strong>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+              {r.cat}{r.conv !== 1 ? ` · 1${r.buy}=${r.conv}${r.unit}` : ''}
+            </Typography.Text>
+          </>
+        ),
+      },
+      { title: '本店均价', dataIndex: 'avg', width: 100, align: 'right', render: (x, r) => `¥${x}/${r.unit}` },
+      {
+        title: '外部最低报价', key: 'best', width: 170,
+        render: (_, r) => r.best
+          ? <span><strong style={{ color: COLORS.green }}>¥{r.best.unit}/{r.unit}</strong><Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>{r.best.src} ¥{r.best.price}/{r.best.per === 'buy' ? r.buy : r.unit}</Typography.Text></span>
+          : <Typography.Text type="secondary">暂无报价</Typography.Text>,
+      },
+      {
+        title: '差价', dataIndex: 'diff', width: 100, align: 'right',
+        sorter: (a, b) => (a.diff ?? 0) - (b.diff ?? 0),
+        render: (x) => x == null ? '-' : <span style={{ color: x < 0 ? COLORS.green : COLORS.red }}>{x > 0 ? '+' : ''}{x}</span>,
+      },
+      {
+        title: '节省%', dataIndex: 'savePct', width: 100, align: 'right',
+        sorter: (a, b) => (a.savePct ?? 0) - (b.savePct ?? 0),
+        render: (x, r) => x == null ? '-' : <Tag color={r.diff! < 0 ? COLORS.green : COLORS.red}>{r.diff! < 0 ? '省' : '高'} {x}%</Tag>,
+      },
+      {
+        title: '来源与时间', key: 'recent', width: 200,
+        render: (_, r) => r.best
+          ? (
+            <>
+              <Tag color={r.diff! < -0.01 ? COLORS.green : r.diff! > 0.01 ? COLORS.red : COLORS.gray}>{r.diff! < -0.01 ? '外价更低' : r.diff! > 0.01 ? '外价更高' : '基本持平'}</Tag>
+              {r.recent.slice(0, 2).map((q, i) => (
+                <Typography.Text key={i} type="secondary" style={{ fontSize: 12, display: 'block' }}>{q.src} · {q.date}</Typography.Text>
+              ))}
+            </>
+          )
+          : <Typography.Text type="secondary">无</Typography.Text>,
+      },
+      {
+        /* FP-PRICE-09：跳转外部平台搜索（旧版 pricePop，HTML:1178-1182） */
+        title: '去比价', key: 'go', width: 110,
+        render: (_, r) => (
+          <Dropdown
+            menu={{
+              items: platforms.length
+                ? platforms.map((p) => ({
+                    key: p.name || p.tpl,
+                    label: (
+                      <a href={comparePlatformUrl(p.tpl, r.name)} target="_blank" rel="noopener noreferrer">
+                        🔍 {p.name || p.tpl}
+                      </a>
+                    ),
+                  }))
+                : [{ key: 'none', label: '未配置平台（到「设置」添加）', disabled: true }],
+            }}
+          >
+            <Button size="small">去比价</Button>
+          </Dropdown>
+        ),
+      },
+    ],
+    [platforms],
+  )
+
+  /* FP-PRICE-13 待比价清单 */
+  const planCols: ColumnsType<PricePlanItem> = useMemo(
+    () => [
+      { title: '原料', dataIndex: 'name', width: 140, render: (x) => <strong>{x}</strong> },
+      { title: '分类', dataIndex: 'cat', width: 90, render: (x) => <Tag color={COLORS.blue}>{x}</Tag> },
+      { title: '建议搜索关键词', dataIndex: 'keyword', width: 160 },
+      { title: '采购单位换算', key: 'conv', width: 120, render: (_, r) => `1${r.buy} = ${r.conv}${r.unit}` },
+      { title: '本店均价', dataIndex: 'avg', width: 100, align: 'right', render: (x, r) => `¥${x}/${r.unit}` },
+      { title: '状态', dataIndex: 'status', width: 100, render: (x) => <Tag color={x === '已比价' ? COLORS.green : COLORS.orange}>{x}</Tag> },
+    ],
+    [],
+  )
+
+  const priceRows = useMemo(() => {
+    if (!price) return []
+    return price.report.rows.filter((r) => {
+      if (priceQ && !r.name.includes(priceQ) && !r.cat.includes(priceQ)) return false
+      if (priceF === 'better') return r.best != null && (r.diff ?? 0) < -0.01
+      if (priceF === 'worse') return r.best != null && (r.diff ?? 0) > 0.01
+      if (priceF === 'none') return r.best == null
+      return true
+    })
+  }, [price, priceQ, priceF])
+
   const run = async (fn: () => Promise<{ ok?: boolean; note?: string; error?: string }>, close: () => void, okMsg: string) => {
     setBusy(true)
     try {
@@ -172,10 +285,29 @@ export default function VendorsPage() {
       level: v.level == null ? undefined : Number(v.level), status: v.status, contact: v.contact, phone: v.phone, note: v.note,
     }), () => setVOpen(false), '供应商档案已入队')
   }
+  /* FP-PRICE-05 报价口径实时折算（口径同 bff/lib/price.js::quotePerStock：
+     per='buy' 按采购单位价 ÷ conv，'stock' 即库存单位价），对比本店均价给「低/高」提示 */
+  const qIng = Form.useWatch('ing', qForm)
+  const qPrice = Form.useWatch('price', qForm)
+  const qPer = Form.useWatch('per', qForm)
+  const qRows = price?.report.rows ?? []
+  const qRow = useMemo(() => qRows.find((r) => r.name === qIng) || null, [qRows, qIng])
+  const qHint = useMemo(() => {
+    if (!qRow) return null
+    const p = Number(qPrice) || 0
+    if (p <= 0) return null
+    const conv = qRow.conv > 0 ? qRow.conv : 1
+    const unit = qPer === 'buy' ? p / conv : p
+    const avg = Number(qRow.avg) || 0
+    const diff = unit - avg
+    const pct = avg > 0 ? (Math.abs(diff) / avg) * 100 : 0
+    return { unit, avg, diff, pct, unitName: qRow.unit, buy: qRow.buy, conv: qRow.conv }
+  }, [qRow, qPrice, qPer])
+
   const submitQuote = async () => {
     const v = await qForm.validateFields()
     await run(() => logSupplyQuote({
-      ing: v.ing, src: v.src, price: Number(v.price), unit: v.unit, note: v.note, set_default_sup: v.set_default_sup === true,
+      ing: v.ing, src: v.src, price: Number(v.price), per: v.per, unit: v.unit, note: v.note, set_default_sup: v.set_default_sup === true,
     }), () => setQOpen(false), '报价已入队')
   }
   const submitPo = async () => {
@@ -283,6 +415,30 @@ export default function VendorsPage() {
                 </>
               ),
             },
+            {
+              key: 'price',
+              label: `原料比价（${price?.report.tip.onSale ?? 0}）`,
+              children: (
+                <>
+                  {price && (
+                    <Alert type="info" showIcon style={{ marginBottom: 12 }} message={`待比价原料：${price.report.tip.onSale} 种 · 尚无报价 ${price.report.tip.noQuote} 种 · 已有报价 ${price.report.tip.hasQuote} 种`} />
+                  )}
+                  <Space style={{ marginBottom: 12 }} wrap>
+                    <Input.Search placeholder="搜索原料名 / 分类" allowClear style={{ width: 240 }} value={priceQ} onChange={(e) => setPriceQ(e.target.value)} onSearch={setPriceQ} />
+                    <Select<PriceFilter> value={priceF} onChange={setPriceF} style={{ width: 150 }} options={[
+                      { value: 'all', label: '全部' },
+                      { value: 'better', label: '外价更低' },
+                      { value: 'worse', label: '外价更高' },
+                      { value: 'none', label: '暂无报价' },
+                    ]} />
+                    <Button onClick={() => setPlanOpen(true)}>待比价清单</Button>
+                  </Space>
+                  {priceRows.length ? (
+                    <Table<PriceReportRow> rowKey="ingId" columns={priceCols} dataSource={priceRows} loading={loading} pagination={{ pageSize: 12 }} size="small" />
+                  ) : <Empty description="暂无原料比价数据" />}
+                </>
+              ),
+            },
           ]}
         />
 
@@ -309,9 +465,39 @@ export default function VendorsPage() {
 
       <Modal title="录入供应商报价" open={qOpen} onCancel={() => setQOpen(false)} confirmLoading={busy} destroyOnHidden onOk={submitQuote}>
         <Form form={qForm} layout="vertical" preserve={false}>
-          <Form.Item name="ing" label="原料" rules={[{ required: true, message: '请填写原料' }]}><Input placeholder="如：猪肉 / 白菜" /></Form.Item>
+          <Form.Item name="ing" label="原料" rules={[{ required: true, message: '请选择原料' }]}>
+            <Select
+              showSearch
+              placeholder="选择在售原料"
+              options={qRows.map((r) => ({ value: r.name, label: `${r.name}（本店均价 ¥${r.avg}/${r.unit}）` }))}
+              filterOption={(inp, opt) => String(opt?.label ?? '').includes(inp)}
+            />
+          </Form.Item>
           <Form.Item name="src" label="供应商" rules={[{ required: true, message: '请填写供应商' }]}><Input /></Form.Item>
-          <Form.Item name="price" label="报价（元）" rules={[{ required: true, message: '请填写报价' }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} /></Form.Item>
+          <Form.Item name="per" label="报价口径" initialValue="buy">
+            <Select
+              options={[
+                { value: 'buy', label: qRow && qRow.conv > 1 ? `按采购单位（元/${qRow.buy}，1${qRow.buy}=${qRow.conv}${qRow.unit}）` : '按采购单位' },
+                { value: 'stock', label: qRow ? `按库存单位（元/${qRow.unit}）` : '按库存单位' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="price" label="报价金额（元）" rules={[{ required: true, message: '请填写报价' }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} /></Form.Item>
+          {qHint && (
+            <Alert
+              style={{ marginBottom: 12 }}
+              showIcon
+              type={qHint.diff < -0.01 ? 'success' : qHint.diff > 0.01 ? 'warning' : 'info'}
+              message={
+                `折算 ¥${qHint.unit.toFixed(2)}/${qHint.unitName}，与本店均价 ¥${qHint.avg} 相比：` +
+                (qHint.diff < -0.01
+                  ? `低 ¥${(-qHint.diff).toFixed(2)}（省 ${qHint.pct.toFixed(0)}%）`
+                  : qHint.diff > 0.01
+                    ? `高 ¥${qHint.diff.toFixed(2)}（贵 ${qHint.pct.toFixed(0)}%）`
+                    : '基本持平')
+              }
+            />
+          )}
           <Form.Item name="unit" label="单位"><Input placeholder="kg / 箱" /></Form.Item>
           <Form.Item name="note" label="备注"><Input placeholder="含运 / 到店价" /></Form.Item>
           <Form.Item name="set_default_sup" label="设为该原料默认供应商" valuePropName="checked"><Switch /></Form.Item>
@@ -335,6 +521,12 @@ export default function VendorsPage() {
           <Form.Item name="low_level" label="低评级线（星）" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} max={5} /></Form.Item>
           <Alert type="info" showIcon message="需满足：30 天档 < 60 天档；保存即对全店供应链台账生效。" />
         </Form>
+      </Modal>
+
+      <Modal title={`待比价清单（${price?.plan.onSale ?? 0}）`} open={planOpen} footer={null} onCancel={() => setPlanOpen(false)} width={820}>
+        {price?.plan.items.length ? (
+          <Table<PricePlanItem> rowKey="ingId" columns={planCols} dataSource={price.plan.items} pagination={{ pageSize: 12 }} size="small" />
+        ) : <Empty description="暂无在售原料" />}
       </Modal>
     </div>
   )

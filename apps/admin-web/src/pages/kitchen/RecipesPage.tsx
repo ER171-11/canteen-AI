@@ -21,7 +21,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { fetchAdminDishes, fetchKitchenRecipe, fetchKitchenRecipes, fetchSnapshot, submitConfirmedAction } from '../../api'
+import { fetchAdminDishes, fetchKitchenRecipe, fetchKitchenRecipes, fetchSnapshot, submitAndConfirmAction } from '../../api'
 import type { CostCard, Dish, RecipeItem } from '../../api/types'
 import ColorBadge from './components/ColorBadge'
 import BomTable from './components/BomTable'
@@ -30,7 +30,17 @@ import { colorMeta, colorOrderKey, FIVE_COLOR_ORDER } from './colorMeta'
 import { COLORS } from '../../theme'
 
 type BomFormLine = { name?: string; qty?: number; unit?: string }
-type IngOpt = { id: string; name: string; unit?: string }
+type IngOpt = { id: string; name: string; unit?: string; avg?: number; yld?: number }
+
+/** 单行成本预览：毛料消耗 = 净料用量 / 出成率；行成本 = 毛料 × 均价（元/库存单位） */
+function calcLine(line: BomFormLine | undefined, ing: IngOpt | undefined) {
+  const qty = Number(line?.qty)
+  if (!ing || !(qty > 0)) return null
+  const yld = ing.yld && ing.yld > 0 ? ing.yld : 1
+  const gross = qty / yld
+  const avg = typeof ing.avg === 'number' && isFinite(ing.avg) && ing.avg > 0 ? ing.avg : null
+  return { gross, lc: avg != null ? gross * avg : null }
+}
 
 function linesFromBom(arr: RecipeItem['main']): BomFormLine[] {
   if (!arr?.length) return [{ name: '', qty: undefined, unit: 'g' }]
@@ -62,6 +72,23 @@ export default function RecipesPage() {
   const [dishes, setDishes] = useState<Dish[]>([])
   const [form] = Form.useForm()
 
+  /* 编辑弹窗实时成本：Form.useWatch([]) 监听整表，任一改动触发重渲染 */
+  const watched = Form.useWatch([], form) as Record<string, unknown> | undefined
+  const linesOf = (key: 'main' | 'aux' | 'seasoning') =>
+    (watched?.[key] as BomFormLine[] | undefined) || []
+  const bomSummary = useMemo(() => {
+    let total = 0
+    for (const k of ['main', 'aux', 'seasoning'] as const) {
+      for (const line of linesOf(k)) {
+        const ing = line?.name ? ings.find((g) => g.name === line.name) : undefined
+        const c = calcLine(line, ing)
+        if (c?.lc != null) total += c.lc
+      }
+    }
+    const price = Number(watched?.price)
+    return { total, gm: price > 0 ? (price - total) / price : null, price }
+  }, [watched, ings])
+
   const load = useCallback(() => {
     fetchKitchenRecipes()
       .then((resp) => {
@@ -76,11 +103,24 @@ export default function RecipesPage() {
       })
     fetchSnapshot()
       .then((snap) => {
-        const raw = (snap.data?.ings as Array<{ id?: string; name?: string; unit?: string }>) || []
+        const raw =
+          (snap.data?.ings as Array<{
+            id?: string
+            name?: string
+            unit?: string
+            avg?: number
+            yld?: number
+          }>) || []
         setIngs(
           raw
             .filter((g) => g.name)
-            .map((g) => ({ id: String(g.id || g.name), name: String(g.name), unit: g.unit })),
+            .map((g) => ({
+              id: String(g.id || g.name),
+              name: String(g.name),
+              unit: g.unit,
+              avg: g.avg,
+              yld: g.yld,
+            })),
         )
       })
       .catch(() => setIngs([]))
@@ -437,7 +477,7 @@ export default function RecipesPage() {
           const v = await form.validateFields()
           setBusy(true)
           try {
-            const r = await submitConfirmedAction({
+            const r = await submitAndConfirmAction({
               type: 'recipe.upsert',
               payload: {
                 sku_id: v.sku_id,
@@ -455,7 +495,7 @@ export default function RecipesPage() {
               },
               operator: 'admin',
             })
-            message.success(r.confirmed ? '已确认，待消费器落库' : '已入队')
+            message.success(r.confirmed ? '已保存' : '已入队，待审批中心确认')
             setEditOpen(false)
             setTimeout(load, 2800)
           } catch (e: unknown) {
@@ -521,51 +561,110 @@ export default function RecipesPage() {
                       + 行
                     </Button>
                   </div>
-                  {fields.map((field) => (
-                    <Space key={field.key} style={{ display: 'flex', marginBottom: 8 }} align="start">
-                      <Form.Item
-                        {...field}
-                        name={[field.name, 'name']}
-                        rules={[{ required: true, message: '原料名' }]}
-                        style={{ width: 280, marginBottom: 0 }}
-                      >
-                        <Select
-                          showSearch
-                          allowClear
-                          mode="tags"
-                          placeholder={ings.length ? '从产品库选或输入' : '输入原料名'}
-                          options={ings.map((g) => ({
-                            value: g.name,
-                            label: `${g.name}${g.unit ? ` · ${g.unit}` : ''}`,
-                          }))}
-                          optionFilterProp="label"
-                          onChange={(val) => {
-                            /* tags 模式允许自由输入新原料名：取最后一项并收敛为单值 */
-                            const name = Array.isArray(val) ? val[val.length - 1] : val
-                            const cur = form.getFieldValue(key) || []
-                            const next = [...cur]
-                            next[field.name] = { ...(next[field.name] || {}), name }
-                            const hit = ings.find((g) => g.name === name)
-                            if (hit?.unit) next[field.name].unit = hit.unit
-                            form.setFieldValue(key, next)
-                          }}
-                        />
-                      </Form.Item>
-                      <Form.Item {...field} name={[field.name, 'qty']} style={{ width: 100, marginBottom: 0 }}>
-                        <InputNumber min={0} placeholder="用量" style={{ width: '100%' }} />
-                      </Form.Item>
-                      <Form.Item {...field} name={[field.name, 'unit']} style={{ width: 80, marginBottom: 0 }}>
-                        <Input placeholder="单位" />
-                      </Form.Item>
-                      <Button type="link" danger onClick={() => remove(field.name)}>
-                        删
-                      </Button>
-                    </Space>
-                  ))}
+                  {fields.map((field) => {
+                    const line = linesOf(key)[field.name] as BomFormLine | undefined
+                    const ing = line?.name ? ings.find((g) => g.name === line.name) : undefined
+                    const c = calcLine(line, ing)
+                    return (
+                      <Space key={field.key} style={{ display: 'flex', marginBottom: 8 }} align="start">
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'name']}
+                          rules={[{ required: true, message: '原料名' }]}
+                          style={{ width: 200, marginBottom: 0 }}
+                        >
+                          <Select
+                            showSearch
+                            allowClear
+                            mode="tags"
+                            placeholder={ings.length ? '从产品库选或输入' : '输入原料名'}
+                            options={ings.map((g) => ({
+                              value: g.name,
+                              label: `${g.name}${g.unit ? ` · ${g.unit}` : ''}`,
+                            }))}
+                            optionFilterProp="label"
+                            onChange={(val) => {
+                              /* tags 模式允许自由输入新原料名：取最后一项并收敛为单值 */
+                              const name = Array.isArray(val) ? val[val.length - 1] : val
+                              const cur = form.getFieldValue(key) || []
+                              const next = [...cur]
+                              next[field.name] = { ...(next[field.name] || {}), name }
+                              const hit = ings.find((g) => g.name === name)
+                              if (hit?.unit) next[field.name].unit = hit.unit
+                              form.setFieldValue(key, next)
+                            }}
+                          />
+                        </Form.Item>
+                        <Form.Item {...field} name={[field.name, 'qty']} style={{ width: 90, marginBottom: 0 }}>
+                          <InputNumber min={0} placeholder="用量" style={{ width: '100%' }} />
+                        </Form.Item>
+                        <Form.Item {...field} name={[field.name, 'unit']} style={{ width: 70, marginBottom: 0 }}>
+                          <Input placeholder="单位" />
+                        </Form.Item>
+                        <div style={{ width: 84 }}>
+                          <div style={{ color: '#999', fontSize: 11, lineHeight: '20px' }}>毛料消耗</div>
+                          <div style={{ lineHeight: '30px', textAlign: 'right' }}>
+                            {c ? c.gross.toFixed(3) : '—'}
+                          </div>
+                        </div>
+                        <div style={{ width: 84 }}>
+                          <div style={{ color: '#999', fontSize: 11, lineHeight: '20px' }}>行成本</div>
+                          <div style={{ lineHeight: '30px', textAlign: 'right' }}>
+                            {c?.lc != null ? c.lc.toFixed(2) : '—'}
+                          </div>
+                        </div>
+                        <Button type="link" danger onClick={() => remove(field.name)}>
+                          删
+                        </Button>
+                      </Space>
+                    )
+                  })}
                 </div>
               )}
             </Form.List>
           ))}
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '10px 12px',
+              background: '#fafafa',
+              borderRadius: 8,
+              marginTop: 2,
+            }}
+          >
+            <div>
+              <Typography.Text strong>配方成本（实时）：</Typography.Text>
+              <span style={{ color: '#D93025', fontWeight: 600 }}>{bomSummary.total.toFixed(2)}</span>
+              <Typography.Text type="secondary"> 元/份</Typography.Text>
+              <span style={{ marginLeft: 10, color: '#999', fontSize: 12 }}>
+                行成本 = 净料用量 ÷ 出成率 × 均价
+              </span>
+            </div>
+            <div>
+              <Typography.Text strong>毛利率：</Typography.Text>
+              <span
+                style={{
+                  color:
+                    bomSummary.gm != null
+                      ? bomSummary.gm >= 0.6
+                        ? '#1E8E5A'
+                        : bomSummary.gm >= 0.45
+                          ? '#666'
+                          : '#D93025'
+                      : '#999',
+                  fontWeight: 600,
+                }}
+              >
+                {bomSummary.gm != null ? `${Math.round(bomSummary.gm * 100)}%` : '—'}
+              </span>
+              {bomSummary.price <= 0 && (
+                <span style={{ marginLeft: 6, color: '#bbb', fontSize: 11 }}>填售价后显示</span>
+              )}
+            </div>
+          </div>
         </Form>
       </Modal>
     </div>

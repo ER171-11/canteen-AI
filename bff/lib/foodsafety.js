@@ -13,6 +13,8 @@
  *   消毒（M4-T4）：待执行 → 已完成 / 超时标红；7 日达标率
  */
 
+const sp = require('./safety_points');
+
 const DAY_MS = 86400000;
 const HOUR_MS = 3600000;
 const SAMPLE_HOLD_H = 48;   // 留样 48h 监管要求
@@ -20,6 +22,8 @@ const SAMPLE_WARN_H = 2;    // 到期前 2h 转黄
 const WEIGHT_JIAOZI = 125;  // 饺子留样克重下限
 const WEIGHT_HOTDISH = 200; // 热菜留样克重下限
 const DEFAULT_SPAN = 7;     // 消毒达标率默认窗口（7 日）
+const TEMP_MIN = 0;         // 留样存放温度下限 ℃（附录 C）
+const TEMP_MAX = 8;         // 留样存放温度上限 ℃（附录 C）
 
 const DEFAULT_THRESHOLDS = { block: 0, red: 7, orange: 14, yellow: 30 };
 
@@ -201,6 +205,20 @@ function sampleState(sample, now) {
   };
 }
 
+/** 存放温度：缺失/非法 → null；否则 number */
+function tempNum(v) {
+  if (v == null || v === '') return null;
+  const n = parseFloat(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+/** 存放温度分级：ok 0–8℃ / out 越界 / unknown 缺失或非法 */
+function tempLevel(v) {
+  const n = tempNum(v);
+  if (n == null) return 'unknown';
+  return n >= TEMP_MIN && n <= TEMP_MAX ? 'ok' : 'out';
+}
+
 /** 留样汇总 + 到期提醒（M4-T4） */
 function sampleReport(ext, now) {
   const at = now == null ? Date.now() : now;
@@ -218,7 +236,10 @@ function sampleReport(ext, now) {
       need_g: wc.need,
       weight_ok: wc.ok,
       weight_level: wc.level,
-      short_g: wc.short
+      short_g: wc.short,
+      hold_temp: tempNum(s && s.hold_temp),
+      sealed_by: str(s && s.sealed_by) || null,
+      temp_level: tempLevel(s && s.hold_temp)
     });
   });
   rows.sort((a, b) => (a.hours_left == null ? 1e9 : a.hours_left) - (b.hours_left == null ? 1e9 : b.hours_left));
@@ -230,7 +251,8 @@ function sampleReport(ext, now) {
     due_soon: active.filter((x) => x.level === 'yellow').length,
     expired: active.filter((x) => x.level === 'red').length,
     cleared: rows.filter((x) => x.level === 'done').length,
-    under_weight: rows.filter((x) => x.weight_level === 'fail').length
+    under_weight: rows.filter((x) => x.weight_level === 'fail').length,
+    temp_out: rows.filter((x) => x.temp_level === 'out').length
   };
   const reminders = [];
   active.forEach((x) => {
@@ -239,6 +261,9 @@ function sampleReport(ext, now) {
   });
   rows.filter((x) => x.weight_level === 'fail').forEach((x) => {
     reminders.push({ id: x.id, dish: x.dish, level: 'fail', text: `${x.dish} 留样克重 ${x.weight_g}g < ${x.need_g}g` });
+  });
+  rows.filter((x) => x.temp_level === 'out').forEach((x) => {
+    reminders.push({ id: x.id, dish: x.dish, level: 'out', text: `${x.dish} 存放温度 ${x.hold_temp}℃ 超出 ${TEMP_MIN}–${TEMP_MAX}℃` });
   });
   return { rows, summary, reminders };
 }
@@ -251,12 +276,22 @@ function isDoneRow(row) {
   return !/待执行|未完成|pending|未做|漏/.test(v);
 }
 
-/** 7 日消毒达标率：当日已完成区域数 / 应做区域数（区域集合取窗口内出现过的全部区域） */
+/**
+ * 7 日消毒达标率：当日已完成区域数 / 应做区域数
+ * 应做区域来源：已配置消毒点位时取点位 name（唯一事实来源）；未配置时回退历史
+ * fs_disinfect.area 去重，保持历史环境与空态兼容。
+ */
 function disinfectReport(ext, date, now, span) {
   const all = arr(ext && ext.fs_disinfect);
   const end = dayOf(date);
   const days = lastNDays(end, Math.max(1, num(span, DEFAULT_SPAN)));
-  const areas = uniq(all.map((r) => str(r && r.area) || '未分区'));
+  // 优先可配置消毒点位；无配置点位时回退历史记录区域去重
+  const configured = sp.usingDefaultPoints(ext, 'disinfect')
+    ? []
+    : sp.resolvePoints(ext, 'disinfect').map((p) => str(p.name) || '未分区');
+  const areas = configured.length
+    ? uniq(configured)
+    : uniq(all.map((r) => str(r && r.area) || '未分区'));
   const per = days.map((d) => {
     const dayRows = all.filter((r) => recordDay(r) === d);
     const doneAreas = uniq(dayRows.filter(isDoneRow).map((r) => str(r && r.area) || '未分区'));
@@ -359,6 +394,8 @@ module.exports = {
   SAMPLE_WARN_H,
   WEIGHT_JIAOZI,
   WEIGHT_HOTDISH,
+  TEMP_MIN,
+  TEMP_MAX,
   DEFAULT_THRESHOLDS,
   thresholdsOf,
   daysLeft,

@@ -8,9 +8,14 @@ set "WEB_PORT=5173"
 set "WEB_URL=http://localhost:%WEB_PORT%/"
 
 echo ==============================================
-echo   canteenAI  -  local test launcher
+echo   canteenAI  -  local launcher (REAL DATABASE)
 echo   (BFF + admin-web, for local testing only)
 echo ==============================================
+echo.
+echo   [!] REAL DATABASE mode: writes go to
+echo       store-inventory\data\餐厅系统.db
+echo       For any testing, use 启动演练.cmd instead
+echo       (sandbox DB, real data untouched).
 echo.
 
 where node >nul 2>nul

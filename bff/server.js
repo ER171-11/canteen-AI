@@ -83,8 +83,12 @@ const ROUTES = [
   require('./routes/analysis_sim'),
   require('./routes/app_release'),
   require('./routes/settle'),
+  // 设置页只读导出（backup.json / ings.csv / dishes.csv / sales.csv）
+  require('./routes/export'),
   require('./routes/qc_media'),
-  require('./routes/sop_media')
+  require('./routes/sop_media'),
+  // 食安点位主数据（巡检 / 消毒统一事实来源）
+  require('./routes/safety_points')
 ];
 
 // 默认绑 0.0.0.0：允许同一局域网设备访问（App 安装包下载 / 管理后台联调）。
@@ -239,9 +243,12 @@ const server = http.createServer(async (req, res) => {
     // 健康检查（新版契约）
     if (req.method === 'GET' && pathname === '/api/health') {
       const snap = loadSnapshot();
+      /* 环境透传：前端据此展示「演练环境」横幅（CANTEEN_ENV=sandbox 由启动脚本设置） */
+      const env = String(process.env.CANTEEN_ENV || '').trim().toLowerCase() === 'sandbox' ? 'sandbox' : 'real';
       return sendJSON(res, 200, {
         ok: true,
         service: 'canteenAI-bff',
+        env,
         models: kimi.MODEL_CANDIDATES,
         key_loaded: !!process.env.KIMI_API_KEY,
         rev: snap ? snap.rev : null,

@@ -42,6 +42,7 @@ __pycache__/
 
 # 店内系统运行时（备份/临时文件）
 store-inventory/data/backups/
+store-inventory/data/backups_sandbox/
 store-inventory/_tmp_*
 store-inventory/_p1prof/
 

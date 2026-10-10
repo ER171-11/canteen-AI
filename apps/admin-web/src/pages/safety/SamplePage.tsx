@@ -24,11 +24,13 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs, { Dayjs } from 'dayjs'
 import {
   clearFoodsafeSample,
+  fetchExportCsvBlob,
   fetchFoodsafeSamples,
   ingestFoodsafeSample,
   logFoodsafeSample,
 } from '../../api'
 import type { FoodsafeSamplesResp, SampleLevel, SampleRow } from '../../api/types'
+import { downloadBlob } from '../inventory/settle/download'
 import { useAuthStore } from '../../store/auth'
 import { COLORS } from '../../theme'
 
@@ -45,6 +47,12 @@ const WEIGHT_META: Record<string, { text: string; color: string }> = {
   warn: { text: '临界', color: COLORS.yellow },
   fail: { text: '不足', color: COLORS.red },
   unknown: { text: '缺失', color: COLORS.gray },
+}
+
+const TEMP_META: Record<string, { text: string; color: string }> = {
+  ok: { text: '正常', color: COLORS.green },
+  out: { text: '越界', color: COLORS.red },
+  unknown: { text: '未填', color: COLORS.gray },
 }
 
 const REMINDER_COLOR: Record<string, string> = {
@@ -93,6 +101,11 @@ export default function SamplePage() {
       .join(' / ')
   }, [data])
 
+  const tempRangeTip = useMemo(() => {
+    const r = data?.temp_range ?? { min: 0, max: 8 }
+    return `${r.min}–${r.max}℃`
+  }, [data])
+
   const submitLog = async () => {
     const v = await logForm.validateFields()
     setBusy(true)
@@ -103,6 +116,8 @@ export default function SamplePage() {
         dish: v.dish,
         weight_g: Number(v.weight_g),
         keeper: v.keeper || undefined,
+        hold_temp: v.hold_temp != null ? Number(v.hold_temp) : null,
+        sealed_by: v.sealed_by || undefined,
       })
       if (res.ok) {
         message.success(
@@ -134,6 +149,8 @@ export default function SamplePage() {
         conf: Number(v.conf),
         keeper: v.keeper || undefined,
         source: 'kimi',
+        hold_temp: v.hold_temp != null ? Number(v.hold_temp) : null,
+        sealed_by: v.sealed_by || undefined,
       })
       if (res.review) {
         setKimiResult(res.reason || `置信度 ${res.conf}% < ${res.threshold}%，转人工待复核`)
@@ -171,6 +188,17 @@ export default function SamplePage() {
       message.error(err.response?.data?.error || '销毁登记失败')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const exportSamples = async () => {
+    try {
+      const blob = await fetchExportCsvBlob('samples')
+      downloadBlob(`留样台账_${dayjs().format('YYYY-MM-DD')}.csv`, blob)
+      message.success('已导出留样台账 CSV')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string }
+      message.error(err?.response?.data?.error || err?.message || '导出失败')
     }
   }
 
@@ -231,6 +259,21 @@ export default function SamplePage() {
         </Tooltip>
       ),
     },
+    {
+      title: '存放温度',
+      dataIndex: 'hold_temp',
+      width: 110,
+      render: (v: number | null, r) => {
+        if (v == null) return '-'
+        const meta = TEMP_META[r.temp_level ?? 'unknown']
+        return (
+          <Tooltip title={`正常范围 ${tempRangeTip}`}>
+            <Tag color={meta?.color}>{v}℃ {meta?.text}</Tag>
+          </Tooltip>
+        )
+      },
+    },
+    { title: '封存人', dataIndex: 'sealed_by', width: 100, render: (v) => v ?? '-' },
     { title: '保管人', dataIndex: 'keeper', width: 90, render: (v) => v ?? '-' },
     {
       title: '操作',
@@ -298,6 +341,9 @@ export default function SamplePage() {
                 留样登记
               </Button>
             </Tooltip>
+            <Button size="small" onClick={exportSamples}>
+              导出 CSV
+            </Button>
             <Button size="small" onClick={load}>
               刷新
             </Button>
@@ -339,6 +385,15 @@ export default function SamplePage() {
                 title="克重不足"
                 value={s?.under_weight ?? 0}
                 valueStyle={{ color: (s?.under_weight ?? 0) ? COLORS.red : COLORS.green }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} md={6} xl={4}>
+            <Card size="small">
+              <Statistic
+                title="温度越界"
+                value={s?.temp_out ?? 0}
+                valueStyle={{ color: (s?.temp_out ?? 0) ? COLORS.red : COLORS.green }}
               />
             </Card>
           </Col>
@@ -420,6 +475,12 @@ export default function SamplePage() {
           <Form.Item name="keeper" label="保管人">
             <Input placeholder="选填，默认当前账号" />
           </Form.Item>
+          <Form.Item name="hold_temp" label={`存放温度（℃）· 正常 ${tempRangeTip}`}>
+            <InputNumber min={-40} max={60} style={{ width: '100%' }} placeholder="如 4（0–8℃ 为正常）" />
+          </Form.Item>
+          <Form.Item name="sealed_by" label="封存人（双人封存）">
+            <Input placeholder="如：张三 / 李四" />
+          </Form.Item>
           <Alert type="info" showIcon message="登记后进入 48h 倒计时，销毁需另行登记。" />
         </Form>
       </Modal>
@@ -461,6 +522,12 @@ export default function SamplePage() {
             <Select options={['早餐', '午餐', '晚餐'].map((m) => ({ value: m, label: m }))} />
           </Form.Item>
           <Form.Item name="keeper" label="保管人">
+            <Input placeholder="选填" />
+          </Form.Item>
+          <Form.Item name="hold_temp" label={`存放温度（℃）· 正常 ${tempRangeTip}`}>
+            <InputNumber min={-40} max={60} style={{ width: '100%' }} placeholder="选填" />
+          </Form.Item>
+          <Form.Item name="sealed_by" label="封存人（双人封存）">
             <Input placeholder="选填" />
           </Form.Item>
           {kimiResult && <Alert type="warning" showIcon message={kimiResult} />}

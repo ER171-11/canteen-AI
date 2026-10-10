@@ -33,6 +33,12 @@ function dayOf(dateStr) {
   const s = trim(dateStr);
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : todayStr();
 }
+/** 可选数值：空值/非法 → undefined；合法 → number */
+function optNum(v) {
+  if (v == null || v === '') return undefined;
+  const n = parseFloat(v);
+  return Number.isNaN(n) ? undefined : n;
+}
 function q1(url, key) {
   const v = url && url.get ? url.get(key) : null;
   return v == null ? null : String(v);
@@ -96,6 +102,7 @@ function samplesPayload() {
     hold_hours: foodsafety.SAMPLE_HOLD_H,
     warn_hours: foodsafety.SAMPLE_WARN_H,
     weight_rule: { '饺子': foodsafety.WEIGHT_JIAOZI, '热菜/其他': foodsafety.WEIGHT_HOTDISH },
+    temp_range: { min: foodsafety.TEMP_MIN, max: foodsafety.TEMP_MAX },
     auto_archive_conf: AUTO_ARCHIVE_CONF
   }, rep);
 }
@@ -248,7 +255,9 @@ function handle(req, res, ctx, pathname) {
         dish,
         weight_g: wc.weight,
         keeper: trim(body.keeper) || operatorOf(ctx, body) || undefined,
-        kept_at: trim(body.kept_at) || undefined
+        kept_at: trim(body.kept_at) || undefined,
+        hold_temp: optNum(body.hold_temp),
+        sealed_by: trim(body.sealed_by) || undefined
       }, operatorOf(ctx, body), ctx.traceId);
       ctx.sendJSON(res, 200, {
         ok: true, action_id: id, rev,
@@ -283,7 +292,9 @@ function handle(req, res, ctx, pathname) {
         dish,
         weight_g: wc.weight,
         keeper: trim(body.keeper) || operatorOf(ctx, body) || undefined,
-        kept_at: trim(body.kept_at) || undefined
+        kept_at: trim(body.kept_at) || undefined,
+        hold_temp: optNum(body.hold_temp),
+        sealed_by: trim(body.sealed_by) || undefined
       }, operatorOf(ctx, body), ctx.traceId);
       ctx.sendJSON(res, 200, {
         ok: true, archived: true, action_id: id, rev, conf: conf == null ? null : conf,

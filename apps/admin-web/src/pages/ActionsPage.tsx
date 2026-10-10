@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { isAxiosError } from 'axios'
 import {
   Alert,
   Card,
@@ -24,24 +25,18 @@ import type { ActionItem, ActionStatus } from '../api/types'
 import { useAuthStore } from '../store/auth'
 import { COLORS } from '../theme'
 
-/** 审批四态标签（兼容英文枚举与 BFF 中文状态） */
+/** 审批动作状态标签（与后端权威 5 态一一对应：queued 为入队初态英文遗留） */
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
-  pending: { color: COLORS.yellow, text: '排队中' },
   queued: { color: COLORS.yellow, text: '排队中' },
-  confirmed: { color: COLORS.green, text: '待执行' },
-  rejected: { color: COLORS.red, text: '已驳回' },
-  done: { color: COLORS.purple, text: '已执行' },
-  排队中: { color: COLORS.yellow, text: '排队中' },
-  queued_cn: { color: COLORS.yellow, text: '排队中' },
   待执行: { color: COLORS.green, text: '待执行' },
-  已驳回: { color: COLORS.red, text: '已驳回' },
   已执行: { color: COLORS.purple, text: '已执行' },
+  已驳回: { color: COLORS.red, text: '已驳回' },
   已过期: { color: 'default', text: '已过期' },
 }
 
-const OPEN = new Set(['queued', '排队中', 'pending'])
+const OPEN = new Set(['queued'])
 /** 终态：轮询到此为止 */
-const TERMINAL = new Set(['已执行', '已驳回', '已过期', 'done', 'rejected', 'expired'])
+const TERMINAL = new Set(['已执行', '已驳回', '已过期'])
 
 /** 轮询已确认单直到终态（消费器异步落库），最长约 20s */
 async function pollUntilTerminal(id: string): Promise<string> {
@@ -58,6 +53,15 @@ async function pollUntilTerminal(id: string): Promise<string> {
   return ''
 }
 
+/** 透出服务端 error 字段（如 rev mismatch / invalid state / pending_provider），而非裸 axios 文案 */
+function serverErrMsg(e: unknown): string {
+  if (isAxiosError(e)) {
+    const d = e.response?.data as { error?: string } | undefined
+    return d?.error || e.message
+  }
+  return e instanceof Error ? e.message : String(e)
+}
+
 export default function ActionsPage() {
   const canWrite = useAuthStore((s) => s.canWrite)
   const noWriteTip = '当前角色无写权限，仅可查看'
@@ -69,6 +73,8 @@ export default function ActionsPage() {
   const [batchBusy, setBatchBusy] = useState(false)
   const [selected, setSelected] = useState<React.Key[]>([])
   const [rejectReason, setRejectReason] = useState('')
+  /* 同步竞态闸门：setBusyId 是异步 state，同一帧的双击拦不住，用 ref 兜底 */
+  const busyRef = useRef(false)
 
   const load = useCallback((s?: string) => {
     setLoading(true)
@@ -91,34 +97,64 @@ export default function ActionsPage() {
   const doConfirm = async (row: ActionItem) => {
     const snap = await fetchSnapshot().catch(() => null)
     const rev = snap?.rev != null ? String(snap.rev) : undefined
-    await confirmAction(row.id, { operator: 'admin', rev })
+    try {
+      await confirmAction(row.id, { operator: 'admin', rev })
+    } catch (e: unknown) {
+      /* rev 乐观锁冲突：快照可能刚被消费器推进，取最新 rev 重试一次（仍失败则抛出） */
+      if (isAxiosError(e) && e.response?.status === 409 && /rev mismatch/.test(serverErrMsg(e))) {
+        const fresh = await fetchSnapshot().catch(() => null)
+        const rev2 = fresh?.rev != null ? String(fresh.rev) : undefined
+        await confirmAction(row.id, { operator: 'admin', rev: rev2 })
+      } else {
+        throw e
+      }
+    }
     /* 已确认（待执行）后轮询执行结果直至终态 */
     const final = await pollUntilTerminal(row.id)
     return final
   }
 
   const onConfirm = async (row: ActionItem) => {
+    if (busyRef.current) return
+    busyRef.current = true
     setBusyId(row.id)
     try {
       const final = await doConfirm(row)
       message.success(final ? `已执行完成 ${row.id}（${final}）` : `已通过 ${row.id}，等待消费器执行`)
       load(status)
     } catch (e: unknown) {
-      message.error(e instanceof Error ? e.message : '确认失败')
+      const msg = serverErrMsg(e)
+      if (/invalid state/.test(msg)) {
+        /* 该单已不在 queued（多半刚才那次点击其实已成功），刷新即可，不算错误 */
+        message.warning(`该申请状态已变化，无需重复通过（${row.id}），列表已刷新`)
+      } else {
+        message.error(`通过失败：${msg}`)
+      }
+      load(status)
     } finally {
+      busyRef.current = false
       setBusyId(null)
     }
   }
 
   const onReject = async (row: ActionItem, reason: string) => {
+    if (busyRef.current) return
+    busyRef.current = true
     setBusyId(row.id)
     try {
       await rejectAction(row.id, { reason: reason.trim() || '管理端驳回' })
       message.success(`已驳回 ${row.id}`)
       load(status)
     } catch (e: unknown) {
-      message.error(e instanceof Error ? e.message : '驳回失败')
+      const msg = serverErrMsg(e)
+      if (/invalid state/.test(msg)) {
+        message.warning(`该申请状态已变化，无需重复驳回（${row.id}），列表已刷新`)
+      } else {
+        message.error(`驳回失败：${msg}`)
+      }
+      load(status)
     } finally {
+      busyRef.current = false
       setBusyId(null)
     }
   }

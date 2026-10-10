@@ -15,7 +15,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { fetchSnapshot, submitConfirmedAction } from '../../api'
+import { fetchSnapshot, submitAndConfirmAction } from '../../api'
 import type { PosTable } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
 import { COLORS } from '../../theme'
@@ -111,9 +111,9 @@ export default function TablesPage() {
   const run = async (type: string, payload: Record<string, unknown>, okMsg: string) => {
     setBusy(true)
     try {
-      const r = await submitConfirmedAction({ type, payload, operator: 'admin' })
+      const r = await submitAndConfirmAction({ type, payload, operator: 'admin' })
       message.success(
-        r.confirmed ? `${okMsg}（已确认，待消费器）` : `${okMsg}已入队，请到审批中心确认`,
+        r.confirmed ? `${okMsg}已保存` : `${okMsg}已入队，待审批中心确认`,
       )
       setTimeout(load, 2500)
     } catch (e: unknown) {

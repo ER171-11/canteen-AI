@@ -22,6 +22,7 @@ const path = require('path');
 const { exec } = require('child_process');
 const { Store, Conflict, nowIso } = require('./db');
 const mergeMod = require('./merge');
+const envGuard = require('../lib/env-guard');
 
 const BASE_DIR = __dirname;                                        // bff/store-node/
 const STORE_DIR = path.resolve(BASE_DIR, '..', '..', 'store-inventory'); // 旧 Python 项目根
@@ -149,8 +150,10 @@ function makeHandler(store, cfg, staticRoot) {
     return {
       ok: true,
       service: 'panda-inv-db',
+      env: cfg.canteen_env || envGuard.envName(),
       machine: cfg.machine_id,
       db_path: store.db_path,
+      db_file: path.basename(store.db_path),
       db_size: store.size(),
       rev: cur.rev,
       empty: cur.empty,
@@ -363,6 +366,13 @@ function buildStore(cfg) {
 // 启动服务；返回 { server, port, store, cfg }
 function startServer(cfg) {
   cfg = cfg || loadConfig();
+  /* 环境一致性校验：sandbox 却指向主库 → 抛错；同时隔离备份目录 */
+  const envInfo = envGuard.assertEnvSafe(abspath(cfg.db_path), console);
+  cfg = Object.assign({}, cfg, {
+    db_path: envInfo.dbPath,
+    backup_dir: envInfo.backupDir,
+    canteen_env: envInfo.env,
+  });
   const store = buildStore(cfg);
   const staticRoot = abspath(cfg.static_root);
   const handler = makeHandler(store, cfg, staticRoot);
@@ -422,7 +432,11 @@ async function main() {
   console.log(line);
   const { server, port, store } = await startServer(cfg);
   const cur = store.get();
+  console.log('  环境   : ' + (cfg.canteen_env === 'sandbox'
+    ? 'SANDBOX 演练（测试数据写入演练库）'
+    : 'REAL 真实库（写操作将落入真实数据）'));
   console.log('  数据库 : ' + store.db_path);
+  console.log('  备份目录: ' + abspath(cfg.backup_dir));
   console.log('  本机标识: ' + cfg.machine_id);
   console.log('  当前版本: rev=' + cur.rev + '  ' +
     (cur.empty ? '（空库，等待首次写入）' : cur.updated_at));

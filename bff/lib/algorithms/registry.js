@@ -11,6 +11,7 @@ const pos = require('./pos');
 const dish = require('./dish');
 const ops = require('./ops');
 const inspection = require('./inspection');
+const safetyPoint = require('./safety_point');
 
 /* 库存算法：入库/盘点后重算 stock/qty/avg */
 registerAll({
@@ -38,6 +39,11 @@ registerAll({
   'recv.pay': (ctx, data, payload) => inv.applyRecvPay(data, payload),
   'stock.count': (ctx, data, payload) => inv.applyStockCount(data, payload, ctx),
   'order.mark': (ctx, data, payload) => inv.applyOrderMark(data, payload),
+  'order.pay': (ctx, data, payload) => inv.applyOrderPay(data, payload),
+  'order.close': (ctx, data, payload) => inv.applyOrderClose(data, payload),
+  'order.void': (ctx, data, payload) => inv.applyOrderVoid(data, payload),
+  'order.restore': (ctx, data, payload) => inv.applyOrderRestore(data, payload),
+  'order.delete': (ctx, data, payload) => inv.applyOrderDelete(data, payload),
   'vendor.upsert': (ctx, data, payload) => inv.upsertVendor(data, payload, ctx),
   'supply.po': (ctx, data, payload) => (
     inv.applyRestock(data, payload) + ' + ' + inv.insertSupplyPo(ctx, payload)
@@ -118,6 +124,13 @@ registerAll({
   'inspection.assign': (ctx, data, payload) => inspection.assignInspection(ctx, data, payload)
 });
 
+/* 食安点位主数据域：巡检点 / 消毒点的增删改，写快照 ext.fs_points（走审批队列） */
+registerAll({
+  'safety_point.upsert': (ctx, data, payload) => safetyPoint.upsertSafetyPoint(ctx, data, payload),
+  'safety_point.seed': (ctx, data, payload) => safetyPoint.seedSafetyPoints(ctx, data, payload),
+  'safety_point.remove': (ctx, data, payload) => safetyPoint.removeSafetyPoint(ctx, data, payload)
+});
+
 /* loss.report 的 data 侧与 SQLite 旁路均已由 inv.applyLossReport 处理（内含 loss_reports 写入） */
 
-module.exports = { stock, inv, dish, pos, ops };
+module.exports = { stock, inv, dish, pos, ops, inspection, safetyPoint };

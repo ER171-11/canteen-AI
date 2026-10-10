@@ -19,6 +19,7 @@ import {
 import type { MenuProps } from 'antd'
 import { LogoutOutlined, ShopOutlined, SyncOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../store/auth'
+import EnvBanner from '../components/EnvBanner'
 import { canAccess, firstAccessiblePath } from '../rbac/roles'
 import { MENU, findLeaf } from '../config/menu'
 import { fetchHealth, fetchOrg } from '../api'
@@ -113,7 +114,10 @@ export default function MainLayout() {
   }
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <>
+      {/* 演练环境横幅：仅当 BFF /api/health 返回 env=sandbox 时展示 */}
+      <EnvBanner env={health?.env} />
+      <Layout style={{ minHeight: '100vh' }}>
       <Sider width={220} theme="dark">
         <div
           className="ai-gradient-text"
@@ -214,6 +218,7 @@ export default function MainLayout() {
           )}
         </Content>
       </Layout>
-    </Layout>
+      </Layout>
+    </>
   )
 }

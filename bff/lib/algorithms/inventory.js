@@ -22,7 +22,7 @@
  */
 
 const crypto = require('crypto');
-const { today, nowIso, num, r3, arr } = require('./util');
+const { today, nowIso, num, r2, r3, arr } = require('./util');
 const { rebuildStock } = require('./stock');
 
 /* ---------- 通用辅助 ---------- */
@@ -71,6 +71,11 @@ function toFloat(v) {
   const n = Number(s);
   if (Number.isNaN(n)) throw new Error('invalid float');
   return n;
+}
+
+/** 出成率钳制：0.05 ~ 1.00（对齐旧版 fYld 输入 min 0.05 max 1，存储为分数） */
+function clampYld(n) {
+  return Math.min(1, Math.max(0.05, n));
 }
 
 /**
@@ -247,6 +252,7 @@ function applyIngUpsert(data, payload) {
       ing.safety = toFloat(payload.safe);
     }
     if (payload.est != null) ing.est = toFloat(payload.est);
+    if (payload.yld != null) ing.yld = clampYld(toFloat(payload.yld));
     if (payload.qty != null) {
       const q = toFloat(payload.qty);
       ing.qty = q;
@@ -291,6 +297,7 @@ function applyIngUpsert(data, payload) {
     safe: toFloat(payload.safe || 0),
     safety: toFloat(payload.safe || 0),
     est: toFloat(payload.est || 0),
+    yld: payload.yld != null ? clampYld(toFloat(payload.yld)) : 1,
     avg: toFloat(payload.avg || 0),
     on: true,
     _u: now
@@ -1019,6 +1026,107 @@ function applyOrderMark(data, payload) {
   throw new Error('找不到采购单 ' + oid);
 }
 
+/* ---------- order.pay / close / void / restore / delete ----------
+ * 采购单付款与状态流转（对齐旧版 openGet('O')/closeOrder/voidOrder/restoreOrder/delOrder，HTML:1751-1827）。
+ * 硬规则：只改 data.orders（status/lines/ payments），**绝不触碰库存与均价**（采购单不进库存）。
+ */
+
+function _ordersArr(data) {
+  if (data.orders === undefined || data.orders === null) data.orders = [];
+  if (!Array.isArray(data.orders)) throw new Error('data.orders 不是数组');
+  return data.orders;
+}
+
+/** 定位采购单（id / no 任一匹配） */
+function _findOrder(orders, oid) {
+  const key = String(oid || '').trim();
+  if (!key) throw new Error('缺 order_id');
+  for (const o of orders) {
+    if (String(o.id || '') === key || String(o.no || '') === key) return o;
+  }
+  throw new Error('找不到采购单 ' + key);
+}
+
+/** 已付 = Σ payments[].amount（对齐旧版 recvPaid，HTML:1139） */
+function _orderPaid(o) {
+  return r2((o.payments || []).reduce((a, p) => a + (Number(p && p.amount) || 0), 0));
+}
+
+/** 设置所有行状态（st='closed'/'canceled'；null 清除。对齐旧版 setOrderLinesSt，HTML:1715） */
+function _setLinesSt(o, st) {
+  for (const l of o.lines || []) {
+    if (st) l.st = st; else delete l.st;
+  }
+}
+
+/**
+ * order.pay：采购单付款/补付登记（旧版 openGet('O')，HTML:2055-2080）。
+ * 校验 0 < amount ≤ 欠款 + 0.01（payable − 已付）；金额与日期可选，方式照抄旧版枚举。
+ */
+function applyOrderPay(data, payload) {
+  const orders = _ordersArr(data);
+  const o = _findOrder(orders, payload.order_id || payload.id || payload.no);
+  const payable = Number(o.payable) || 0;
+  const debt = r2(payable - _orderPaid(o));
+  const amount = r2(payload.amount);
+  if (!(amount > 0) || amount > debt + 0.01) {
+    throw new Error('付款金额需在 0 ~ 欠款（' + debt + '）之间');
+  }
+  if (!Array.isArray(o.payments)) o.payments = [];
+  o.payments.push({
+    amount,
+    date: payload.date || today(),
+    method: String(payload.method || '现金/扫码')
+  });
+  o._u = nowIso();
+  return 'orders ' + (o.no || o.id || '') + ' 付款 ' + amount + '（余欠 ' + r2(debt - amount) + '）';
+}
+
+/** order.close：结案（旧版 closeOrder，HTML:1751-1757）。只改状态，不碰库存与均价 */
+function applyOrderClose(data, payload) {
+  const orders = _ordersArr(data);
+  const o = _findOrder(orders, payload.order_id || payload.id || payload.no);
+  o.status = 'closed';
+  o.closeBy = 'manual';
+  o.closedAt = today();
+  _setLinesSt(o, 'closed');
+  o._u = nowIso();
+  return 'orders ' + (o.no || o.id || '') + ' 已结案（手工）';
+}
+
+/** order.void：作废（旧版 voidOrder，HTML:1758-1763） */
+function applyOrderVoid(data, payload) {
+  const orders = _ordersArr(data);
+  const o = _findOrder(orders, payload.order_id || payload.id || payload.no);
+  o.status = 'void';
+  o.closeBy = 'manual';
+  o.closedAt = today();
+  _setLinesSt(o, 'canceled');
+  o._u = nowIso();
+  return 'orders ' + (o.no || o.id || '') + ' 已作废';
+}
+
+/** order.restore：已结案/已作废 → 收货中（旧版 restoreOrder，HTML:1765-1769） */
+function applyOrderRestore(data, payload) {
+  const orders = _ordersArr(data);
+  const o = _findOrder(orders, payload.order_id || payload.id || payload.no);
+  o.status = 'normal';
+  o.closeBy = 'auto';
+  delete o.closedAt;
+  _setLinesSt(o, null);
+  o._u = nowIso();
+  return 'orders ' + (o.no || o.id || '') + ' 已恢复为收货中';
+}
+
+/** order.delete：物理删除采购单（旧版 delOrder，HTML:1822-1827）。该单不参与库存计算 */
+function applyOrderDelete(data, payload) {
+  const orders = _ordersArr(data);
+  const o = _findOrder(orders, payload.order_id || payload.id || payload.no);
+  const no = o.no || o.id || '';
+  data.orders = orders.filter((x) => x !== o);
+  return 'orders ' + no + ' 已删除';
+}
+
 /* ---------- vendor.upsert ---------- */
 
 /**
@@ -1213,6 +1321,11 @@ module.exports = {
   applyStockCount,
   insertStockCount,
   applyOrderMark,
+  applyOrderPay,
+  applyOrderClose,
+  applyOrderVoid,
+  applyOrderRestore,
+  applyOrderDelete,
   upsertVendor,
   insertSupplyPo
 };

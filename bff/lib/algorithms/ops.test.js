@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS qc_records (id INTEGER PRIMARY KEY AUTOINCREMENT, wor
 CREATE TABLE IF NOT EXISTS qc_force_pass (id INTEGER PRIMARY KEY AUTOINCREMENT, workorder_id, reason, operator, ts, source);
 CREATE TABLE IF NOT EXISTS queue_serves (id INTEGER PRIMARY KEY AUTOINCREMENT, date, action, item, qty REAL, note, queue_no, wait_eta_min INT, queue_count INT, ts, source);
 CREATE TABLE IF NOT EXISTS loss_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, date, ing_name, qty, reason, reporter, status, source);
-CREATE TABLE IF NOT EXISTS fs_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, date, meal, dish, weight_g, keeper, kept_at, source);
+CREATE TABLE IF NOT EXISTS fs_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, date, meal, dish, weight_g, keeper, kept_at, source, hold_temp, sealed_by);
 CREATE TABLE IF NOT EXISTS sop_workorders (id INTEGER PRIMARY KEY AUTOINCREMENT, date, sku_id, qty REAL, planned_start, status, qc_records, table_id, table_no, bom_deducted INT DEFAULT 0, actual_yield REAL, steps_state TEXT);
 CREATE TABLE IF NOT EXISTS fs_certs (id, cert_type, holder, cert_no, issued_at, expire_at, status);
 CREATE TABLE IF NOT EXISTS app_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, kind, title, body, ts TEXT DEFAULT (datetime('now','localtime')));
@@ -292,7 +292,7 @@ const fixtures = [
   { name: 'qc.record', fn: 'qc', data: {}, payload: { workorder_id: 7, sku_id: 'S1', sample_weight: 50, pass: '合格', ts: '2026-09-27T10:00:00', source: 'auto' } },
   { name: 'qc.pass(false)', fn: 'qc', data: {}, payload: { workorder_id: 8, pass: 0, ts: 'T', __t__: 'qc.pass' } },
   { name: 'queue.serve', fn: 'queue_serve', data: { logs: [] }, payload: { action: '上茶', item: '普洱', qty: 2, date: '2026-09-27', ts: 'T', queue_no: 'Q01', wait_eta_min: 5, queue_count: 3 } },
-  { name: 'sample.log', fn: 'sample', data: {}, payload: { date: '2026-09-27', meal: '午餐', dish: '红烧肉', weight_g: 125, keeper: '张三', kept_at: 'T' } },
+  { name: 'sample.log', fn: 'sample', data: {}, payload: { date: '2026-09-27', meal: '午餐', dish: '红烧肉', weight_g: 125, keeper: '张三', kept_at: 'T', hold_temp: 4.5, sealed_by: '张三/李四' } },
   { name: 'loss.report', fn: 'loss', data: {}, payload: { date: '2026-09-27', ing_name: '白菜', qty: 3, reason: '腐烂', reporter: '李四', status: '待审核' } },
   { name: 'workorder.create', fn: 'wo_create', data: {}, payload: { date: '2026-09-27', sku_id: 'S1', qty: 20, planned_start: '2026-09-27T10:00', status: '待开始', table_id: 'T1' } },
   { name: 'fs.cert.upsert(new)', fn: 'fs_cert', data: {}, payload: { cert_type: '食品经营许可', holder: '本店', cert_no: 'X1', expire_at: '2027-01-01', issued_at: '2026-01-01' } },

@@ -13,6 +13,8 @@ const auth = require('../lib/auth');
 const audit = require('../lib/audit');
 const { loadSnapshot } = require('./snapshot');
 const { enqueue } = require('./actions');
+const { dishSalesAgg } = require('./export');
+const { priceReport, pricePlan } = require('../lib/price');
 
 const READONLY_KEYS = ['dishes', 'recipes', 'staff', 'members', 'tables', 'vendors'];
 
@@ -88,6 +90,18 @@ async function handle(req, res, ctx, pathname) {
     return false;
   }
 
+  // FP-PRICE-01/02/03/13/14 原料比价只读聚合（本店均价 vs 外部报价，口径见 lib/price.js）
+  if (req.method === 'GET' && pathname === '/api/admin/price') {
+    const snap = loadSnapshot();
+    ctx.sendJSON(res, 200, {
+      ok: true,
+      report: priceReport(snap),
+      plan: pricePlan(snap),
+      rev: snap ? snap.rev : null
+    });
+    return true;
+  }
+
   // 只读业务端点
   const m = pathname.match(/^\/api\/admin\/([a-z]+)$/);
   if (m && READONLY_KEYS.indexOf(m[1]) >= 0) {
@@ -95,7 +109,19 @@ async function handle(req, res, ctx, pathname) {
     const key = m[1];
     const snap = loadSnapshot();
     const arr = snap && snap.data && Array.isArray(snap.data[key]) ? snap.data[key] : [];
-    ctx.sendJSON(res, 200, { ok: true, key, count: arr.length, items: arr, rev: snap ? snap.rev : null });
+    let items = arr;
+    // FP-DISH-11/12：菜品列表附带近 30 天销量/毛利额（只读聚合，口径见 export.dishSalesAgg）
+    if (key === 'dishes') {
+      const agg = dishSalesAgg(snap);
+      items = arr.map((d) => {
+        if (!d || typeof d !== 'object') return d;
+        const h = (d.id != null ? agg.byId[String(d.id)] : null)
+          || (d.name != null ? agg.byName[String(d.name)] : null)
+          || { q30: 0, gp30: 0 };
+        return Object.assign({}, d, { q30: h.q30, gp30: h.gp30 });
+      });
+    }
+    ctx.sendJSON(res, 200, { ok: true, key, count: items.length, items, rev: snap ? snap.rev : null });
     return true;
   }
 

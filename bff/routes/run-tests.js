@@ -17,6 +17,10 @@
  *   · 入队两级幂等：OPEN 复用同一动作；「已执行」后窗口内复投复用原动作（连点两下不产生两条待审批）
  *   · 已驳回 不参与事后幂等（驳回后可重新发起）
  *
+ * 覆盖 routes/snapshot.js：
+ *   · markRecipeStatus 未配配方标记（FP-SALE-14）：sku_id（或 dish.id）优先、name 兜底；
+ *     main/aux/seasoning 全空即视为未配配方；ext.recipes 缺失/为空时不标记（防全店误报）
+ *
  * 运行：node routes/run-tests.js
  */
 const os = require('os');
@@ -350,6 +354,187 @@ async function testActionsDedup(ok) {
     retry.body.dedup === false && retry.body.id !== idRej, retry.body);
 }
 
+/*
+ * 覆盖 routes/snapshot.js（FP-SALE-14 未配配方告警的数据源）：
+ *   · markRecipeStatus：sku_id（或 dish.id）优先、name 兜底；
+ *     main/aux/seasoning 至少一列有料才算"已配配方"
+ *   · ext.recipes 缺失/为空时不标记（默认视为已配），避免全店误报
+ */
+async function testSnapshotRecipeMark(ok) {
+  const snapshot = require('./snapshot');
+  const dishes = [
+    { id: 'D1', name: '有配方菜', sku_id: 'SKU-A' },
+    { id: 'SKU-B', name: '占位SKU菜' },
+    { id: 'D2', name: '无配方菜' },
+    { id: 'D3', name: '空配方菜', sku_id: 'SKU-C' },
+    { id: 'D4', name: '名字命中菜' },
+  ];
+  const ext = { recipes: [
+    { sku_id: 'SKU-A', name: '有配方菜', main: '["猪肉"]', aux: '[]', seasoning: '[]' },
+    { sku_id: 'SKU-B', name: '占位SKU菜', main: '["韭菜"]', aux: '[]', seasoning: '[]' },
+    { sku_id: 'SKU-C', name: '空配方菜', main: '[]', aux: '   ', seasoning: '[]' },
+    { sku_id: 'SKU-Z', name: '名字命中菜', main: [], aux: ['盐'], seasoning: null },
+  ] };
+  const out = snapshot.markRecipeStatus(dishes, ext);
+  const get = (id) => out.find((x) => x && x.id === id) || {};
+  ok('markRecipeStatus sku_id 命中且有主料 → has_recipe=true', get('D1').has_recipe === true, get('D1'));
+  ok('markRecipeStatus dish.id 即 sku 命中 → true', get('SKU-B').has_recipe === true, get('SKU-B'));
+  ok('markRecipeStatus 无配方行 → false', get('D2').has_recipe === false, get('D2'));
+  ok('markRecipeStatus 配方行列全空（含空白串）→ false', get('D3').has_recipe === false, get('D3'));
+  ok('markRecipeStatus name 兜底命中且辅料有料 → true', get('D4').has_recipe === true, get('D4'));
+  ok('markRecipeStatus 非破坏：原字段保留', get('D1').name === '有配方菜' && get('D1').sku_id === 'SKU-A');
+  ok('markRecipeStatus 非对象元素原样返回', snapshot.markRecipeStatus([null, 1, 'x'], ext).length === 3);
+
+  const noExt = snapshot.markRecipeStatus(dishes, null);
+  ok('markRecipeStatus ext 缺失时不加 has_recipe（防全店误报）', noExt.every((x) => x.has_recipe === undefined));
+  const emptyExt = snapshot.markRecipeStatus(dishes, { recipes: [] });
+  ok('markRecipeStatus ext.recipes 为空时不加 has_recipe', emptyExt.every((x) => x.has_recipe === undefined));
+
+  const took = await snapshot.handle({ method: 'GET' }, {}, mkctx('老板'), '/api/other');
+  ok('snapshot 非本路由不接管', took === false);
+}
+
+/**
+ * 食安点位主数据路由（巡检 / 消毒统一事实来源）。
+ * 守护：只读空态回退默认、写操作进审批队列、图片红线、RBAC、演示图预签名。
+ */
+async function testSafetyPointsRoute(ok) {
+  const safety = require('./safety_points');
+
+  // 只读：无自定义点位时回退内置默认（50 巡检点）
+  let res = {};
+  await safety.handle({ method: 'GET' }, res, mkMediaCtx('店长', 'kind=inspection'), '/api/safety/points');
+  ok('safety.points GET 默认返回 200 + 50 巡检点',
+    res.code === 200 && res.body.ok === true && res.body.points.length === 50, res.body && res.body.count);
+  ok('safety.points GET 标注 using_defaults', res.body.using_defaults === true, res.body.using_defaults);
+  ok('safety.points 点位含 id/name/zone/kind 字段',
+    !!res.body.points[0].id && !!res.body.points[0].name && res.body.points[0].kind === 'inspection');
+
+  // 消毒默认 5 个
+  res = {};
+  await safety.handle({ method: 'GET' }, res, mkMediaCtx('店长', 'kind=disinfect'), '/api/safety/points');
+  ok('safety.points GET 消毒默认 5 个', res.body.points.length === 5, res.body.count);
+
+  // kind 非法 → 400
+  res = {};
+  await safety.handle({ method: 'GET' }, res, mkMediaCtx('店长', 'kind=nope'), '/api/safety/points');
+  ok('safety.points GET kind 非法 400', res.code === 400, res.body);
+
+  // RBAC：只读角色不得新增
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ name: 'X', kind: 'inspection' }) },
+    res, mkMediaCtx('只读'), '/api/safety/points',
+  );
+  ok('safety.points POST 只读角色被拒 403', res.code === 403, res.body);
+
+  // 新增点位：入队
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ name: '验收台', zone: '后厨', kind: 'inspection', sort: 3 }) },
+    res, mkMediaCtx('店长'), '/api/safety/points',
+  );
+  ok('safety.points POST 新增入队返回 action_id',
+    res.code === 200 && typeof res.body.action_id === 'string', res.body);
+  const actId = res.body.action_id;
+
+  // RBAC：删除（逻辑删除）也要求写权限
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ id: 'K01', kind: 'inspection' }) },
+    res, mkMediaCtx('店长'), '/api/safety/points/remove',
+  );
+  ok('safety.points POST remove 入队', res.code === 200 && typeof res.body.action_id === 'string', res.body);
+
+  // 红线：图片 base64 一律驳回
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ name: 'X', kind: 'inspection', image_base64: 'data:image/jpeg;base64,AAAA' }) },
+    res, mkMediaCtx('店长'), '/api/safety/points',
+  );
+  ok('safety.points POST 拒收图片 base64（400 image_payload_rejected）',
+    res.code === 400 && res.body.code === 'image_payload_rejected', res.body);
+
+  // 缺 name / kind 非法 → 400
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ kind: 'inspection' }) },
+    res, mkMediaCtx('店长'), '/api/safety/points',
+  );
+  ok('safety.points POST 缺 name 400', res.code === 400, res.body);
+
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ id: 'K01' }) },
+    res, mkMediaCtx('店长'), '/api/safety/points/remove',
+  );
+  ok('safety.points remove 缺 kind 400', res.code === 400, res.body);
+
+  // seed 导入默认
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ kind: 'disinfect' }) },
+    res, mkMediaCtx('店长'), '/api/safety/points/seed',
+  );
+  ok('safety.points seed 入队', res.code === 200 && typeof res.body.action_id === 'string', res.body);
+
+  // presign：未配置对象存储时降级
+  const savedEnv = {};
+  ['OSS_ENDPOINT', 'OSS_BUCKET', 'OSS_AK', 'OSS_SK'].forEach((n) => { savedEnv[n] = process.env[n]; delete process.env[n]; });
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ kind: 'inspection', id: 'K01' }) },
+    res, mkMediaCtx('店长'), '/api/safety/points/presign',
+  );
+  ok('safety.points presign 未配置对象存储时降级 200 + configured=false',
+    res.code === 200 && res.body.configured === false, res.body);
+
+  // presign：配置后签发 PUT URL，对象键落在 points/ 前缀
+  process.env.OSS_ENDPOINT = 'https://oss-cn-hangzhou.aliyuncs.com';
+  process.env.OSS_BUCKET = 'pandawufu-qc';
+  process.env.OSS_AK = 'AKID-TEST-ONLY';
+  process.env.OSS_SK = 'SECRET-TEST-ONLY';
+  process.env.OSS_REGION = 'cn-hangzhou';
+  process.env.OSS_SERVICE = 'oss';
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ kind: 'inspection', id: 'K01', ext: 'jpg' }) },
+    res, mkMediaCtx('店长'), '/api/safety/points/presign',
+  );
+  ok('safety.points presign 签发 PUT URL', res.code === 200 && res.body.method === 'PUT', res.body);
+  ok('safety.points presign 对象键落在 points/ST001/ 前缀下',
+    /^points\/ST001\/\d{4}-\d{2}-\d{2}\/inspection-K01-\d+-[0-9a-f]{6}\.jpg$/.test(res.body.key || ''), res.body.key);
+  ok('safety.points presign URL 含 SigV4 签名', /X-Amz-Signature=[0-9a-f]{64}/.test(res.body.upload_url || ''));
+  const demoKey = res.body.key;
+
+  // sign 读图（私有 bucket 换上图 URL）
+  res = {};
+  await safety.handle(
+    { method: 'POST', __body: JSON.stringify({ keys: [demoKey] }) },
+    res, mkMediaCtx('店长'), '/api/safety/points/sign',
+  );
+  ok('safety.points sign 返回 GET 预签名 URL',
+    res.code === 200 && res.body.items.length === 1 && res.body.items[0].url.indexOf('X-Amz-Signature=') > 0, res.body);
+
+  ['OSS_ENDPOINT', 'OSS_BUCKET', 'OSS_AK', 'OSS_SK', 'OSS_REGION', 'OSS_SERVICE'].forEach((n) => { delete process.env[n]; });
+  Object.keys(savedEnv).forEach((n) => { if (savedEnv[n] !== undefined) process.env[n] = savedEnv[n]; });
+
+  // 未知子路径 404；非本路由不接管
+  res = {};
+  await safety.handle({ method: 'POST', __body: '{}' }, res, mkMediaCtx('店长'), '/api/safety/points/nope');
+  ok('safety.points 未知子路径 404', res.code === 404, res.body);
+
+  const other = {};
+  const took = await safety.handle({ method: 'GET' }, other, mkMediaCtx('店长'), '/api/other');
+  ok('safety.points 非本路由不接管', took === false);
+
+  // 审批队列里确实产生了点位动作
+  const store = require('../lib/store');
+  const q = store.readJSON('actions_queue.json', []);
+  ok('safety.points 写操作进入审批队列（含 safety_point.* 动作）',
+    q.some((a) => String(a.type).indexOf('safety_point.') === 0), { actId: actId });
+}
+
 async function main() {
   let fail = 0;
   const ok = (name, cond, extra) => {
@@ -418,6 +603,8 @@ async function main() {
   await testInspectionBoardRoute(ok);
   await testQcInboxAlerts(ok);
   await testActionsDedup(ok);
+  await testSnapshotRecipeMark(ok);
+  await testSafetyPointsRoute(ok);
 
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(fail ? '== routes 测试失败 ' + fail + ' 项 ==' : '== routes 测试全部通过 ==');

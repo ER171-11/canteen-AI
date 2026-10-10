@@ -14,7 +14,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { fetchAdminDishes, fetchSnapshot, submitConfirmedAction } from '../../api'
+import { fetchAdminDishes, fetchSnapshot, submitAndConfirmAction } from '../../api'
 import type { Dish } from '../../api/types'
 import MockAlert from './components/MockAlert'
 import { COLORS } from '../../theme'
@@ -81,8 +81,8 @@ export default function DishesPage() {
   const run = async (type: string, payload: Record<string, unknown>, ok: string) => {
     setBusy(true)
     try {
-      const r = await submitConfirmedAction({ type, payload, operator: 'admin' })
-      message.success(r.confirmed ? `${ok}（待消费器）` : `${ok}已入队`)
+      const r = await submitAndConfirmAction({ type, payload, operator: 'admin' })
+      message.success(r.confirmed ? `${ok}已保存` : `${ok}已入队，待审批中心确认`)
       setTimeout(load, 2500)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } }
@@ -127,11 +127,23 @@ export default function DishesPage() {
       render: (v) => (v == null ? '-' : `¥${v}`),
     },
     {
-      title: '销量',
-      dataIndex: 'q',
-      width: 80,
+      /* FP-DISH-11 近30天销量（q30；快照回退无 q30 时退回 q） */
+      title: '近30天销量',
+      dataIndex: 'q30',
+      width: 100,
       align: 'right',
-      sorter: (a, b) => (a.q ?? 0) - (b.q ?? 0),
+      render: (v, r) => (v != null ? v : r.q != null ? r.q : '-'),
+      sorter: (a, b) => (a.q30 ?? a.q ?? 0) - (b.q30 ?? b.q ?? 0),
+    },
+    {
+      /* FP-DISH-12 近30天毛利额（gp30 = 营收 − 每份成本×销量；正绿负红） */
+      title: '近30天毛利额',
+      dataIndex: 'gp30',
+      width: 120,
+      align: 'right',
+      render: (v) =>
+        v == null ? '-' : <span style={{ color: v > 0 ? COLORS.green : COLORS.red }}>¥{v}</span>,
+      sorter: (a, b) => (a.gp30 ?? 0) - (b.gp30 ?? 0),
     },
     {
       title: '上架',

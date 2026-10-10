@@ -34,7 +34,8 @@ const VALID_ACTIONS = new Set([
 ]);
 const DEFAULT_ACTION_BY_TYPE = {
   recv: '人工复核', stock: '人工复核', qc: '人工复核',
-  plate: '人工复核', sample: '人工复核', uniform: '人工复核'
+  plate: '人工复核', sample: '人工复核', uniform: '人工复核',
+  cert: '人工复核'
 };
 const LOW_CONF_THRESHOLD = 70; // 契约 §6：置信度 < 70 → 强制人工复核
 
@@ -76,6 +77,13 @@ const SYSTEM_PROMPTS = {
 2. 判定规则：工服整洁=pass，污渍=fail，轻微皱=warn；帽子佩戴规范=pass，未戴=fail；口罩规范=pass，露鼻=fail，未戴=fail；洗手消毒完成=pass，未完成=fail；整体 SOP 合规=pass，单项 fail 则整体 warn；
 3. 隐私约束：不输出任何个人身份信息，不做人脸识别，仅返回合规判定；
 4. 你只识别与判定，不记录合规；suggestedAction 仅给出"记录合规"或"人工复核"。
+严格输出 JSON，schema 见用户消息。不输出 JSON 外文字。`,
+  cert: `你是熊猫五福餐厅的证照合规 AI 助手。你的职责是：
+1. 识别照片中的证照类型（健康证 / 食品经营许可证 / 营业执照 / 其他，尽量具体）；
+2. 抽取结构化字段：持有人或主体、证号、签发日、到期日、状态；
+3. 日期统一输出 YYYY-MM-DD，无法识别的字段输出空字符串 ""；
+4. 隐私约束：不输出任何与证照无关的个人身份信息；
+5. 你只识别与抽取，不登记、不写库；suggestedAction 仅给出"记录合规"或"人工复核"。
 严格输出 JSON，schema 见用户消息。不输出 JSON 外文字。`
 };
 
@@ -167,6 +175,24 @@ const USER_PROMPT_TEMPLATES = {
   "thumbs": ["原图","识别框","对比"],
   "rows": [{"item":"工服整洁|帽子佩戴|口罩规范|洗手消毒|SOP合规","value":"pass或识别值","status":"pass|fail|warn","detail":"判定依据"}],
   "note": "结论",
+  "suggestedAction": "记录合规 | 人工复核"
+}`,
+  cert: `【照片】见附图。
+
+【任务】识别证照并抽取字段，输出 JSON：
+{
+  "title": "证照识别",
+  "confidence": 0-100,
+  "fields": {
+    "cert_type": "证照类型",
+    "holder": "持有人/主体",
+    "cert_no": "证号",
+    "issued_at": "签发日 YYYY-MM-DD 或空",
+    "expire_at": "到期日 YYYY-MM-DD 或空",
+    "status": "状态"
+  },
+  "rows": [{"item":"证照类型|持有人|证号|签发日|到期日","value":"识别值","status":"pass|fail|warn","detail":"判定依据"}],
+  "note": "结论与待核对项",
   "suggestedAction": "记录合规 | 人工复核"
 }`
 };
@@ -364,7 +390,18 @@ function mapToPrototype(parsed, type) {
   if (conf < 0) conf = 0;
   if (conf > 100) conf = 100;
   if (conf < LOW_CONF_THRESHOLD) action = '人工复核';
-  return { title, rows, note, cta: action, conf: Math.round(conf) + '%' };
+  const out = { title, rows, note, cta: action, conf: Math.round(conf) + '%' };
+  if (parsed.fields && typeof parsed.fields === 'object') {
+    out.fields = {
+      cert_type: String(parsed.fields.cert_type ?? parsed.fields.certType ?? ''),
+      holder: String(parsed.fields.holder ?? ''),
+      cert_no: String(parsed.fields.cert_no ?? parsed.fields.certNo ?? ''),
+      issued_at: String(parsed.fields.issued_at ?? parsed.fields.issuedAt ?? ''),
+      expire_at: String(parsed.fields.expire_at ?? parsed.fields.expireAt ?? ''),
+      status: String(parsed.fields.status ?? '')
+    };
+  }
+  return out;
 }
 
 // 读取并校验视觉请求体；失败时已直接响应，返回 null

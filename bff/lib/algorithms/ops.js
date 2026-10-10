@@ -387,6 +387,8 @@ function insertSample(ctx, data, payload) {
     weight_g: payload.weight_g || payload.weight,
     keeper: payload.keeper || 'QUEUE',
     kept_at: payload.kept_at || nowIso(),
+    hold_temp: payload.hold_temp,
+    sealed_by: payload.sealed_by,
     source: 'queue'
   });
   return 'fs_samples 插入 rowid=' + (rid === null ? '-' : rid);

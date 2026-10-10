@@ -30,3 +30,7 @@ ALTER TABLE fs_certs      ADD COLUMN source TEXT;
 ALTER TABLE fs_samples    ADD COLUMN source TEXT;
 ALTER TABLE bookings      ADD COLUMN source TEXT;
 ALTER TABLE queue         ADD COLUMN source TEXT;
+
+-- 留样（M4-T4）：附录 C 台账字段——存放温度 + 双人封存
+ALTER TABLE fs_samples    ADD COLUMN hold_temp REAL;
+ALTER TABLE fs_samples    ADD COLUMN sealed_by TEXT;

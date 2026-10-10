@@ -17,6 +17,49 @@ function loadSnapshot() {
   return (s && typeof s === 'object' && s.data !== undefined) ? s : null;
 }
 
+/** 菜谱列（main/aux/seasoning）是否有实质内容：非空数组 / 非空字符串 */
+function recipeColTruthy(col) {
+  if (col == null) return false;
+  if (typeof col === 'string') {
+    const t = col.trim();
+    return t.length > 0 && t !== '[]' && t !== '""';
+  }
+  if (Array.isArray(col)) return col.length > 0;
+  return true;
+}
+
+/**
+ * 给 dishes 标记 has_recipe（是否配了配方）：收银端据此在结账前提示
+ * 「未配配方菜品不会扣减原料库存」。匹配口径对齐 pos.js::recipeBomLines：
+ * sku_id（或 dish.id）优先、name 兜底；main/aux/seasoning 至少一列有料才算有配方。
+ * ext.recipes 缺失/为空时不标记（默认视为有配方），避免全店误报。
+ */
+function markRecipeStatus(dishes, ext) {
+  const list = Array.isArray(dishes) ? dishes : [];
+  const recipes = ext && Array.isArray(ext.recipes) ? ext.recipes : null;
+  if (!recipes || !recipes.length) return list;
+  const bySku = new Map();
+  const byName = new Map();
+  for (const r of recipes) {
+    if (!r || typeof r !== 'object') continue;
+    if (r.sku_id != null && String(r.sku_id) !== '') bySku.set(String(r.sku_id), r);
+    if (r.name != null && String(r.name) !== '') byName.set(String(r.name), r);
+  }
+  return list.map((d) => {
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return d;
+    const sku = String(d.sku_id || d.id || '');
+    const nm = String(d.name || '');
+    const row = bySku.get(sku) || byName.get(nm) || null;
+    let has = true;
+    if (!row) {
+      has = false;
+    } else {
+      has = recipeColTruthy(row.main) || recipeColTruthy(row.aux) || recipeColTruthy(row.seasoning);
+    }
+    return Object.assign({}, d, { has_recipe: has });
+  });
+}
+
 async function handle(req, res, ctx, pathname) {
   if (req.method === 'POST' && pathname === '/api/snapshot/push') {
     const cl = parseInt(req.headers['content-length'] || '0', 10);
@@ -68,7 +111,7 @@ async function handle(req, res, ctx, pathname) {
       const { mergeDishesWithBaoben } = require('../lib/menu_baoben');
       if (data && typeof data === 'object') {
         const merged = mergeDishesWithBaoben(Array.isArray(data.dishes) ? data.dishes : []);
-        data = Object.assign({}, data, { dishes: merged.dishes });
+        data = Object.assign({}, data, { dishes: markRecipeStatus(merged.dishes, ext) });
       }
     } catch (e) { /* optional */ }
 
@@ -101,4 +144,4 @@ async function handle(req, res, ctx, pathname) {
   return false;
 }
 
-module.exports = { handle, loadSnapshot };
+module.exports = { handle, loadSnapshot, markRecipeStatus };

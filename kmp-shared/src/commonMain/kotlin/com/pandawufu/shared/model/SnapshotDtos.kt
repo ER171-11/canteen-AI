@@ -150,7 +150,9 @@ data class DishDto(
     @SerialName("dish_type") val dishType: String? = null,
     @SerialName("sku_id") val skuId: String? = null,
     @SerialName("baoben_id") val baobenId: String? = null,
-    @SerialName("recipe_link") val recipeLink: String? = null
+    @SerialName("recipe_link") val recipeLink: String? = null,
+    /** 是否配了配方（BFF 快照下发时按 ext.recipes 标记）；false = 结账不扣库存（FP-SALE-14） */
+    @SerialName("has_recipe") val hasRecipe: Boolean = true
 )
 
 /** 进货/采购单据明细行 */

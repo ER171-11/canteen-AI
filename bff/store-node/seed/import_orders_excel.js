@@ -785,6 +785,8 @@ function importDocs(db, docs, fpsSeen, existingItemsList, softKeys) {
   let newRecv = 0;
   let newIng = 0;
   let skipped = 0;
+  /* 新增原料的证据（名称 → 单位/出现次数/单价区间/日期/来源文件），供导入前复核与导出清单 */
+  const newIngs = new Map();
   for (const doc of docs) {
     const named = doc.lines.map((r) => [r.name, r.qty, r.price]);
     const fp = lineFp(named);
@@ -802,6 +804,20 @@ function importDocs(db, docs, fpsSeen, existingItemsList, softKeys) {
       if (!g) {
         g = createIng(db, row.name, row.unit);
         newIng += 1;
+        const key = cleanName(row.name);
+        const rec = newIngs.get(key) || {
+          name: key, unit: row.unit || '', count: 0,
+          minPrice: null, maxPrice: null, dates: new Set(), files: new Set(),
+        };
+        rec.count += 1;
+        const price = Number(row.price);
+        if (Number.isFinite(price) && price > 0) {
+          rec.minPrice = rec.minPrice === null ? price : Math.min(rec.minPrice, price);
+          rec.maxPrice = rec.maxPrice === null ? price : Math.max(rec.maxPrice, price);
+        }
+        rec.dates.add(date);
+        rec.files.add(doc.file);
+        newIngs.set(key, rec);
       }
       lines.push(mkPoLine(g, row.qty, row.price));
     }
@@ -835,7 +851,22 @@ function importDocs(db, docs, fpsSeen, existingItemsList, softKeys) {
     console.log('  + ' + n.no + ' ' + date + ' lines=' + lines.length
       + ' ¥' + payable + ' ← ' + doc.file + ' (' + (doc.merchant || '-') + ')');
   }
-  return { newRecv: newRecv, newIng: newIng, skipped: skipped };
+  return {
+    newRecv: newRecv,
+    newIng: newIng,
+    skipped: skipped,
+    newIngs: Array.from(newIngs.values())
+      .map((r) => ({
+        name: r.name,
+        unit: r.unit,
+        count: r.count,
+        minPrice: r.minPrice,
+        maxPrice: r.maxPrice,
+        dates: Array.from(r.dates).sort(),
+        files: Array.from(r.files).sort(),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh')),
+  };
 }
 
 function summarize(db) {
@@ -873,17 +904,25 @@ async function pushSnapshot(token) {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const out = { dir: DEFAULT_DIR, db: DEFAULT_DB, dryRun: false, push: false, help: false };
+  const out = { dir: DEFAULT_DIR, db: DEFAULT_DB, dryRun: false, push: false, help: false, listNew: false, export: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dir') out.dir = argv[++i];
     else if (a === '--db') out.db = argv[++i];
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--push') out.push = true;
+    else if (a === '--list-new') out.listNew = true;
+    else if (a === '--export') out.export = argv[++i];
     else if (a === '--help' || a === '-h') out.help = true;
     else throw new Error('未知参数: ' + a);
   }
   return out;
+}
+
+/** CSV 单元格转义（含逗号/引号/换行时加引号） */
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
 async function main(argv) {
@@ -895,7 +934,7 @@ async function main(argv) {
     return 2;
   }
   if (args.help) {
-    console.log('用法: node import_orders_excel.js [--dir 订单] [--db 路径] [--dry-run] [--push]');
+    console.log('用法: node import_orders_excel.js [--dir 订单] [--db 路径] [--dry-run] [--push] [--list-new] [--export 清单.csv]');
     return 0;
   }
   if (!fs.existsSync(args.dir) || !fs.statSync(args.dir).isDirectory()) {
@@ -924,6 +963,38 @@ async function main(argv) {
   console.log('[after ] ' + summarize(db));
   console.log('[stat ] new_recv=' + stat.newRecv + ' new_ing=' + stat.newIng
     + ' skipped=' + stat.skipped);
+
+  /* 复核用：列出本次将自动新建的原料（dry-run 默认打印，导入前先看清楚） */
+  if (args.listNew || args.dryRun) {
+    console.log('[new_ing] 将自动新建 ' + stat.newIng + ' 个原料'
+      + (stat.newIngs.length !== stat.newIng
+        ? '（去重后 ' + stat.newIngs.length + ' 个名称）' : '') + '：');
+    for (const n of stat.newIngs) {
+      console.log('  · ' + n.name + (n.unit ? '（' + n.unit + '）' : '')
+        + ' ×' + n.count + (n.minPrice != null ? ' ¥' + n.minPrice + '~' + n.maxPrice : ''));
+    }
+  }
+
+  /* 导出待治理清单：CSV（UTF-8 BOM，Excel 直接打开），人工补齐 用途/cat/buy/conv/safe 后回灌 */
+  if (args.export) {
+    const header = ['name', 'unit', '用途(食材/耗材)', 'cat', 'buy', 'conv', 'safe',
+      '出现次数', '单价下限', '单价上限', '涉及日期', '来源文件'];
+    const rows = [header.join(',')];
+    for (const n of stat.newIngs) {
+      rows.push([
+        csvCell(n.name),
+        csvCell(n.unit),
+        '', '', '', '', '',
+        n.count,
+        n.minPrice === null ? '' : n.minPrice,
+        n.maxPrice === null ? '' : n.maxPrice,
+        csvCell(n.dates.join(' ')),
+        csvCell(n.files.join(' ')),
+      ].join(','));
+    }
+    fs.writeFileSync(args.export, '\uFEFF' + rows.join('\r\n') + '\r\n', 'utf8');
+    console.log('[export] 待治理清单已写出（' + stat.newIngs.length + ' 行）: ' + args.export);
+  }
 
   if (args.dryRun) {
     console.log('dry-run：未写库');

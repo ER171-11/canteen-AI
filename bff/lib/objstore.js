@@ -151,6 +151,19 @@ function buildQcKey(opt) {
   return ['qc', safeSeg(o.store_id || o.storeId || 'default'), date, wo + '-' + stamp + '-' + rand + '.' + safeExt(o.ext)].join('/');
 }
 
+/** 生成点位规范演示图对象键：points/{store}/{date}/{kind}-{id}-{stamp}-{rand}.{ext} */
+function buildPointDemoKey(opt) {
+  const o = opt || {};
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(o.date || ''))
+    ? String(o.date)
+    : new Date().toISOString().slice(0, 10);
+  const kind = safeSeg(o.kind === undefined || o.kind === null ? 'na' : o.kind);
+  const id = safeSeg(o.id === undefined || o.id === null ? 'na' : o.id);
+  const stamp = safeSeg(o.stamp === undefined || o.stamp === null ? Date.now() : o.stamp);
+  const rand = crypto.randomBytes(3).toString('hex');
+  return ['points', safeSeg(o.store_id || o.storeId || 'default'), date, kind + '-' + id + '-' + stamp + '-' + rand + '.' + safeExt(o.ext)].join('/');
+}
+
 /* ---------- 预签名 ---------- */
 
 /**
@@ -252,6 +265,7 @@ module.exports = {
   missingEnv,
   normKey,
   buildQcKey,
+  buildPointDemoKey,
   presign,
   presignPut,
   presignGet,

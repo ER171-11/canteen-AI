@@ -108,13 +108,25 @@ fixtures.config = {
 fixtures.ingUpdate = {
   call: 'apply_ing_upsert',
   data: { ings: [{ id: 'I1', name: '面粉', buy: '袋' }] },
-  payload: { id: 'I1', safe: 5, qty: 3, on: 1, supplier: '李四', conv: 2 }
+  payload: { id: 'I1', safe: 5, qty: 3, on: 1, supplier: '李四', conv: 2, yld: 0.8 }
 };
 
 fixtures.ingCreate = {
   call: 'apply_ing_upsert',
   data: { ings: [{ id: 'I5', name: 'x' }, { id: 'I12', name: 'y' }] },
-  payload: { name: '新原料', sup: '王五', pack: '箱', conv: 3, safe: 2 }
+  payload: { name: '新原料', sup: '王五', pack: '箱', conv: 3, safe: 2, yld: 0.6 }
+};
+
+fixtures.ingYldMax = {
+  call: 'apply_ing_upsert',
+  data: { ings: [{ id: 'I1', name: '面粉' }] },
+  payload: { id: 'I1', yld: 1.5 }
+};
+
+fixtures.ingYldMin = {
+  call: 'apply_ing_upsert',
+  data: { ings: [{ id: 'I1', name: '面粉' }] },
+  payload: { id: 'I1', yld: 0 }
 };
 
 fixtures.quoteNew = {

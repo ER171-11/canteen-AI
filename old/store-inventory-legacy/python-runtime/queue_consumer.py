@@ -1129,6 +1129,8 @@ def apply_ing_upsert(data, payload):
             ing["safety"] = float(payload.get("safe"))
         if payload.get("est") is not None:
             ing["est"] = float(payload.get("est"))
+        if payload.get("yld") is not None:
+            ing["yld"] = min(1.0, max(0.05, float(payload.get("yld"))))
         if payload.get("qty") is not None:
             q = float(payload.get("qty"))
             ing["qty"] = q
@@ -1173,6 +1175,7 @@ def apply_ing_upsert(data, payload):
         "safe": float(payload.get("safe") or 0),
         "safety": float(payload.get("safe") or 0),
         "est": float(payload.get("est") or 0),
+        "yld": (min(1.0, max(0.05, float(payload.get("yld")))) if payload.get("yld") is not None else 1.0),
         "avg": float(payload.get("avg") or 0),
         "on": True,
         "_u": now,
@@ -1840,15 +1843,18 @@ def insert_sample(db_path, payload):
                 payload.get("dish") or payload.get("name") or "",
                 payload.get("weight_g") or payload.get("weight"),
                 payload.get("keeper") or "QUEUE",
-                payload.get("kept_at") or now_iso())
+                payload.get("kept_at") or now_iso(),
+                payload.get("hold_temp"),
+                payload.get("sealed_by"))
         try:
             cur = conn.execute(
-                "INSERT INTO fs_samples (date, meal, dish, weight_g, keeper, kept_at, source)"
-                " VALUES (?,?,?,?,?,?,?)", args + ("queue",))
+                "INSERT INTO fs_samples (date, meal, dish, weight_g, keeper, kept_at, source, hold_temp, sealed_by)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                args[:6] + ("queue",) + args[6:])
         except sqlite3.OperationalError:
             cur = conn.execute(
-                "INSERT INTO fs_samples (date, meal, dish, weight_g, keeper, kept_at)"
-                " VALUES (?,?,?,?,?,?)", args)
+                "INSERT INTO fs_samples (date, meal, dish, weight_g, keeper, kept_at, hold_temp, sealed_by)"
+                " VALUES (?,?,?,?,?,?,?,?)", args)
         conn.commit()
         return cur.lastrowid
     finally:

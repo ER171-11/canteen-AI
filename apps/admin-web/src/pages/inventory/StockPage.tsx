@@ -16,7 +16,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { fetchSnapshot, submitConfirmedAction } from '../../api'
+import { fetchSnapshot, submitAndConfirmAction } from '../../api'
 import type { IngItem } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
 import { fmtNum, safetyLine, stockStatus, stockValue } from './utils'
@@ -101,9 +101,10 @@ export default function StockPage() {
             safe: safetyLine(r) || r.safe,
             est: r.est,
             conv: r.conv || 1,
+            yld: Math.round((r.yld ?? 1) * 100),
             on: r.on !== false,
           }
-        : { unit: '斤', buy: '斤', pack: '斤', conv: 1, safe: 0, on: true },
+        : { unit: '斤', buy: '斤', pack: '斤', conv: 1, safe: 0, yld: 100, on: true },
     )
     setEditOpen(true)
   }
@@ -176,6 +177,13 @@ export default function StockPage() {
       width: 110,
       align: 'right',
       render: (_, r) => `${fmtNum((Number(r.stock) || 0) * (Number(r.avg) || 0))} 元`,
+    },
+    {
+      title: '出成率',
+      key: 'yld',
+      width: 80,
+      align: 'right',
+      render: (_, r) => `${Math.round((r.yld ?? 1) * 100)}%`,
     },
     {
       title: '状态',
@@ -293,14 +301,19 @@ export default function StockPage() {
         width={560}
         onOk={async () => {
           const v = await form.validateFields()
+          // 出成率：表单存百分比（5~100），提交时折算为分数（0.05~1）
+          const payload = {
+            ...v,
+            yld: v.yld == null ? undefined : Math.min(1, Math.max(0.05, Number(v.yld) / 100)),
+          }
           setBusy(true)
           try {
-            const r = await submitConfirmedAction({
+            const r = await submitAndConfirmAction({
               type: 'ing.upsert',
-              payload: v,
+              payload,
               operator: 'admin',
             })
-            message.success(r.confirmed ? '已确认，待消费器' : '已入队')
+            message.success(r.confirmed ? '已保存' : '已入队，待审批中心确认')
             setEditOpen(false)
             setTimeout(load, 2500)
           } catch (e: unknown) {
@@ -355,6 +368,9 @@ export default function StockPage() {
             </Form.Item>
             <Form.Item name="est" label="日耗" style={{ flex: 1 }}>
               <InputNumber min={0} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="yld" label="出成率 %" style={{ width: 120 }}>
+              <InputNumber min={5} max={100} step={1} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item name="on" label="是否启用" style={{ width: 150 }}>
               <Radio.Group

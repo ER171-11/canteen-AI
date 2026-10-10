@@ -72,6 +72,8 @@ export interface OrgOverview {
 export interface Health {
   ok: boolean
   service?: string
+  /** 运行环境：real（真实库）| sandbox（演练库）；由 BFF 依据 CANTEEN_ENV 透出 */
+  env?: string
   /** 数据快照修订号（Header 展示用） */
   rev?: number | string
   /** 快照最近更新时间（ISO8601） */
@@ -167,16 +169,16 @@ export interface ReportDaily {
   breakeven?: { be_day?: number; today_rev?: number; attain_pct?: number } | null
 }
 
-/** 审批中心动作四态（BFF 实际下发中文状态，渲染层做双语映射） */
-export type ActionStatus = 'pending' | 'confirmed' | 'rejected' | 'done'
+/** 审批中心动作状态（BFF 实际下发集合：queued 为入队初态英文遗留，其余中文） */
+export type ActionStatus = 'queued' | '待执行' | '已执行' | '已驳回' | '已过期'
 
 /** GET /api/actions 列表项 */
 export interface ActionItem {
   id: string
   type: string
   title?: string
-  /** 英文四态或中文「待审批/已通过/已驳回/已执行」 */
-  status: ActionStatus | '待审批' | '已通过' | '已驳回' | '已执行' | string
+  /** 后端下发的状态字符串（以 ActionStatus 为准，| string 兜底未知态） */
+  status: ActionStatus | string
   initiator?: string
   operator?: string
   payload?: Record<string, unknown>
@@ -216,6 +218,10 @@ export interface Dish {
   price?: number
   /** 销量 */
   q?: number
+  /** 近 30 天销量（BFF /api/admin/dishes 聚合，FP-DISH-11） */
+  q30?: number
+  /** 近 30 天毛利额（= 近30天营收 − 每份成本×近30天销量，FP-DISH-12） */
+  gp30?: number
   /** 是否上架 */
   on?: boolean
 }
@@ -452,6 +458,85 @@ export interface InspectionEvery30 {
   rounds_missing: string[]
 }
 
+/* ---------------- 食安点位主数据（巡检 / 消毒 统一事实来源） ---------------- */
+
+export type SafetyPointKind = 'inspection' | 'disinfect'
+
+/** fs_points 行结构：巡检点与消毒点共用，按 kind 区分 */
+export interface SafetyPoint {
+  id: string
+  name: string
+  zone: string
+  kind: SafetyPointKind
+  /** 1=需每 30 分钟记录（仅巡检卫生间类） */
+  every30: number
+  demo_image_key: string | null
+  demo_image_url: string | null
+  /** 1=启用；0=逻辑删除 */
+  enabled: number
+  sort: number
+  note: string | null
+}
+
+/** GET /api/safety/points */
+export interface SafetyPointsResp {
+  ok: boolean
+  kind: SafetyPointKind
+  points: SafetyPoint[]
+  count?: number
+  rev: number | string | null
+  /** true=当前展示内置默认点位（尚无自定义点位） */
+  using_defaults: boolean
+  /** 对象存储是否可用（false 时演示图降级） */
+  configured: boolean
+}
+
+/** POST /api/safety/points */
+export interface SafetyPointUpsertBody {
+  id?: string
+  name: string
+  zone?: string
+  kind: SafetyPointKind
+  every30?: number
+  demo_image_key?: string | null
+  demo_image_url?: string | null
+  sort?: number
+  note?: string | null
+}
+
+/** 点位写操作统一回执（入队） */
+export interface SafetyPointEnqueueResp {
+  ok: boolean
+  action_id?: string
+  status?: string
+  rev?: number | string | null
+  dedup?: boolean
+  note?: string
+  error?: string
+}
+
+/** POST /api/safety/points/presign — 演示图上传预签名 */
+export interface SafetyPointPresignResp {
+  ok: boolean
+  configured: boolean
+  key: string | null
+  method?: 'PUT'
+  upload_url: string | null
+  headers?: Record<string, string>
+  expires_in?: number
+  photo_url?: string | null
+  public_base?: boolean
+  missing?: string[]
+  note?: string
+}
+
+/** POST /api/safety/points/sign — 私有 bucket 读图 */
+export interface SafetyPointSignResp {
+  ok: boolean
+  configured: boolean
+  items: { key: string; url: string | null; public_url: string | null }[]
+}
+
 /** GET /api/kitchen/board?date= → items 元素（按五色分组） */
 export interface KitchenBoardItem {
   color: string
@@ -530,6 +615,8 @@ export interface IngItem {
   avg?: number
   /** 换算率：1 采购单位 = conv 库存单位（旧版 ing.conv，缺省 1） */
   conv?: number
+  /** 出成率（毛料→净料，0.05~1 的分数，缺省 1 = 无损耗） */
+  yld?: number
   /** 最近一次进货价（元/采购单位，重建库存时回写；无进货记录为 0/缺失） */
   last?: number | null
   /** 是否启用（false = 停用，不参与补货/告急统计） */
@@ -1187,6 +1274,33 @@ export interface CertConfigResp {
   rev?: number | string | null
 }
 
+/** Kimi 证照识别返回的结构化字段 */
+export interface CertRecognizeFields {
+  cert_type: string
+  holder: string
+  cert_no: string
+  issued_at: string
+  expire_at: string
+  status: string
+}
+
+export interface KimiVisionResult {
+  title: string
+  rows: [string, string, string][]
+  note: string
+  cta: string
+  conf: string
+  fields?: CertRecognizeFields | null
+}
+
+export interface KimiVisionResp {
+  ok: boolean
+  result?: KimiVisionResult
+  model?: string
+  traceId?: string
+  error?: string
+}
+
 export interface TraceRow {
   id: string | number | null
   batch_no: string
@@ -1223,6 +1337,7 @@ export interface TraceResp {
 
 export type WeightLevel = 'pass' | 'warn' | 'fail' | 'unknown'
 export type SampleLevel = 'green' | 'yellow' | 'red' | 'done' | 'unknown'
+export type SampleTempLevel = 'ok' | 'out' | 'unknown'
 
 export interface SampleRow {
   id: string | number | null
@@ -1242,6 +1357,9 @@ export interface SampleRow {
   status: string
   level: SampleLevel
   cleared_at?: string | null
+  hold_temp?: number | null
+  sealed_by?: string | null
+  temp_level?: SampleTempLevel
 }
 
 export interface SampleReminder {
@@ -1258,6 +1376,7 @@ export interface SampleSummary {
   expired: number
   cleared: number
   under_weight: number
+  temp_out: number
 }
 
 export interface FoodsafeSamplesResp {
@@ -1266,6 +1385,7 @@ export interface FoodsafeSamplesResp {
   hold_hours: number
   warn_hours: number
   weight_rule: Record<string, number>
+  temp_range?: { min: number; max: number }
   auto_archive_conf: number
   rows: SampleRow[]
   summary: SampleSummary
@@ -1791,6 +1911,60 @@ export interface SupplyEnqueueResp {
   rev?: number | string | null
   note?: string
   error?: string
+}
+
+/* ---------------- 原料比价 M13 /api/admin/price（FP-PRICE-01/02/03/13/14） ---------------- */
+
+export interface PriceBest {
+  src: string
+  price: number
+  per: string
+  date: string
+  unit: number
+  note: string
+}
+
+export interface PriceReportRow {
+  ingId: string
+  name: string
+  cat: string
+  buy: string
+  conv: number
+  unit: string
+  avg: number
+  best: PriceBest | null
+  diff: number | null
+  savePct: number | null
+  recent: Array<{ src: string; date: string }>
+}
+
+export interface PriceReport {
+  rows: PriceReportRow[]
+  tip: { onSale: number; noQuote: number; hasQuote: number }
+}
+
+export interface PricePlanItem {
+  ingId: string
+  name: string
+  cat: string
+  keyword: string
+  buy: string
+  conv: number
+  unit: string
+  avg: number
+  status: '已比价' | '待比价'
+}
+
+export interface PricePlan {
+  items: PricePlanItem[]
+  onSale: number
+}
+
+export interface PriceResp {
+  ok: boolean
+  report: PriceReport
+  plan: PricePlan
+  rev?: number | string | null
 }
 
 /* ---------------- 损耗 M12 /api/loss/*（后场：GET 只读聚合 + POST 入队） ---------------- */

@@ -285,9 +285,14 @@ fun PosScreen() {
                             return@PosMenuPage
                         }
                         val dishSummary = cartLines.joinToString("、") { "${it.dish.name}×${it.qty}" }
+                        // FP-SALE-14：挂单（建后厨工单备料扣）前提示未配配方菜品不扣料
+                        val noRecipeNames = cartLines.map { it.dish }.filter { !it.hasRecipe }.map { it.name }.distinct()
+                        val recipeWarn = if (noRecipeNames.isNotEmpty()) {
+                            "\n⚠ 以下菜品未配置配方，挂单/结账后不会扣减原料库存、成本按估算值：${noRecipeNames.joinToString("、")}"
+                        } else ""
                         askConfirm(
                             title = "绑桌挂单",
-                            summary = "桌 ${table.no ?: table.id} · ¥${fmtMoney(cartTotal)}\n$dishSummary\n挂单=就餐 · 并建后厨挂桌工单（备料扣；结账不叠扣）",
+                            summary = "桌 ${table.no ?: table.id} · ¥${fmtMoney(cartTotal)}\n$dishSummary\n挂单=就餐 · 并建后厨挂桌工单（备料扣；结账不叠扣）$recipeWarn",
                             type = "pos.table_state",
                             payload = buildJsonObject {
                                 put("table_id", table.id)
@@ -330,6 +335,13 @@ fun PosScreen() {
                         table.billSummary ?: "挂单结账"
                     }
                     val qty = if (useCart) cartCount else 1
+                    // FP-SALE-14：未配配方菜品告警（结账后不扣原料库存）
+                    val noRecipeNames = if (useCart) {
+                        cartLines.map { it.dish }.filter { !it.hasRecipe }.map { it.name }.distinct()
+                    } else emptyList()
+                    val recipeWarn = if (noRecipeNames.isNotEmpty()) {
+                        "\n⚠ 以下菜品未配置配方，结账后不会扣减原料库存、成本按估算值：${noRecipeNames.joinToString("、")}"
+                    } else ""
                     // 储值结账：需该桌已识别会员；结账成功后联动会员储值扣减
                     if (method == "储值" && table.vipMemberId.isNullOrBlank()) {
                         Toast.makeText(
@@ -341,7 +353,7 @@ fun PosScreen() {
                     }
                     askConfirm(
                         title = "确认结账",
-                        summary = "桌 ${table.no ?: table.id} · ¥${fmtMoney(amount)} · $method\n$dishSummary",
+                        summary = "桌 ${table.no ?: table.id} · ¥${fmtMoney(amount)} · $method\n$dishSummary$recipeWarn",
                         type = "pos.pay",
                         payload = buildJsonObject {
                             put("table_id", table.id)

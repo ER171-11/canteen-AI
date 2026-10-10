@@ -12,6 +12,7 @@
  * 算法约定（全项目统一）：handler(ctx, data, payload) → msg 字符串；抛错 = 动作被驳回。
  */
 const nodes = require('../inspection_nodes');
+const sp = require('../safety_points');
 const { persist } = require('./ops');
 
 /* ---------- 归一工具 ---------- */
@@ -90,7 +91,8 @@ function hasImagePayload(payload) {
  * inspection.record：登记一个巡检节点的完成情况。
  *
  * 关键规则：
- *   1) 节点必须存在于内置主数据，否则驳回（防止 App 侧拼错 id 污染台账）。
+ *   1) 节点必须存在于巡检点位（ext.fs_points 的 inspection 点位，空态回退内置 50 节点），
+ *      否则驳回（防止 App 侧拼错 id 污染台账）。
  *   2) 责任人必填（「负责到人」是需求硬要求）。
  *   3) **未拍照自动标记未完成** —— photo_taken 为假时 done 恒为 0，
  *      即使上层传 done=true 也不认（照片是唯一完成凭据）。
@@ -98,7 +100,20 @@ function hasImagePayload(payload) {
  */
 function recordInspection(ctx, data, payload) {
   const p = payload || {};
-  const node = nodes.byId(p.node_id);
+  // 节点校验：优先快照 ext 的可配置点位（ctx.store.query），空态回退内置 50 节点
+  const extRows = (ctx && ctx.store && ctx.store.query) ? ctx.store.query('fs_points') : [];
+  const pt = sp.pointById({ fs_points: extRows }, 'inspection', p.node_id);
+  let node = null;
+  if (pt) {
+    const known = nodes.byId(pt.id); // 内置节点保留 node_group 分组；自定义点位回落 zone
+    node = {
+      id: pt.id,
+      name: pt.name,
+      board: pt.zone || '未分区',
+      node_group: (known && known.node_group) || pt.zone || '未分区',
+      every30: pt.every30 === 1 || pt.every30 === '1' || pt.every30 === true
+    };
+  }
   if (!node) throw new Error('未知巡检节点: ' + String(p.node_id === undefined ? '' : p.node_id));
 
   const operator = firstText(p.operator, p.op);

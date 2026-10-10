@@ -38,9 +38,8 @@ import TrainPage from './pages/hr/TrainPage'
 import LicensesPage from './pages/safety/LicensesPage'
 import TracePage from './pages/safety/TracePage'
 import SamplePage from './pages/safety/SamplePage'
-import DisinfectPage from './pages/safety/DisinfectPage'
+import SafetyPointsPage from './pages/safety/SafetyPointsPage'
 import DeviceEnergyPage from './pages/safety/DeviceEnergyPage'
-import InspectionBoardPage from './pages/safety/InspectionBoardPage'
 import FinancePage from './pages/finance/FinancePage'
 
 /** 路由守卫：未登录跳 /login */
@@ -124,9 +123,8 @@ export default function App() {
           <Route path="safety/licenses" element={<LicensesPage />} />
           <Route path="safety/trace" element={<TracePage />} />
           <Route path="safety/sample" element={<SamplePage />} />
-          <Route path="safety/disinfect" element={<DisinfectPage />} />
+          <Route path="safety/points" element={<SafetyPointsPage />} />
           <Route path="safety/devices" element={<DeviceEnergyPage />} />
-          <Route path="safety/inspection" element={<InspectionBoardPage />} />
 
           {/* 财务 */}
           <Route path="finance/invoice" element={<FinancePage defaultTab="invoice" />} />

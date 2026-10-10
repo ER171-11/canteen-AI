@@ -9,9 +9,33 @@
  * 图片不出现在任何输出字段里 —— 巡检照片只存在手机本地（见 algorithms/inspection.js）。
  */
 const nodes = require('./inspection_nodes');
+const sp = require('./safety_points');
 
 function arr(v) {
   return Array.isArray(v) ? v : [];
+}
+
+function uniq(list) {
+  const out = [];
+  for (const x of list) if (out.indexOf(x) < 0) out.push(x);
+  return out;
+}
+
+/** 巡检点位归一：board 取 zone；node_group 优先取内置节点分组，自定义点位回落 zone */
+function pointOf(p) {
+  const known = nodes.byId(p.id);
+  return {
+    id: p.id,
+    name: p.name,
+    board: p.zone || '未分区',
+    node_group: (known && known.node_group) || p.zone || '未分区',
+    every30: p.every30 === 1 || p.every30 === '1' || p.every30 === true
+  };
+}
+
+/** 解析巡检点位：优先 ext.fs_points(inspection)，空态回退内置 50 节点（见 safety_points） */
+function pointsOf(ext) {
+  return sp.resolvePoints(ext, 'inspection').map(pointOf);
 }
 
 /** 记录归属日：优先 date 字段，缺失时取 ts 前 10 位 */
@@ -66,22 +90,27 @@ function buildBoard(ext, opt) {
     if (!cur || String(r.ts || '') >= String(cur.ts || '')) latest[id] = r;
   });
 
+  // 板块/节点来源改为可配置点位（空态回退内置 50 节点）
+  const points = pointsOf(ext);
+
   const boardOf = {};
-  nodes.BOARDS.forEach((b) => {
-    boardOf[b] = {
-      board: b,
-      total: 0,
-      done: 0,
-      missing_count: 0,
-      rate: 0,
-      operator: null,
-      last_ts: null,
-      every30_pending: 0,
-      missing: []
-    };
+  points.forEach((n) => {
+    if (!boardOf[n.board]) {
+      boardOf[n.board] = {
+        board: n.board,
+        total: 0,
+        done: 0,
+        missing_count: 0,
+        rate: 0,
+        operator: null,
+        last_ts: null,
+        every30_pending: 0,
+        missing: []
+      };
+    }
   });
 
-  nodes.NODES.forEach((n) => {
+  points.forEach((n) => {
     const b = boardOf[n.board];
     if (!b) return;
     b.total += 1;
@@ -111,12 +140,12 @@ function buildBoard(ext, opt) {
     if (a.operator) b.operator = a.operator;
   });
 
-  const boards = nodes.BOARDS.map((x) => boardOf[x]);
+  const boards = Object.keys(boardOf).map((x) => boardOf[x]);
   boards.forEach((b) => {
     b.rate = b.total ? Math.round((b.done / b.total) * 100) : 0;
   });
 
-  const total = nodes.NODES.length;
+  const total = points.length;
   const done = boards.reduce((s, b) => s + b.done, 0);
 
   const roundsRecorded = [];
@@ -145,12 +174,12 @@ function buildBoard(ext, opt) {
       rate: total ? Math.round((done / total) * 100) : 0
     },
     boards: boards,
-    nodes: nodes.all(),
-    groups: nodes.groups(),
+    nodes: points,
+    groups: uniq(points.map((p) => p.node_group)),
     records: list,
     records_total: recs.length,
     every30: {
-      node_total: nodes.every30Nodes().length,
+      node_total: points.filter((p) => p.every30 === true).length,
       rounds_per_day: 48,
       rounds_recorded: roundsRecorded,
       rounds_missing: missingRounds(roundsRecorded, o.now)

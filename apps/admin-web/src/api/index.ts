@@ -46,10 +46,12 @@ import type {
   FoodsafeResp,
   FoodsafeSamplesResp,
   Health,
+  KimiVisionResp,
   KitchenBoardResp,
   ListResp,
   LoginRequest,
   LoginResponse,
+  PriceResp,
   QcRecord,
   QcMediaStatus,
   SopVideo,
@@ -62,6 +64,12 @@ import type {
   SettleTemplate,
   SettleTemplateResp,
   Snapshot,
+  SafetyPointKind,
+  SafetyPointEnqueueResp,
+  SafetyPointPresignResp,
+  SafetyPointSignResp,
+  SafetyPointsResp,
+  SafetyPointUpsertBody,
   StaffModuleResp,
   StaffScheduleResp,
   StaffClockResp,
@@ -135,9 +143,9 @@ export async function updateOrgPosition(body: {
 
 /**
  * 管理端主数据写：入队 + 立即确认（仍走确认台状态机，不直连店内库）。
- * 消费器异步落库后快照刷新。
+ * 注意：此处「确认」仅推进到「待执行」，并非「执行完成」；消费器异步落库后才真正生效。
  */
-export async function submitConfirmedAction(
+export async function submitAndConfirmAction(
   body: PostActionBody,
 ): Promise<PostActionResult & { confirmed?: boolean }> {
   const enq = await postAction(body)
@@ -425,6 +433,12 @@ export async function fetchAdminDishes(): Promise<ListResp<Dish>> {
   return data
 }
 
+/** GET /api/admin/price → 原料比价只读聚合（FP-PRICE-01/02/03/13/14） */
+export async function fetchAdminPrice(): Promise<PriceResp> {
+  const { data } = await client.get<PriceResp>('/admin/price')
+  return data
+}
+
 /** GET /api/kitchen/recipes */
 export async function fetchKitchenRecipes(): Promise<RecipesResp> {
   const { data } = await client.get<RecipesResp>('/kitchen/recipes')
@@ -699,6 +713,16 @@ export async function upsertFoodsafeCert(body: {
   return data
 }
 
+/** POST /api/kimi/vision（type=cert）— 证照拍照识别（只读，超时放大到 3 分钟） */
+export async function recognizeCert(imageBase64: string): Promise<KimiVisionResp> {
+  const { data } = await client.post<KimiVisionResp>(
+    '/kimi/vision',
+    { type: 'cert', imageBase64, ctx: {} },
+    { timeout: 180000 },
+  )
+  return data
+}
+
 /** POST /api/foodsafe/samples — 留样登记（克重不足 422 拦截）→ sample.log 入队 */
 export async function logFoodsafeSample(body: {
   date?: string
@@ -707,6 +731,8 @@ export async function logFoodsafeSample(body: {
   weight_g: number
   keeper?: string
   kept_at?: string
+  hold_temp?: number | null
+  sealed_by?: string
 }): Promise<FoodsafeEnqueueResp> {
   const { data } = await client.post<FoodsafeEnqueueResp>('/foodsafe/samples', body)
   return data
@@ -721,6 +747,8 @@ export async function ingestFoodsafeSample(body: {
   conf: number
   keeper?: string
   source?: string
+  hold_temp?: number | null
+  sealed_by?: string
 }): Promise<FoodsafeEnqueueResp> {
   const { data } = await client.post<FoodsafeEnqueueResp>('/foodsafe/samples/ingest', body)
   return data
@@ -747,6 +775,55 @@ export async function logFoodsafeDisinfect(body: {
   result?: string
 }): Promise<FoodsafeEnqueueResp> {
   const { data } = await client.post<FoodsafeEnqueueResp>('/foodsafe/disinfect', body)
+  return data
+}
+
+/* ---------------- 食安点位主数据（巡检 / 消毒 统一事实来源） ---------------- */
+
+/** GET /api/safety/points?kind= — 点位列表（无自定义时回退内置默认） */
+export async function fetchSafetyPoints(kind: SafetyPointKind): Promise<SafetyPointsResp> {
+  const { data } = await client.get<SafetyPointsResp>('/safety/points', { params: { kind } })
+  return data
+}
+
+/** POST /api/safety/points — 新增/编辑点位 → safety_point.upsert 入队 */
+export async function upsertSafetyPoint(
+  body: SafetyPointUpsertBody,
+): Promise<SafetyPointEnqueueResp> {
+  const { data } = await client.post<SafetyPointEnqueueResp>('/safety/points', body)
+  return data
+}
+
+/** POST /api/safety/points/remove — 逻辑删除点位 → safety_point.remove 入队 */
+export async function removeSafetyPoint(body: {
+  id: string
+  kind: SafetyPointKind
+}): Promise<SafetyPointEnqueueResp> {
+  const { data } = await client.post<SafetyPointEnqueueResp>('/safety/points/remove', body)
+  return data
+}
+
+/** POST /api/safety/points/seed — 把内置默认点位导入为可编辑点位 → safety_point.seed 入队 */
+export async function seedSafetyPoints(kind: SafetyPointKind): Promise<SafetyPointEnqueueResp> {
+  const { data } = await client.post<SafetyPointEnqueueResp>('/safety/points/seed', { kind })
+  return data
+}
+
+/** POST /api/safety/points/presign — 演示图上传预签名（PUT 直传，图片不经 BFF） */
+export async function presignSafetyPointDemo(body: {
+  kind: SafetyPointKind
+  id: string
+  store_id?: string
+  ext?: string
+  content_type?: string
+}): Promise<SafetyPointPresignResp> {
+  const { data } = await client.post<SafetyPointPresignResp>('/safety/points/presign', body)
+  return data
+}
+
+/** POST /api/safety/points/sign — 批量换取读图 URL（bucket 私有时） */
+export async function signSafetyPointImages(keys: string[]): Promise<SafetyPointSignResp> {
+  const { data } = await client.post<SafetyPointSignResp>('/safety/points/sign', { keys })
   return data
 }
 
@@ -1112,4 +1189,27 @@ export async function approveLossReport(body: { id: number | string }): Promise<
 export async function rejectLossReport(body: { id: number | string; reason?: string }): Promise<LossEnqueueResp> {
   const { data } = await client.post<LossEnqueueResp>('/loss/reject', body)
   return data
+}
+
+/* ---------------- 设置页只读导出（FP-SET-11/12/13/14） ---------------- */
+
+/**
+ * GET /api/export/backup.json — 全量数据备份（只读，快照 data+ext）。
+ * 走 axios blob（带 Bearer token，不能用 <a href> 直链）。
+ */
+export async function fetchExportBackupBlob(): Promise<Blob> {
+  const { data } = await client.get('/export/backup.json', {
+    responseType: 'blob',
+    timeout: 60000,
+  })
+  return data as Blob
+}
+
+/** GET /api/export/{ings|dishes|sales|samples}.csv — 原料库存 / 菜品成本毛利 / 销售应收实收 / 留样台账 CSV（只读） */
+export async function fetchExportCsvBlob(kind: 'ings' | 'dishes' | 'sales' | 'samples'): Promise<Blob> {
+  const { data } = await client.get(`/export/${kind}.csv`, {
+    responseType: 'blob',
+    timeout: 60000,
+  })
+  return data as Blob
 }

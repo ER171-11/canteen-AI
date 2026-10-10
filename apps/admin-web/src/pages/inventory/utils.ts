@@ -64,3 +64,56 @@ export function formatLinesSummary(
     })
     .join('；')
 }
+
+/* ---------------- 采购单状态（对齐旧版 orderLineSt/orderSt/orderStTag/orderRecvProg，旧 HTML:1688-1713） ---------------- */
+
+export type OrderLineState = 'normal' | 'closed' | 'canceled'
+export type OrderState = 'normal' | 'void' | 'draft' | 'closed'
+
+/** 行状态：显式 st=canceled/closed 优先；否则「收齐即结案」（qty>0 且 recvQty≥qty） */
+export function orderLineSt(l: InventoryLine | null | undefined): OrderLineState {
+  const st = String(l?.st ?? '')
+  if (st === 'canceled' || st === 'closed') return st
+  const q = Number(l?.qty) || 0
+  const got = Number(l?.recvQty) || 0
+  return q > 0 && got >= q - 1e-6 ? 'closed' : 'normal'
+}
+
+/** 单状态：显式 void/draft/closed 优先；否则全部行收齐/作废 → 已结案，否则收货中 */
+export function orderSt(p: InventoryDoc | null | undefined): OrderState {
+  if (!p) return 'normal'
+  const status = String(p.status ?? '')
+  if (status === 'void') return 'void'
+  if (status === 'draft') return 'draft'
+  if (status === 'closed') return 'closed'
+  const ls = p.lines ?? []
+  if (ls.length && !ls.some((l) => orderLineSt(l) === 'normal')) return 'closed'
+  return 'normal'
+}
+
+/** 状态标签（对齐旧版 orderStTag()） */
+export function orderStMeta(st: OrderState): { text: string; color: string } {
+  switch (st) {
+    case 'closed':
+      return { text: '已结案', color: COLORS.green }
+    case 'void':
+      return { text: '已作废', color: COLORS.gray }
+    case 'draft':
+      return { text: '草稿', color: COLORS.blue }
+    default:
+      return { text: '收货中', color: COLORS.orange }
+  }
+}
+
+/** 行收货进度：q=下单量(采购单位) g=已收量（对齐旧版 orderRecvProg()） */
+export function orderRecvProg(p: InventoryDoc): { q: number; g: number; pct: number } {
+  let q = 0
+  let g = 0
+  for (const l of p.lines ?? []) {
+    const a = Number(l.qty) || 0
+    q += a
+    g += Math.min(a, Number(l.recvQty) || 0)
+  }
+  const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
+  return { q: r2(q), g: r2(g), pct: q > 0 ? Math.round((g / q) * 100) : 0 }
+}

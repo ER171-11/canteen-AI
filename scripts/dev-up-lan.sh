@@ -66,6 +66,27 @@ proc_running() { pgrep -f "$1" >/dev/null 2>&1; }
 
 STORE_DB="${STORE_DB:-$ROOT/store-inventory/data/餐厅系统.db}"
 
+# ---- 环境标识：CANTEEN_ENV=sandbox 时强制走演练库，避免误写真实主库 ----
+CANTEEN_ENV="${CANTEEN_ENV:-real}"
+MAIN_DB="$ROOT/store-inventory/data/餐厅系统.db"
+SANDBOX_DB="$ROOT/store-inventory/data/餐厅系统_演练.db"
+if [ "$CANTEEN_ENV" = "sandbox" ]; then
+  if [ "$STORE_DB" = "$MAIN_DB" ]; then
+    echo "==> [sandbox] STORE_DB 未显式指定，自动切到演练库"
+    STORE_DB="$SANDBOX_DB"
+  fi
+  if [ ! -f "$STORE_DB" ]; then
+    echo "==> [sandbox] 演练库不存在，正在从主库生成 ..."
+    node "$ROOT/scripts/sandbox-db.js" --init || { echo "演练库生成失败"; exit 1; }
+  fi
+  echo "==> [SANDBOX] 演练模式：写入 $STORE_DB（真实主库不受影响）"
+elif [ "$STORE_DB" = "$SANDBOX_DB" ]; then
+  echo "==> [WARN] CANTEEN_ENV=real 但 STORE_DB 指向演练库，按演练模式处理"
+else
+  echo "==> [REAL] 真实库模式：写入 $STORE_DB"
+fi
+export CANTEEN_ENV
+
 echo "==> 局域网 IP: $LAN_IP  (BFF http://$LAN_IP:$BFF_PORT) =="
 
 if [ "$RESET_PW" -eq 1 ]; then
