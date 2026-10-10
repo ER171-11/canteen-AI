@@ -5,6 +5,7 @@
  * 覆盖动作：
  *   restock.create / analysis.restock → applyRestock
  *   config.update                     → applyConfig
+ *   rest.update                       → applyRest（写顶层 data.rest 餐厅名）
  *   ing.upsert                        → applyIngUpsert
  *   quote.upsert                      → applyQuoteUpsert
  *   loss.report                       → applyLossReport
@@ -223,6 +224,20 @@ function deepMergeLocal(dst, src) {
     }
   }
   return out;
+}
+
+/* ---------- rest.update ---------- */
+
+/**
+ * rest.update：写顶层 data.rest（餐厅名，字符串）。
+ * 旧版 DB.rest 是顶层字符串字段（抬头/结算单回落名），config.update 只改 data.config，故单列动作。
+ */
+function applyRest(data, payload) {
+  const raw = payload && payload.name != null ? payload.name : (payload && payload.rest);
+  const name = String(raw == null ? '' : raw).trim();
+  if (!name) throw new Error('rest.update 的 payload 必须提供非空 name');
+  data.rest = name;
+  return '餐厅名 → ' + name;
 }
 
 /* ---------- ing.upsert ---------- */
@@ -1307,6 +1322,7 @@ module.exports = {
   resolveIngId,
   applyRestock,
   applyConfig,
+  applyRest,
   applyIngUpsert,
   applyQuoteUpsert,
   applyLossReport,

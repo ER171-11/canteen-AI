@@ -326,6 +326,26 @@ function main() {
     pass++;
     console.log('  PASS ' + ec.name + ' (error)');
   }
+
+  /* ---------- rest.update：新增动作（旧版无 Python 队列动作，仅 Node 单测） ---------- */
+  {
+    const d1 = {};
+    const m1 = inv.applyRest(d1, { name: '  熊猫五福餐厅  ' });
+    assert.strictEqual(d1.rest, '熊猫五福餐厅', 'rest 应写入顶层 data.rest');
+    assert.strictEqual(m1, '餐厅名 → 熊猫五福餐厅');
+
+    const d2 = { rest: '旧名', config: { a: 1 } };
+    inv.applyRest(d2, { rest: '新店名' });
+    assert.strictEqual(d2.rest, '新店名', 'payload.rest 也应可写');
+    assert.deepStrictEqual(d2.config, { a: 1 }, 'config 不应被触碰');
+
+    let threw = false;
+    try { inv.applyRest({}, { name: '   ' }); } catch (e) { threw = true; }
+    assert.ok(threw, '空名应抛错');
+    pass++;
+    console.log('  PASS rest.update (standalone)');
+  }
+
   console.log('[inventory.test] PASS ' + pass + ' cases');
 }
 

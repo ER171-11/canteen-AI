@@ -1442,3 +1442,42 @@
 - 后续: W2 余 **21 张**；全局欠账 **⬆️ 103 / ⬜ 48**（合计 151）。
   W2 头部转为 `FP-SET-02`（餐厅名落点决策，见 `gen-debt-table.ps1` W2-01）与 `FP-PO-18`（建议转正式采购单）。
 
+## [2026-10-10] W2 第三批 - 餐厅名称配置（阶段 23 / FP-SET-02）
+
+- 目标: W2 业务闭环续。补设置页「配置餐厅名称」写类项——餐厅名存于快照顶层 `data.rest`（旧版 `DB.rest` 字符串，
+  默认「熊猫五福餐厅」），用作抬头与结算单回落名。
+- 决策（落点）: **新增 `rest.update` 动作**，而非改存 `config.restaurant_name`——`data.rest` 本就是顶层字段、与 `config` 语义分离；
+  新增动作最贴近旧版 `DB.rest=...;saveDB()`，且零回改各处回落逻辑。
+- 变更（BFF）:
+  - `bff/lib/algorithms/inventory.js`: 新增并导出 `applyRest(data, payload)`——trim 后写 `data.rest`，空名抛错
+    （`rest.update 的 payload 必须提供非空 name`），不触碰 `data.config`。
+  - `bff/lib/algorithms/registry.js`: 登记 `'rest.update'`（**未注册会被消费器判 need-manual 静默驳回**）。
+  - `bff/routes/admin.js`: `GET /api/admin/config` 增返 `rest`（缺失回落默认名）；新增 `POST /api/admin/rest`
+    （RBAC 仅老板/店长，body `{name}`，`enqueue('rest.update', {name})`）。
+- 变更（admin-web `apps/admin-web/src/pages/SystemConfigPage.tsx`）:
+  - 新增「餐厅名称」卡片（`:318`）：展示当前 `data.rest` + Input 编辑 + 「保存餐厅名称」按钮，经审批队列入队；
+    空名前端拦截；`canWrite`（老板/店长）禁用态与其它卡片一致。
+- 验证（实际跑过）:
+  - `node bff/lib/algorithms/inventory.test.js` → **28/28 通过**（新增 `rest.update` 单测：写入/trim/payload.rest 别名/空名抛错/config 不被触碰）。
+  - `npm test`（bff 全量）→ **exit 0**；`node scripts/lint-zero-dep.js` → 通过。
+  - `apps/admin-web` `npx tsc --noEmit` → **exit 0**；`read_lints` → **0 错**。
+  - `powershell -File ci/redline_guard.ps1` → 全通过。
+  - `powershell -File scripts/gen-debt-table.ps1` → 151 项 **⬆️ 104 / ⬜ 47**（欠账卡 47：W1 1 / W2 **20** / W3 19 / W4 7）；
+    `-Check` **exit 0**（无漂移）；`node scripts/gen-progress-board.js` → 漂移校验 ok、数字一致性 OK。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **未在浏览器手工冒烟**：餐厅名称卡片仅静态类型检查，未点击核对；落库链路由店内消费器执行器保证，
+     但本机未跑「审批执行 → 快照变化」的完整 HTTP 闭环。
+  2. `rest.update` 是**新增动作类型**，旧版 Python 无对应队列动作（旧版直接 `DB.rest=...`），故无 Node↔Python 平价对照，仅 Node 单测覆盖。
+- 影响范围: `bff/lib/algorithms/{inventory.js,registry.js,inventory.test.js}`、`bff/routes/admin.js`、
+  `apps/admin-web/src/pages/SystemConfigPage.tsx`、`docs/迁移基线/FP-设置.md`、
+  `docs/下一步任务清单_2026-09-28.md`、本文件。
+  **未触碰**受保护哈希文件（`bff/store-node/{db,merge}.js`、`bff/lib/algorithms/stock.js`）。
+- AI避坑提示:
+  - `rest.update` 与 `config.update` **分列动作**：餐厅名在 `data.rest`（顶层标量）、配置在 `data.config`（对象），
+    勿把 `rest` 塞进 `config`，否则旧回落逻辑（抬头/结算单）需整体回改。
+  - 空名必须**拒绝而非回落默认**：`applyRest` 抛错 → 审批中心可见失败，前端已前置拦截；不要静默写回「熊猫五福餐厅」掩盖误操作。
+- 回档方案: `git revert` 本提交即可——去掉 `rest.update` 注册 + `applyRest` + `/api/admin/rest` 路由 + 前端卡片。
+  已入队未执行的 `rest.update` 动作会判 need-manual，需人工处理。
+- 后续: W2 余 **20 张**；全局欠账 **⬆️ 104 / ⬜ 47**（合计 151）。
+  W2 头部转为 `FP-PO-18`（建议转正式采购单）；其余大量 W2 卡仍被「销售应收模型」「服务端快照」两个 ADR 阻塞。
+

@@ -14,7 +14,7 @@
 | FP ID | 功能点 | 旧版证据 | 新版现状 | 状态 | 处置 / 关联 |
 |---|---|---|---|---|---|
 | FP-SET-01 | 查看各模块数据输入通道一览（模块/数据来源/输入方式/当前状态） | HTML:569-586 表格（10 行模块状态） | `SystemConfigPage.tsx`:367-383「各模块数据输入通道一览」表 + `buildChannelRows` :395-417（10 行）；状态由 `GET /api/snapshot/latest` 实时推导 | ⬆️ 已移植 | 读类：只读展示；未接通快照时统一「未接通快照」，不编造数字 |
-| FP-SET-02 | 配置餐厅名称 | HTML:588 `#setRest`、:5273 change → `saveDB()` | 无（`/api/admin/config` 仅 safety_stock/SOP/note；admin-web 无餐厅名展示位） | ⬜ 待补 | 写类：`data.rest` 为**顶层字段**，而 `config.update` 只改 `data.config`——须先定落点（新增 `rest.update` 动作，或改存 `config.restaurant_name` 并定展示优先级） |
+| FP-SET-02 | 配置餐厅名称 | HTML:588 `#setRest`、:5273 change → `saveDB()` | `SystemConfigPage.tsx`「餐厅名称」卡片（`:318` 展示+编辑，`saveRestName` `:116`）；`bff/routes/admin.js` `GET /api/admin/config` 返 `rest`、`POST /api/admin/rest` | ⬆️ 已移植 | 写类：**新增 `rest.update` 动作**（`inventory.applyRest` + `registry` 登记），写顶层 `data.rest`（字符串，默认「熊猫五福餐厅」）；不并入 `config.update`，避免与 `config` 语义纠缠；经审批队列，仅老板/店长 |
 | FP-SET-03 | 新增外接比价平台 | HTML:592 `#btnAddPlat`、:5283 `DB.platforms.push()` | `SystemConfigPage.tsx`「外接比价平台」卡片「新增平台」；存 `config.compare_platforms`（默认 `DEF_COMPARE_PLATFORMS`，`pages/inventory/comparePlatforms.ts`） | ⬆️ 已移植 | 写类：经 `POST /api/admin/config`（config.update，仅老板/店长）。**注意**：快照 `data.platforms` 是**外卖平台**（美团/饿了么），与旧版 `DB.platforms`（比价平台）**同名不同义**，故用 `config.compare_platforms` |
 | FP-SET-04 | 编辑/删除已配置平台（名称 + `{kw}` 搜索 URL 模板） | HTML:5230-5235 `#platTable` 渲染、:5277/5280-5282 change/删除 | `SystemConfigPage.tsx`「外接比价平台」表格：名称 / URL 模板逐行可编辑 + 行内「删」 | ⬆️ 已移植 | 写类：随 FP-SET-03；口径照抄旧版 `renderSet`（HTML:5228-5237 / :5277-5283） |
 | FP-SET-05 | 配置同步服务地址与本机标识 | HTML:595-596 `#setApiBase`/`#setMachine`、:1083-1089 | 无（新版为中心化 BFF/SaaS，无 P2P 双机同步） | ⬜ 待补 | 建议转 ⚰️ 废弃：架构变更，但**缺业务批准人**，暂留 ⬜ |
@@ -38,15 +38,16 @@
 | 项 | 数 |
 |---|---|
 | FP 总数 | 19 |
-| ⬆️ 已移植 | 9（T5：FP-SET-18/19；W1：FP-SET-01/11/12/13/14；W2：FP-SET-03/04） |
+| ⬆️ 已移植 | 10（T5：FP-SET-18/19；W1：FP-SET-01/11/12/13/14；W2：FP-SET-02/03/04） |
 | 🔄 等价替代 | 0 |
-| ⬜ 待补 | 10 |
+| ⬜ 待补 | 9 |
 | ⚰️ 废弃 | 0 |
 
 > **2026-09-28 T5 更新**：结算单模板（FP-SET-18/19）已随进货入库单据闭环一并补齐，本页不再是「零移植」。
 > **2026-10-10 W1 更新**：四类导出（FP-SET-11/12/13/14）与「各模块数据输入通道一览」（FP-SET-01）已补齐
 > （只读，新增 `bff/routes/export.js` 四端点 + 设置页两张新卡）。
 > **2026-10-10 W2 更新**：外接比价平台配置（FP-SET-03/04）已补齐——设置页新增「外接比价平台」卡片
+> **2026-10-10 W2 阶段 23 更新**：餐厅名称（FP-SET-02）已补齐——新增 `rest.update` 动作写顶层 `data.rest`，设置页新增「餐厅名称」卡片。
 > （名称 + `{kw}` URL 模板的增 / 删 / 改），存 `config.compare_platforms`（默认 `DEF_COMPARE_PLATFORMS`），
 > 经 `POST /api/admin/config`（config.update 审批队列）；与 FP-PRICE-09/10 同一实现。
 
@@ -69,7 +70,7 @@ W1 只读速补 5 项 + W2 比价平台配置 2 项（FP-SET-03/04）已完成�
 
 1. ~~**FP-SET-11 / 12 / 13 / 14** 四类导出（只读、零风险、老板日常要表）~~ ✅ 已完成（W1，2026-10-10）
 2. ~~**FP-SET-18 / 19** 结算单模板（配合 FP-RECV-04/05/06 单据闭环）~~ ✅ 已完成（T5）
-3. ~~**FP-SET-03 / 04** 比价平台配置（`config.update` 链路已通，成本最低的写类）~~ ✅ 已完成（W2，2026-10-10）；**FP-SET-02** 餐厅名待定落点（`data.rest` 顶层 vs `config`）
+3. ~~**FP-SET-03 / 04** 比价平台配置（`config.update` 链路已通，成本最低的写类）~~ ✅ 已完成（W2，2026-10-10）；~~**FP-SET-02** 餐厅名落点已定（新增 `rest.update` 动作，写顶层 `data.rest`）~~ ✅ 已完成（W2 阶段 23，2026-10-10）
 4. ~~**FP-SET-01** 模块状态总览（只读，可复用 ModuleBrowse 数据）~~ ✅ 已完成（W1，2026-10-10）
 5. **FP-SET-07 / 10** 服务端快照与回滚（需先定「服务端快照」形态并补 ADR）
 6. **FP-SET-15 / 16 / 17** 导入恢复 / 重置基线 / 清空（**高危**：双人确认 + 审批队列 + 自动前置备份）

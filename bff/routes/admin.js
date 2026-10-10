@@ -4,8 +4,9 @@
  *   POST /api/admin/login          公开：同 auth/login，标记来源 admin-web
  *   GET  /api/admin/kimi-log?limit → kimi_log.jsonl 尾部
  *   GET  /api/admin/audit?limit    → audit.jsonl 尾部
- *   GET  /api/admin/config         → 当前配置（取自快照 data.config，无则默认）
+ *   GET  /api/admin/config         → 当前配置（取自快照 data.config，无则默认），含 rest 餐厅名
  *   POST /api/admin/config         → 写配置走 actions 队列（type="config.update"），仅 老板/店长
+ *   POST /api/admin/rest           → 写餐厅名走 actions 队列（type="rest.update"），仅 老板/店长
  *   GET  /api/admin/{dishes,recipes,staff,members,tables,vendors}
  *                                  → 只读，取自快照 data 对应 key，无则空数组
  */
@@ -24,6 +25,9 @@ const DEFAULT_CONFIG = {
   plate_sop: '五色齐整，宫廷御膳点缀规范',
   note: '默认配置（快照未携带 config 模块）'
 };
+
+/* 旧版 DB.rest 默认餐厅名（抬头/结算单回落名） */
+const DEFAULT_REST_NAME = '熊猫五福餐厅';
 
 async function handle(req, res, ctx, pathname) {
   // 公开登录
@@ -58,10 +62,12 @@ async function handle(req, res, ctx, pathname) {
     if (req.method === 'GET') {
       const snap = loadSnapshot();
       const fromSnap = !!(snap && snap.data && snap.data.config && typeof snap.data.config === 'object');
+      const restRaw = snap && snap.data && typeof snap.data.rest === 'string' ? snap.data.rest.trim() : '';
       ctx.sendJSON(res, 200, {
         ok: true,
         config: fromSnap ? snap.data.config : DEFAULT_CONFIG,
         source: fromSnap ? 'snapshot' : 'default',
+        rest: restRaw || DEFAULT_REST_NAME,
         rev: snap ? snap.rev : null
       });
       return true;
@@ -88,6 +94,30 @@ async function handle(req, res, ctx, pathname) {
       return true;
     }
     return false;
+  }
+
+  // FP-SET-02：写餐厅名（顶层 data.rest，rest.update 动作）
+  if (req.method === 'POST' && pathname === '/api/admin/rest') {
+    // RBAC：admin 写操作仅 老板/店长
+    if (!ctx.auth || auth.WRITE_ROLES.indexOf(ctx.auth.role) < 0) {
+      ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: 仅老板/店长可写餐厅名', role: ctx.auth ? ctx.auth.role : null });
+      return true;
+    }
+    const { buf } = await ctx.readBody(req);
+    let body = null;
+    try { body = JSON.parse(buf.toString('utf8')); } catch (e) {}
+    const name = String((body && body.name) || '').trim();
+    if (!name) {
+      ctx.sendJSON(res, 400, { ok: false, error: 'missing name(string)' });
+      return true;
+    }
+    const { action, dedup } = enqueue('rest.update', { name }, ctx.auth.account, ctx.traceId);
+    ctx.sendJSON(res, 200, {
+      ok: true, queued: true, dedup,
+      id: action.id, status: action.status, rev: action.rev,
+      note: '餐厅名写已进入 actions 队列，由店内消费器执行后生效'
+    });
+    return true;
   }
 
   // FP-PRICE-01/02/03/13/14 原料比价只读聚合（本店均价 vs 外部报价，口径见 lib/price.js）

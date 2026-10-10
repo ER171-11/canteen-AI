@@ -62,15 +62,20 @@ export default function SystemConfigPage() {
   const [platforms, setPlatforms] = useState<ComparePlatform[]>(DEF_COMPARE_PLATFORMS.map((p) => ({ ...p })))
   const [platBusy, setPlatBusy] = useState(false)
 
+  /* FP-SET-02：餐厅名称（顶层 data.rest，rest.update 动作） */
+  const [restName, setRestName] = useState('')
+  const [restBusy, setRestBusy] = useState(false)
+
   const load = useCallback(() => {
     setLoading(true)
     client
-      .get<{ ok: boolean; config: Config; source?: string; rev?: number }>('/admin/config')
+      .get<{ ok: boolean; config: Config; source?: string; rev?: number; rest?: string }>('/admin/config')
       .then(({ data }) => {
         const c = data.config || {}
         setConfig(c)
         setSource(data.source || '-')
         setRev(data.rev)
+        setRestName(data.rest || '熊猫五福餐厅')
         form.setFieldsValue({
           uniform_sop: c.uniform_sop ?? '',
           plate_sop: c.plate_sop ?? '',
@@ -104,6 +109,25 @@ export default function SystemConfigPage() {
       message.error(err.response?.data?.error || '提交失败（仅老板/店长可改）')
     } finally {
       setPlatBusy(false)
+    }
+  }
+
+  /* ---- FP-SET-02：保存餐厅名（写顶层 data.rest，rest.update 动作）---- */
+  const saveRestName = async () => {
+    const name = restName.trim()
+    if (!name) {
+      message.error('餐厅名称不能为空')
+      return
+    }
+    setRestBusy(true)
+    try {
+      await client.post('/admin/rest', { name })
+      message.success('餐厅名已入队 → 请到审批中心确认执行')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '提交失败（仅老板/店长可改）')
+    } finally {
+      setRestBusy(false)
     }
   }
 
@@ -289,6 +313,29 @@ export default function SystemConfigPage() {
           </Button>
         </Tooltip>
       </Form>
+    </Card>
+
+    <Card title="餐厅名称" style={{ marginTop: 16 }}>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="餐厅名存于快照顶层 data.rest（rest.update 动作），用作抬头与结算单回落名；变更经审批中心入队，由店内消费器执行后生效。"
+      />
+      <Space>
+        <Input
+          value={restName}
+          disabled={!canWrite}
+          onChange={(e) => setRestName(e.target.value)}
+          style={{ width: 320 }}
+          placeholder="如：熊猫五福餐厅"
+        />
+        <Tooltip title={canWrite ? undefined : noWriteTip}>
+          <Button type="primary" loading={restBusy} disabled={!canWrite} onClick={saveRestName}>
+            保存餐厅名称
+          </Button>
+        </Tooltip>
+      </Space>
     </Card>
 
     <Card

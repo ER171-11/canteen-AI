@@ -23,6 +23,7 @@ registerAll({
   'restock.create': (ctx, data, payload) => inv.applyRestock(data, payload),
   'analysis.restock': (ctx, data, payload) => inv.applyRestock(data, payload),
   'config.update': (ctx, data, payload) => inv.applyConfig(data, payload),
+  'rest.update': (ctx, data, payload) => inv.applyRest(data, payload),
   'ing.upsert': (ctx, data, payload) => inv.applyIngUpsert(data, payload),
   'quote.upsert': (ctx, data, payload) => inv.applyQuoteUpsert(data, payload),
   'loss.report': (ctx, data, payload) => inv.applyLossReport(data, payload, ctx),
