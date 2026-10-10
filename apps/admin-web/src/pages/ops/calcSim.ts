@@ -28,6 +28,18 @@ export const QMODE_OPTIONS: Array<{ value: CalcQMode; label: string }> = [
   { value: 'real7', label: '近7天真实（日均）' },
 ]
 
+/**
+ * 五类角色标签底色，逐字照抄旧版 `CT_COLOR`（HTML:3817）。
+ * 由「五类角色卡片」（FP-CALC-14）与逐菜表类型标签共用，避免两处色表漂移。
+ */
+export const CALC_TYPE_COLOR: Record<string, string> = {
+  引流: '#E8734A',
+  爆品: '#D93025',
+  利润: '#1E8E5A',
+  形象: '#6B4C9A',
+  常规: '#3D7EA6',
+}
+
 /** 模拟态控制句柄（由页面持有状态，逐菜表只上抛动作） */
 export interface CalcSimCtl {
   /** 是否已进入模拟态（未进入时行内控件禁用） */

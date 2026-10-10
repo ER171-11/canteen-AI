@@ -40,6 +40,7 @@ import { COLORS } from '../../theme'
 import CalcParamsCard from './CalcParamsCard'
 import CalcCharts from './CalcCharts'
 import CalcDishTable from './CalcDishTable'
+import CalcTypeCards from './CalcTypeCards'
 import { rowOvKey, SIM_BASIS_LABEL, type BulkAction } from './calcSim'
 
 const QUAD_META: Record<string, { name: string; color: string }> = {
@@ -354,6 +355,9 @@ export default function WeeklyReportPage() {
           </Col>
         </Row>
       </Card>
+
+      {/* 菜品结构 · 五类角色（FP-CALC-14；源：旧版 `#typeCards`、`renderCalcTypes` HTML:387/3978） */}
+      <CalcTypeCards types={types} loading={loading} />
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} md={10}>

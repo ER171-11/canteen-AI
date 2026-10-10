@@ -697,6 +697,8 @@ export interface BaobenType {
   cost?: number
   gp?: number
   cost_rate?: number
+  /** 销量占比（五类角色卡片；旧版 renderCalcTypes totQ 口径，HTML:3987） */
+  qty_share?: number
   rev_share?: number
   gp_share?: number
 }

@@ -195,12 +195,13 @@ function echoParams(P) {
   return out;
 }
 
+/** 五类角色：键/名/描述逐字照抄旧版 `CT`（HTML:3810-3816），供「五类角色卡片」展示（FP-CALC-14） */
 const TYPE_META = [
-  { k: '引流', name: '引流款', desc: '低价高频，降低进店门槛' },
-  { k: '爆品', name: '爆品（核心）', desc: '招牌与高销，营收主力' },
-  { k: '利润', name: '利润款', desc: '高毛利结构款' },
-  { k: '形象', name: '形象款', desc: '高档硬菜，拉客单' },
-  { k: '常规', name: '常规款', desc: '补齐菜单结构' }
+  { k: '引流', name: '引流款', desc: '低价高频，降低进店门槛、提升点单率，毛利中等但拉客流' },
+  { k: '爆品', name: '爆品（核心）', desc: '招牌与高销菜品，营收主力，决定翻台与复购' },
+  { k: '利润', name: '利润款', desc: '高毛利菜品，靠结构与出品溢价贡献利润' },
+  { k: '形象', name: '形象款', desc: '高档硬菜，树品牌与拉高客单，销量低但拉高客单价' },
+  { k: '常规', name: '常规款', desc: '补齐菜单结构，满足多样化点单需求' }
 ];
 
 const SCENES = [
@@ -256,6 +257,8 @@ function computeModel(act, P) {
 
   const totRev = revDish || 1;
   const totGp = Math.max(revDish - costDish, 1);
+  // 五类角色卡片「销量占比」分母：参与测算的日销量合计（旧版 `renderCalcTypes` 的 totQ，HTML:3981）
+  const totQ = qty || 1;
   const types = TYPE_META.map((t) => {
     const ds = rows.filter((d) => d.type === t.k);
     let rev = 0, cost = 0, q = 0;
@@ -275,6 +278,7 @@ function computeModel(act, P) {
       cost: r2(cost),
       gp: r2(gp),
       cost_rate: rev ? r2((cost / rev) * 100) : 0,
+      qty_share: r2((q / totQ) * 100),
       rev_share: r2((rev / totRev) * 100),
       gp_share: r2((gp / totGp) * 100)
     };

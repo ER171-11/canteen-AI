@@ -4,9 +4,9 @@
 > 源页面：`#tab-calc`「结构测算」（HTML 第 350–466 行区域，本页最大，参数项最多）
 > 目标系统：**无独立测算页**；测算主战场为 `apps/admin-web/src/pages/ops/WeeklyReportPage.tsx`（本轮新拆出 `ops/CalcParamsCard.tsx` 参数表单 + `ops/CalcCharts.tsx` 图表与情景）+ `DashboardPage.tsx`；算法在 `bff/lib/menu_baoben.js`（与旧版 `calc()` :4856 同公式），经 `GET /api/modules/analysis` 的 `baoben_summary` 出参（`bff/routes/modules.js`:1574-1590）
 > 模式：**替代**（全部 ⬜ 视为回归缺陷，需排期补齐）
-> 建立日期：2026-09-28　最近更新：2026-09-29（阶段 9）　状态：🟡 **待人工复核**（AI 抽取，未经人工签字）　规范依据：`docs/迁移颗粒度规范.md`
+> 建立日期：2026-09-28　最近更新：2026-10-10（阶段 12）　状态：🟡 **待人工复核**（AI 抽取，未经人工签字）　规范依据：`docs/迁移颗粒度规范.md`
 >
-> ⚠️ **该页在新系统无独立路由**，测算能力落在「经营周报」页；**参数可调项 24 项已全部开放（阶段 9 闭合）**，剩余缺口集中在「逐菜结构表 / 模拟态推演」。
+> ✅ **该页在新系统无独立路由**，测算能力落在「经营周报」页；参数可调项 24 项（阶段 9 闭合）、逐菜结构表/排序（阶段 10）、模拟态只读推演（阶段 11）、五类角色卡片（阶段 12）均已落地，**本页 20/20 闭合**。
 
 ---
 
@@ -27,7 +27,7 @@
 | FP-CALC-11 | 行内改售价/成本/日销量并即时重算（本页模拟，不写库） | HTML:428 说明、`updateCalcRow` :4073、`renderCalcCharts` :4092 | `CalcDishTable.tsx` 成本/售价/日销量三列 `InputNumber`（步长 0.5/1/0.1 逐字照抄旧版）+「重置」列（按行清覆盖）；覆盖上行 `POST /api/modules/analysis/sim` 的 `rows`，后端 `menu_baoben.js` `applyRowOverrides`（纯函数、生成新对象）→ 单一公式 `computeModel` | ⬆️ 已移植 | 阶段 11。**模拟态零写库**：行覆盖只活在内存 + 请求体，不 `saveDB`/不写 `data/*.json`/不入 `actions_queue.json`；行值一律取后端回传行，**前端不持第二份公式**（避免口径漂移） |
 | FP-CALC-12 | 取消勾选模拟下架该菜（SKU 精简对保本点影响） | HTML:428 说明、`updateCalcGroups` :4083 | `CalcDishTable.tsx` 首列「上架」勾选（`on` 覆盖，行线删除线 + `已下架` 标签）；模拟取消勾选 → 该行退出 `computeModel` 汇总（店级 KPI/图表联动）。真实下架仍走 `dish.set_active`（`WeeklyReportPage.tsx`:381-393） | ⬆️ 已移植 | 阶段 11。模拟态与真实动作**严格分开**：勾选只在推演层，写库仍需审批队列 |
 | FP-CALC-13 | 按类型批量调价/调量/上架/恢复默认（−10%/−5%/+5%/+10%、±20%） | HTML:396-410 `data-bulk`、:4296 处理 | `CalcDishTable.tsx` 工具条：作用域 `Select`（全部菜品 / 引流·爆品·利润·形象·常规）+ 调价 4 档 + 调量 ±20% +「全部上架」+「恢复默认」；口径 `WeeklyReportPage.tsx` `simCtl.onBulk`（`Math.round(p×k)`、`q` 保留 1 位小数，照抄旧版） | ⬆️ 已移植 | 阶段 11。以「当前生效行值」为基数逐次累积覆盖（同旧版 `SD` 就地改值）；批量结果为 `rows` 覆盖，**不入审批队列** |
-| FP-CALC-14 | 五类角色卡片与分类切换（引流/爆品/利润/形象/常规） | HTML:387 `#typeCards`、`renderCalcTypes` :3978、`renderCalcTabs` :4038 | 近似：四象限分布（波士顿口径）`WeeklyReportPage.tsx`:279-296，非五类角色 | ⬜ 待补 | 口径不同，**不构成等价**；建议保留五类角色视图 |
+| FP-CALC-14 | 五类角色卡片与分类切换（引流/爆品/利润/形象/常规） | HTML:387 `#typeCards`、`renderCalcTypes` :3978、`renderCalcTabs` :4038 | `ops/CalcTypeCards.tsx`（5 张角色卡：名称/道数/描述/日销量/销量占比/日营收/营收占比/成本率/日毛利额/毛利占比，逐字照抄旧版 `CT`/`CT_COLOR` 与 `calcTypeStats` 字段序）+ 分类切换见 `CalcDishTable.tsx` 类型筛选 chips（阶段 10/11 已就位）；后端 `menu_baoben.js` `types` 补 `qty_share`（旧版 `renderCalcTypes` totQ 口径，加法式补字段） | ⬆️ 已移植 | 阶段 12。与左栏「四象限分布」（波士顿口径）**并列新增，不替换**；配色统一抽到 `calcSim.ts` 的 `CALC_TYPE_COLOR`，与逐菜表类型标签同源。口径 = **保本价盘**（同块 FP-CALC-15 表同源），故道数 Σ86 与逐菜表 95 道的**已知口径差**同阶段 10 备注 |
 | FP-CALC-15 | 查看各类型「营收占比 vs 毛利占比」对比 | HTML:389-391 `#typeChart` | `WeeklyReportPage.tsx`:300-336（rev_share/gp_share 进度条表） | ⬆️ 已移植 | 验证：/ops/weekly 菜品类型表 |
 | FP-CALC-16 | 日营收 vs 保本线图（含保本线、安全边际） | HTML:436-442 `#beChart`、`renderCalcCharts` :4092 | `CalcCharts.tsx`:60-110（同尺寸 SVG viewBox 560×150，含保本虚线、缺口/安全边际大字与两行脚注） | ⬆️ 已移植 | 同尺寸同配色重绘（旧 `#beChart`），零图表依赖；近 7 日柱状趋势仍保留在 `WeeklyReportPage.tsx`:249-278 |
 | FP-CALC-17 | 月营收成本结构图（占营收 %） | HTML:445-447 `#costChart` | `CalcCharts.tsx`:111-175（8 段堆叠 + 净利润/亏损段 + 图例标占营收 %）；后端补明细 `menu_baoben.js`:336-338（prop/util_fix/other）、:340-344（cost_bev_month/var_other_month/dish_qty） | ⬆️ 已移植 | 明细均为既有公式的月额拆分（加法式补字段，未改算法）；段色/文案对齐旧版 9 段图例 |
@@ -40,24 +40,27 @@
 | 项 | 数 |
 |---|---|
 | FP 总数 | 20 |
-| ⬆️ 已移植 | 19（其中 1 项为新版新增能力：FP-CALC-20） |
+| ⬆️ 已移植 | 20（其中 1 项为新版新增能力：FP-CALC-20） |
 | 🔄 等价替代 | 0 |
-| ⬜ 待补 | 1 |
+| ⬜ 待补 | 0 |
 | ⚰️ 废弃 | 0 |
 
 **结论**：阶段 9（2026-09-29）补齐「算得出但看不见」的参数与图表缺口，阶段 10 补齐
 **逐菜结构表 + 表头排序**，阶段 11 补齐**模拟态只读推演**（08 口径切换 / 11 行内改价改量 /
-12 模拟下架 / 13 批量调价调量）。剩余 1 项：**FP-CALC-14 五类角色卡片**。
+12 模拟下架 / 13 批量调价调量），阶段 12（2026-10-10）补齐 **FP-CALC-14 五类角色卡片**。
+本页 **20/20 全绿**。
 
 ## 建议补齐顺序
 
-1. **FP-CALC-14** 五类角色卡片（与现有四象限口径不同，需并列新增，不得替换）
+无（本页 20/20 已闭合）。
 
 ## 备注
 
 - 本清单由 AI 从源码抽取，**未经人工复核**，按 `docs/迁移颗粒度规范.md` §2.2 复核后才可转为正式基线。
 - FP-CALC-11/12 的「模拟态」是**只读推演层**，禁止写回菜品/配方/库存（与 CHANGELOG v1.2.0「只读隔离」一致）。
-- FP-CALC-14 的四象限与旧版五类角色**口径不同**，不得宣称等价替代。
+- ~~FP-CALC-14 的四象限与旧版五类角色**口径不同**，不得宣称等价替代。~~ →
+  **阶段 12 已按「并列新增」处理**：五类角色卡片独立成卡（`ops/CalcTypeCards.tsx`），
+  左栏四象限（波士顿口径）原样保留，两口径并存、互不替换。
 - 阶段 9（2026-09-29）迁移 04/05/06/07/16/17/18；验证方式为**无头浏览器开箱**：3 张图 viewBox 均渲染、
   分情景表 5 档有值（日客流/月营收/净利率）、改「目标月利润」后请求带全量 24 项 query、
   「恢复默认参数」后 query 清空、控制台 0 报错（验证脚本为临时文件，已删除）。
@@ -107,4 +110,32 @@
     全部来自同一响应，杜绝两份公式漂移）；代价是输入后约 0.3s 才更新数值。
   - 验证：`bff/lib/algorithms/baoben_sim.test.js`（三段：`computeModel` 与 `computeBaobenSummary`
     逐字段自洽 / 三口径与回落开关 / 零写库可测断言：`data/*.json` mtime+digest 不变、请求体不 mutate、幂等）；
-    BFF 全量 `npm test` 通过；红线守卫 `ci/redline_guard.ps1` 全部通过。
+   BFF 全量 `npm test` 通过；红线守卫 `ci/redline_guard.ps1` 全部通过。
+- 阶段 12（2026-10-10）补齐 14，**本页 20/20 闭合**：
+  - 新增 `apps/admin-web/src/pages/ops/CalcTypeCards.tsx`：5 张角色卡（`Card` 头 + 左侧 `CT_COLOR` 色条），
+    字段序逐字照抄旧版 `renderCalcTypes`（HTML:3978-4019）——
+    名称 / `{n} 道` / `CT.desc` / 日销量 / 销量占比 / 日营收 / 营收占比 / 成本率 / 日毛利额（**字色 = 角色色**，
+    照抄旧版 `${CT_COLOR[s.t]}` 而非 ok/bad）/ 毛利占比。
+  - 后端 `bff/lib/menu_baoben.js` **加法式补字段**：`types[].qty_share`（分母 = 参与测算日销量合计，
+    即旧版 `renderCalcTypes` 的 `totQ`，HTML:3981）；同时把 `TYPE_META[].desc` 对齐为旧版 `CT[].desc` 全文
+    （HTML:3810-3816，字段此前无消费方）。
+  - 分类切换**无需新增**：`CalcDishTable.tsx` 的 `Tag.CheckableTag` 类型筛选（阶段 10/11 已就位，6 个 chip
+    = 全部 + 5 类）即旧版 `renderCalcTabs`（HTML:4038）的等价物，本轮仅补开箱断言。
+  - 配色**收拢单一来源**：旧版 `CT_COLOR`（HTML:3817）抽到 `calcSim.ts` 的 `CALC_TYPE_COLOR`，
+    由角色卡片与逐菜表类型标签共用（原先散在 `CalcDishTable.tsx` 局部常量）。
+  - **口径分界（已知、非缺陷）**：本卡与同块 FP-CALC-15 表同源 **保本价盘整表**口径，
+    故基线道数 Σ = 12/12/22/10/30 = **86 道**，与逐菜表（店内菜品 95 道）的差异同阶段 10 备注；
+    卡头 `extra` 显式标注「静态价盘口径」，不宣称与逐菜表同口径。
+    且该口径**随页面分界自动切换**：`types` 取自 `simOn ? sim.baoben_summary.types : data.baoben_summary.types`
+    （`WeeklyReportPage.tsx`:147），故进入模拟态后本卡道数 Σ 由 86 → **95**
+    （= 本店在售菜品口径，与逐菜表自洽）。
+  - 与左栏「四象限分布」（波士顿口径，`WeeklyReportPage.tsx`:279-296）**并列并存，未替换**。
+  - 验证：`scripts/smoke-calc-sim.js`（阶段 11 起的常驻开箱脚本）新增 15 条 FP-CALC-14 断言
+    （接口层 5 条：5 组 / `qty_share` 齐备 / Σ销量占比 100.01% / `name·desc·n` 齐备；
+    UI 层 10 条：卡片存在 / 5 张卡 / 每卡 7 指标齐备 / 卡色 = `CT_COLOR` / chips=6 /
+    点「引流」→ 逐菜表仅剩 12/95 道 / 点「全部」→ 复原 95 行 / 基线 Σ86 道 / 进模拟态 Σ95 道 = 逐菜行数）。
+    **开箱 56/56 通过**（`powershell -File scripts/smoke-calc-sim.ps1`，含零写库三断言）；
+    算法单测 15 文件全过、`ci/redline_guard.ps1` 全过、`scripts/gen-debt-table.ps1` 与
+    `scripts/gen-progress-board.js` 已刷新（漂移校验 ok、数字一致性 OK）。
+  - 顺手修：开箱脚本「审批队列仍为空」改为「**未新增**」（基线 2 条历史待办），
+    避免因库内既有待办而假红。

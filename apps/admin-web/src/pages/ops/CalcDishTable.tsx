@@ -13,7 +13,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { BaobenDishRow, BaobenType, CalcQMode } from '../../api/types'
-import { QMODE_OPTIONS, rowOvKey, SIM_BASIS_LABEL, type BulkAction, type CalcSimCtl } from './calcSim'
+import { CALC_TYPE_COLOR, QMODE_OPTIONS, rowOvKey, SIM_BASIS_LABEL, type BulkAction, type CalcSimCtl } from './calcSim'
 
 /**
  * 结构测算 · 逐菜结构表（模拟态可编辑推演）
@@ -27,15 +27,6 @@ import { QMODE_OPTIONS, rowOvKey, SIM_BASIS_LABEL, type BulkAction, type CalcSim
  * 3) 纯展示层：排序、类型筛选、分组行。
  * 本表零写库：所有编辑只改内存覆盖，不写菜品主数据、不写配方与库存。
  */
-
-/** 旧版类型标签底色（HTML:10、:76-77） */
-const TYPE_COLOR: Record<string, string> = {
-  引流: '#E8734A',
-  爆品: '#D93025',
-  利润: '#1E8E5A',
-  形象: '#6B4C9A',
-  常规: '#3D7EA6',
-}
 
 /** 旧版 --ok / --bad（HTML:11） */
 const OK = '#1E8E5A'
@@ -231,7 +222,7 @@ export default function CalcDishTable({
       sortOrder: orderOf('t'),
       onCell: cellOf,
       render: (v: string | null | undefined) => (
-        <Tag color={TYPE_COLOR[v ?? ''] ?? 'default'}>{v ?? '常规'}</Tag>
+        <Tag color={CALC_TYPE_COLOR[v ?? ''] ?? 'default'}>{v ?? '常规'}</Tag>
       ),
     },
     {

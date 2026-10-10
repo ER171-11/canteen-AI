@@ -11,8 +11,10 @@
  *  4) FP-CALC-12 取消勾选 → 「已下架」标记 + 店级 KPI 重算；
  *  5) FP-CALC-08 口径切到「估算 q」→ 表头/数值变化；
  *  6) 退出模拟态 → 徽标消失、KPI 回到基线、行数不变；
+ *  6.5) FP-CALC-14 五类角色卡片（5 卡 × 7 指标 + 旧版 CT_COLOR 卡色）+ 分类切换 chips 过滤逐菜表
+ *     （基线 Σ86 道 = 静态价盘口径；进模拟态后跟随切到 Σ95 道 = 本店在售菜品口径）；
  *  7) 零写库（ADR-007 §2.2：snapshot.json / menu-baoben.json / actions_queue.json 大小与 mtime
- *     全程未变 + 快照 rev 未前进 + 审批队列仍为空）+ 页面控制台 0 报错。
+ *     全程未变 + 快照 rev 未前进 + 审批队列未新增）+ 页面控制台 0 报错。
  *
  * 前置：BFF 已在 8787、vite dev 已在 5173（用同目录 smoke-calc-sim.ps1 一键起停）。
  * 用法：node scripts/smoke-calc-sim.js     退出码 0=通过
@@ -178,6 +180,22 @@ const HELPERS = [
   '  qmodeSelect: () => { const c = __q.dishCard(); if (!c) return null;',
   '    return [...c.querySelectorAll(".ant-select")].find((s) => /估算|真实/.test(s.innerText)) || null; },',
   '  qmodeText: () => { const s = __q.qmodeSelect(); return s ? s.innerText.trim() : null; },',
+  // ---- FP-CALC-14 五类角色卡片 + 分类切换 ----
+  '  typeCard: () => __q.card("菜品结构（五类角色）"),',
+  '  typeCards: () => { const c = __q.typeCard(); if (!c) return [];',
+  '    const b = c.querySelector(".ant-card-body"); if (!b) return [];',
+  '    const wrap = b.firstElementChild; return wrap ? [...wrap.children] : []; },',
+  '  typeTexts: () => __q.typeCards().map((el) => el.innerText),',
+  '  typeBorderColors: () => __q.typeCards().map((el) => getComputedStyle(el).borderLeftColor),',
+  '  typeChips: () => { const c = __q.dishCard(); if (!c) return [];',
+  '    return [...c.querySelectorAll(".ant-tag.ant-tag-checkable")]; },',
+  // 角色卡道数合计（取每卡首行「N 道」的数字，避开正则转义）
+  '  typeCardN: () => __q.typeCards().reduce((a, el) => {',
+  '    const s = el.innerText || ""; const i = s.indexOf("道"); let j = i - 1;',
+  '    while (j >= 0 && (s.charCodeAt(j) <= 32 || (s[j] >= "0" && s[j] <= "9"))) j -= 1;',
+  '    return a + (i > 0 ? (Number(s.slice(j + 1, i)) || 0) : 0); }, 0),',
+  '  clickChip: (kw) => { const c = __q.typeChips().find((x) => x.innerText.indexOf(kw) >= 0);',
+  '    if (!c) return false; c.click(); return true; },',
   '};',
 ].join('\n');
 
@@ -208,6 +226,10 @@ async function main() {
   const token = login.body && login.body.token;
   ok(login.status === 200 && !!token, '老板登录（boss/wufu123）', login.status);
 
+  // 审批队列基线（可能已有历史待办，故断言「未新增」而不是「为空」）
+  const queue0 = await req('GET', BFF + '/api/actions?status=queued', undefined, token);
+  const queue0Count = Number((queue0.body && queue0.body.count) || 0);
+
   const base = await req('GET', BFF + '/api/modules/analysis', undefined, token);
   const baseKpi = (base.body && base.body.baoben_summary && base.body.baoben_summary.kpi) || {};
   ok(base.status === 200 && baseKpi.be_day != null,
@@ -225,6 +247,18 @@ async function main() {
     { 基线: baseKpi.be_day, 模拟态: simKpi.be_day, delta: Math.round((simKpi.be_day - baseKpi.be_day) * 100) / 100 });
   const getSim = await req('GET', BFF + '/api/modules/analysis/sim', undefined, token);
   ok(getSim.status === 404, 'GET 同路径 404（只读推演只认 POST）', getSim.status);
+
+  /* ---------- 1b. FP-CALC-14 接口层：五类角色 types 含 qty_share ---------- */
+  const typesApi = (base.body && base.body.baoben_summary && base.body.baoben_summary.types) || [];
+  ok(typesApi.length === 5, 'FP-CALC-14 types 五类角色 5 组（' + typesApi.map((t) => t.k).join('/') + '）');
+  ok(typesApi.every((t) => t.qty_share != null),
+    'FP-CALC-14 每组回传 qty_share（销量占比，后端单一口径）',
+    typesApi.map((t) => t.k + '=' + t.qty_share));
+  const qtyShareSum = typesApi.reduce((a, t) => a + Number(t.qty_share || 0), 0);
+  ok(Math.abs(qtyShareSum - 100) < 0.5, 'FP-CALC-14 Σ销量占比 ≈ 100%', Math.round(qtyShareSum * 100) / 100);
+  ok(typesApi.every((t) => t.desc && String(t.desc).length >= 8) && typesApi.every((t) => t.name && t.n >= 0),
+    'FP-CALC-14 五类均带 name/desc/n（desc 照抄旧版 CT，HTML:3810-3816）',
+    typesApi.map((t) => t.k + ':' + t.desc));
 
   /* ---------- 2. CDP 连接 + 注入登录态 ---------- */
   const ver = await req('GET', 'http://127.0.0.1:' + CDP_PORT + '/json/version');
@@ -287,6 +321,52 @@ async function main() {
     '基线态售价输入框禁用（只读）');
   ok(typeof baseBeDayUi === 'number' && isFinite(baseBeDayUi), '基线日保本 UI 值 ' + baseBeDayUi);
 
+  /* ---------- 3b. FP-CALC-14 五类角色卡片 + 分类切换（基线态只读） ---------- */
+  const METRICS = ['日销量', '销量占比', '日营收', '营收占比', '成本率', '日毛利额', '毛利占比'];
+  ok(await evalJs('!!__q.typeCard()'), 'FP-CALC-14 存在「菜品结构（五类角色）」卡片');
+  ok(await evalJs('__q.typeCards().length') === 5,
+    'FP-CALC-14 渲染 5 张角色卡', await evalJs('__q.typeCards().length'));
+  const typeTexts = await evalJs('__q.typeTexts()');
+  ok(
+    Array.isArray(typeTexts) &&
+      typeTexts.length === 5 &&
+      typeTexts.every((t) => METRICS.every((m) => String(t).indexOf(m) >= 0)),
+    'FP-CALC-14 每卡 7 项指标齐备（' + METRICS.join('/') + '）',
+    (typeTexts || []).map((t) => String(t).split('\n').slice(0, 2).join(' '))
+  );
+  const expectTypeColors = [
+    'rgb(232, 115, 74)',
+    'rgb(217, 48, 37)',
+    'rgb(30, 142, 90)',
+    'rgb(107, 76, 154)',
+    'rgb(61, 126, 166)',
+  ];
+  const typeColors = await evalJs('__q.typeBorderColors()');
+  ok(
+    JSON.stringify(typeColors) === JSON.stringify(expectTypeColors),
+    'FP-CALC-14 卡色 = 旧版 CT_COLOR（引流#E8734A/爆品#D93025/利润#1E8E5A/形象#6B4C9A/常规#3D7EA6）',
+    typeColors
+  );
+  ok(await evalJs('__q.typeChips().length') === 6, 'FP-CALC-14 分类切换 chips = 全部 + 5 类',
+    await evalJs('__q.typeChips().length'));
+  const rowsAll = await evalJs('__q.rows().length');
+  ok(await evalJs('__q.clickChip("引流")'), 'FP-CALC-14 点击「引流」chip');
+  await sleep(600);
+  const rowsYinliu = await evalJs('__q.rows().length');
+  const allYinliu = await evalJs(
+    '__q.rows().every((tr)=>{const td=__q.cells(tr)[2];return !!td && td.innerText.indexOf("引流")>=0})'
+  );
+  ok(
+    rowsYinliu > 0 && rowsYinliu < rowsAll && allYinliu,
+    'FP-CALC-14 分类切换生效：逐菜表仅剩引流（' + rowsYinliu + '/' + rowsAll + ' 道）'
+  );
+  ok(await evalJs('__q.clickChip("全部")'), 'FP-CALC-14 点击「全部」chip');
+  await sleep(600);
+  ok(await evalJs('__q.rows().length') === rowsAll, 'FP-CALC-14 切回「全部」→ 行数复原 ' + rowsAll);
+  const typeCardNBase = await evalJs('__q.typeCardN()');
+  ok(typeCardNBase === 86,
+    'FP-CALC-14 基线卡片道数 Σ' + typeCardNBase + ' = 保本价盘 86 道（与逐菜表 ' + rowsAll + ' 道的差为已知口径差，同阶段 10）');
+
   /* ---------- 4. 进入模拟态 ---------- */
   ok(await evalJs('__q.click("进入模拟态")'), '点击「进入模拟态」');
   const badgeOk = await waitQ('__q.badges().length >= 1', 20000, '模拟态徽标出现');
@@ -310,6 +390,9 @@ async function main() {
     'Σ逐菜日营收 = ' + Math.round(sumRev) + ' ≈ 店级 day_dish_rev ' + Math.round(Number(simKpi.day_dish_rev)) + '（同源）');
   ok(Math.abs(Number(simKpi.day_rev) - Number(simKpi.day_dish_rev) * 1.15) < 1,
     '店级 day_rev = day_dish_rev × (1+bevRatio 0.15) = ' + Math.round(Number(simKpi.day_rev)));
+  const typeCardNSim = await evalJs('__q.typeCardN()');
+  ok(typeCardNSim === (await evalJs('__q.rows().length')),
+    'FP-CALC-14 模拟态卡片道数跟随口径切换 → Σ' + typeCardNSim + ' = 逐菜行数（本店在售菜品口径）');
 
   /* ---------- 5. FP-CALC-11 行内改售价 ---------- */
   const row0Name = await evalJs('__q.dishName(__q.rows()[0])');
@@ -377,7 +460,8 @@ async function main() {
   const after = await req('GET', BFF + '/api/modules/analysis', undefined, token);
   ok(after.body && after.body.rev === base.body.rev, '快照 rev 未前进（无写库）', after.body && after.body.rev);
   const queue = await req('GET', BFF + '/api/actions?status=queued', undefined, token);
-  ok(Number((queue.body && queue.body.count) || 0) === 0, '审批队列仍为空（模拟态不入队）', queue.body && queue.body.count);
+  ok(Number((queue.body && queue.body.count) || 0) === queue0Count,
+    '审批队列未新增（模拟态不入队；基线 ' + queue0Count + ' 条）', queue.body && queue.body.count);
   ok(cdp.logs.length === 0, '页面控制台 0 报错', cdp.logs);
 
   try { await cdp.send('Target.closeTarget', { targetId }); } catch (e) { /* ignore */ }
