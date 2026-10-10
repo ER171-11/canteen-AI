@@ -50,9 +50,9 @@ $numOverride = @{ 'FP-SET-01' = 99 }   # 模块状态总览属锦上添花，排
 # 附录 A 的页面顺序与状态列文案
 $pageOrder  = @('RECV','PO','ING','DISH','SALE','CALC','PRICE','DASH','SET')
 $pageStatus = @{
-  RECV='🟡 进行中（替代模式）'; PO='🟡 待人工复核'; ING='🟡 待人工复核'; DISH='🟡 待人工复核'
-  SALE='🟡 待人工复核 · ⚠️ 整页缺失'; CALC='🟡 待人工复核 · ⚠️ 五类角色缺失'; PRICE='🟡 待人工复核'
-  DASH='🟡 待人工复核 · ⚠️ MOCK 掩盖缺口'; SET='🟡 待人工复核 · ⚠️ 四类导出整块缺失'
+  RECV='🟡 进行中（替代模式）'; PO='🟡 待人工复核 · ⚠️ 写类与建议转正式待补'; ING='🟡 待人工复核'; DISH='🟡 待人工复核 · ⚠️ 食谱卡导入与编辑态实时成本待补'
+  SALE='🟡 待人工复核 · ⚠️ 整页缺失'; CALC='🟡 待人工复核 · ⚠️ 五类角色缺失'; PRICE='🟡 待人工复核 · ⚠️ 写类与一键比价链路待补'
+  DASH='🟡 待人工复核 · ⚠️ MOCK 掩盖缺口'; SET='🟡 待人工复核 · ⚠️ 写类与高危待补'
 }
 
 # ------------------------------------------------- FP → (波次, 建议角色, 阻塞/依赖)
@@ -67,21 +67,13 @@ M 'FP-DASH-01' 'W1' '前端'    '后面所有区间口径的前置'
 M 'FP-DASH-11' 'W1' '前端'    '随 FP-DASH-09 预警卡'
 M 'FP-RECV-10' 'W1' 'BFF+前端' ''
 M 'FP-RECV-11' 'W1' '前端'    ''
-M 'FP-SET-11'  'W1' 'BFF+前端' '后端需新增业务数据导出端点'
-M 'FP-SET-12'  'W1' 'BFF+前端' 'CSV 端点'
-M 'FP-SET-13'  'W1' 'BFF+前端' 'CSV 端点'
-M 'FP-SET-14'  'W1' 'BFF+前端' 'CSV 端点；依赖 FP-SALE-07 口径'
+# 已完成（W1 设置页只读速补，2026-10-10，已从本表消失，勿再登记）：FP-SET-01/11/12/13/14
 M 'FP-ING-07'  'W1' '前端'    ''
 M 'FP-ING-08'  'W1' '前端'    ''
 M 'FP-ING-15'  'W1' 'BFF+前端' ''
 M 'FP-ING-09'  'W1' 'BFF+前端' ''
-M 'FP-PO-15'   'W1' 'BFF+前端' ''
-M 'FP-PO-12'   'W1' '前端'    '依赖 FP-PO-04/05 的状态字段'
-M 'FP-PO-14'   'W1' '前端'    '随 FP-PO-12'
-M 'FP-PO-10'   'W1' '前端'    ''
-M 'FP-DISH-11' 'W1' 'BFF+前端' '需明确「近30天」口径'
-M 'FP-DISH-12' 'W1' 'BFF+前端' '随 FP-DISH-11'
-M 'FP-DISH-08' 'W1' '前端'    '依赖 FP-ING-04 出成率'
+# 已完成（W1 只读补齐，2026-10-10，已从本表消失，勿再登记）：FP-PO-10/12/14/15、FP-DISH-11/12、FP-PRICE-01/02/03/13/14
+# 已完成（W1，2026-10-10，依赖 FP-ING-04 已一并落地）：FP-DISH-08 配方编辑态实时成本
 M 'FP-CALC-18' 'W1' '前端'    '后端已算 scenes，仅差渲染（性价比最高）'
 M 'FP-CALC-04' 'W1' '前端'    '后端 DEFAULT_PARAMS 已备，开放为表单，不写库'
 M 'FP-CALC-05' 'W1' '前端'    '后端 varRate 已算'
@@ -93,23 +85,13 @@ M 'FP-CALC-17' 'W1' '前端'    '后端 var_rate/fixed_month 已有'
 M 'FP-CALC-07' 'W1' '前端'    '后端自动合并已实现，补手动刷新按钮'
 M 'FP-CALC-08' 'W1' 'BFF+前端' '需 realAnalysis 的 sales 聚合支撑'
 M 'FP-CALC-14' 'W1' '前端'    '四象限口径不同，不构成等价替代'
-M 'FP-PRICE-01' 'W1' '前端'   ''
-M 'FP-PRICE-02' 'W1' '前端'   '需本店均价参与计算'
-M 'FP-PRICE-03' 'W1' 'BFF+前端' '比价页核心价值；需快照提供 ing.avg 与 conv'
-M 'FP-PRICE-05' 'W1' '前端'   '折算口径，避免省错钱'
-M 'FP-PRICE-13' 'W1' 'BFF+前端' ''
-M 'FP-PRICE-14' 'W1' '前端'   '随 FP-PRICE-13'
-M 'FP-SALE-14'  'W1' '前端'   '提示类，成本极低'
-M 'FP-SET-01'   'W1' '前端'   '可复用 ModuleBrowse 数据（排本页末位）'
+# 已完成（W1，2026-10-10，已从本表消失，勿再登记）：FP-PRICE-05 报价口径+实时折算、FP-SALE-14 未配配方告警
 
 # --- W2 业务闭环 ---
 # 已完成（T5，已从本表消失，勿再登记）：FP-RECV-04/05/06/07、FP-SET-18/19
-M 'FP-PO-03'   'W2' 'BFF+前端' '欠款清收闭环'
+# 已完成（W2，2026-10-10，已从本表消失，勿再登记）：FP-PO-03/04/05/06/07
+#   采购单付款/结案/作废/恢复/删除（order.pay/close/void/restore/delete，走审批队列）
 M 'FP-PO-18'   'W2' 'BFF+前端' '建议≠下单，须经确认'
-M 'FP-PO-04'   'W2' 'BFF(动作)+前端' ''
-M 'FP-PO-05'   'W2' 'BFF(动作)+前端' '作废留痕，禁物理删除'
-M 'FP-PO-06'   'W2' 'BFF(动作)+前端' '随 FP-PO-04/05'
-M 'FP-PO-07'   'W2' 'BFF(动作)+前端' '建议只留作废不留删除'
 M 'FP-SALE-07' 'W2' 'BFF+前端' '营收/欠款口径唯一出口'
 M 'FP-SALE-08' 'W2' 'BFF+前端' '依赖「单日期 vs 收款日期」口径'
 M 'FP-SALE-09' 'W2' '前端'    '随 FP-SALE-07'
@@ -125,13 +107,10 @@ M 'FP-DASH-13' 'W2' 'BFF+前端' '需先建销售应收模型'
 M 'FP-DASH-14' 'W2' 'BFF(动作)+前端' '随 FP-DASH-13'
 M 'FP-DASH-15' 'W2' 'BFF+前端' '近30天单菜排行'
 M 'FP-PRICE-07' 'W2' 'BFF(动作)+前端' '另需补 consumer.js 的 quote 执行器'
-M 'FP-PRICE-09' 'W2' '前端'    '依赖 FP-PRICE-10'
-M 'FP-PRICE-10' 'W2' 'BFF(动作)+前端' '与 FP-SET-03/04 同一缺口'
 M 'FP-PRICE-11' 'W2' 'BFF+前端' '只读导出，不写库'
 M 'FP-PRICE-12' 'W2' 'BFF(动作)+前端' '批量建议动作入队'
-M 'FP-SET-02'  'W2' 'BFF(动作)+前端' 'config.update 链路已通'
-M 'FP-SET-03'  'W2' 'BFF(动作)+前端' '随 FP-SET-02'
-M 'FP-SET-04'  'W2' 'BFF(动作)+前端' '随 FP-SET-03'
+M 'FP-SET-02'  'W2' 'BFF(动作)+前端' 'data.rest 为顶层字段，config.update 只改 data.config，须先定落点（新增 rest.update 动作，或改存 config.restaurant_name）'
+# 已完成（W2，2026-10-10，已从本表消失，勿再登记）：FP-SET-03/04 比价平台配置、FP-PRICE-09/10 外链与平台模板
 M 'FP-SET-07'  'W2' 'BFF+前端' '需先定「服务端快照」形态并补 ADR'
 M 'FP-SET-10'  'W2' 'BFF(动作)+前端' '回滚高危，须留痕'
 
@@ -146,7 +125,7 @@ M 'FP-PO-02'   'W3' 'BFF(动作)+前端' ''
 M 'FP-PO-17'   'W3' 'BFF(动作)+前端' ''
 M 'FP-PO-19'   'W3' 'BFF(动作)+前端' ''
 M 'FP-PO-20'   'W3' 'BFF(动作)+前端' '记回 ing.upsert'
-M 'FP-ING-04'  'W3' 'BFF(动作)+前端' '影响配方毛料还原，与 FP-DISH-08 联动'
+# 已完成（W3，2026-10-10，解锁 FP-DISH-08）：FP-ING-04 出成率
 M 'FP-ING-05'  'W3' 'BFF(动作)+前端' '手工调整须留痕'
 M 'FP-ING-06'  'W3' 'BFF(动作)+前端' ''
 M 'FP-ING-11'  'W3' 'BFF(动作)+前端' '须带引用校验'
@@ -267,7 +246,7 @@ Add ''
 Add '| 波次 | 定位 | 卡数 | 说明 |'
 Add '|---|---|---|---|'
 foreach ($w in $waves.Keys) {
-  $c = ($ordered | Where-Object { $_.W -eq $w }).Count
+  $c = @($ordered | Where-Object { $_.W -eq $w }).Count
   Add ("| **{0}** | {1} | **{2}** | {3} |" -f $w, (($waves[$w] -split '：')[0]), $c, (($waves[$w] -split '：')[1]))
 }
 Add ("| — | **合计** | **{0}** | 基线 {1} 项中 ⬆️ {2} 已移植，⬜ {3} 待补 |" -f $ordered.Count, $statTot.total, $statTot.up, $statTot.todo)
@@ -275,7 +254,7 @@ Add ''
 Add '| 按页 | ⬜ 欠账数 |'
 Add '|---|---|'
 foreach ($p in @('RECV','PO','ING','DISH','SALE','CALC','PRICE','DASH','SET')) {
-  $c = ($ordered | Where-Object { $_.Page -eq $p }).Count
+  $c = @($ordered | Where-Object { $_.Page -eq $p }).Count
   Add ("| {0} {1} | {2} |" -f $p, $pageName[$p], $c)
 }
 Add ''
@@ -284,7 +263,7 @@ Add '> 按规范 §3，`⬜ 待补` 必须有**已批准的任务卡与负责人
 Add ''
 
 foreach ($w in $waves.Keys) {
-  $grp = $ordered | Where-Object { $_.W -eq $w }
+  $grp = @($ordered | Where-Object { $_.W -eq $w })
   Add ("## {0} · {1}（{2} 项）" -f $w, (($waves[$w] -split '：')[0]), $grp.Count)
   Add ''
   Add '| 卡号 | FP ID | 所属页 | 功能点 | 负责人 | 建议角色 | 阻塞 / 依赖 |'
@@ -301,9 +280,9 @@ Add ''
 Add '| 前置决策 | 阻塞的卡 | 结论存放处 |'
 Add '|---|---|---|'
 Add '| 进货单「在店内录还是云端录」的职责边界 | ~~W3 的 RECV 5 张~~ **已解除**：`FP-RECV-01/02/03/08/09` 已全部 ⬆️ | `docs/decisions/ADR-004-进货单录入边界.md` |'
-Add ("| 采购单/销售单的同名职责边界 | W3 剩余 {0} 张（PO/SALE） | 待写入 ADR |" -f ($ordered | Where-Object { $_.W -eq 'W3' -and ($_.Page -eq 'PO' -or $_.Page -eq 'SALE') }).Count)
+Add ("| 采购单/销售单的同名职责边界 | W3 剩余 {0} 张（PO/SALE） | 待写入 ADR |" -f @($ordered | Where-Object { $_.W -eq 'W3' -and ($_.Page -eq 'PO' -or $_.Page -eq 'SALE') }).Count)
 Add '| 应收/实收按「单日期」还是「收款日期」统计 | `FP-DASH-02/03`、`FP-SALE-08` | 待写入 ADR |'
-Add '| 「服务端快照」形态（替代旧 localStorage 备份） | `FP-SET-07/10/11` | 待写入 ADR |'
+Add '| 「服务端快照」形态（替代旧 localStorage 备份） | `FP-SET-07/10` | 待写入 ADR |'
 Add '| 双机同步四件套是否废弃 | `FP-SET-05/06/08/09` | 需业务批准人签字后方可标 ⚰️ |'
 Add '| 结构测算「模拟层」设计（只读推演、禁写库） | ~~`FP-CALC-11/12/13`~~ **已解除**：三项已全部 ⬆️ | `docs/decisions/ADR-007-结构测算模拟层只读推演.md` |'
 Add ''
@@ -312,7 +291,7 @@ Add ''
 Add '- 本表卡号 `{波次}-{序号}`（如 `W1-01`）即规范 §3 要求的**关联任务卡 ID**；补齐一个 FP 后，'
 Add '  须同步把 `docs/迁移基线/FP-*.md` 中该行状态改为 ⬆️，并重新生成本表（该卡自动消失）。'
 Add ("- {0} 张卡中 **W1 的 {1} 张是零红线只读项**，可与任何任务并行，建议最先清空。" -f `
-  $ordered.Count, ($ordered | Where-Object { $_.W -eq 'W1' }).Count)
+  $ordered.Count, @($ordered | Where-Object { $_.W -eq 'W1' }).Count)
 Add '- 平价测试全绿属另一条门禁，不能替代本表。'
 
 $text = $L -join "`n"
@@ -360,4 +339,4 @@ if ($Check) {
 Write-Host ("已生成：{0}" -f $out)
 Write-Host ("已同步：{0} 附录 A" -f $spec)
 Write-Host ("基线 {0} 项 → ⬆️ {1} / ⬜ {2}；欠账卡 {3} 张" -f $statTot.total, $statTot.up, $statTot.todo, $ordered.Count)
-foreach ($w in $waves.Keys) { Write-Host ("  {0}: {1}" -f $w, ($ordered | Where-Object { $_.W -eq $w }).Count) }
+foreach ($w in $waves.Keys) { Write-Host ("  {0}: {1}" -f $w, @($ordered | Where-Object { $_.W -eq $w }).Count) }

@@ -1145,3 +1145,300 @@
   而阻塞，须与 FP-SALE-07/08/11 同批建销售应收模型后再补（**不先上 ¥0 假卡**）；
   全局欠账 **⬆️ 74 / ⬜ 77**（合计 151）。
 
+## [2026-10-10] W1 第二批 - 设置「四类导出 + 模块通道一览」（阶段 14 / FP-SET-01/11/12/13/14）
+
+- 目标: 按欠账总表 W1 顺序推进设置页 5 张卡（`W1-02`~`W1-06` = FP-SET-11/12/13/14 + FP-SET-01），全部只读清零。
+- 变更:
+  - 新增后端 `bff/routes/export.js`（红线①：**只读**，不写快照 / 不写文件 / 不入队），并注册到 `bff/server.js`：
+    - **FP-SET-11** `GET /api/export/backup.json`：快照 `{rev,generated_at,size,data,ext}` 原样下发，
+      格式与 `/api/snapshot/push` 入参同构，**可直接回灌**（供后续 FP-SET-15 导入恢复复用）。
+    - **FP-SET-12** `GET /api/export/ings.csv`：11 列逐字照抄旧版 `#btnCsvIng`（HTML:5297）。
+    - **FP-SET-13** `GET /api/export/dishes.csv`：9 列；有配方 → `lib/recipe_cost` 的**每份成本**，
+      无配方 → 回落 `est`（= 旧版 `dishCost()`/`dishCostType()` HTML:1130-1131）；
+      近 30 天销量/营收按销售行 `date ≥ today−29` 聚合（= 旧版 `dishSalesAgg(d,30)` HTML:2613-2619）。
+    - **FP-SET-14** `GET /api/export/sales.csv`：12 列；口径**优先读显式字段** `sub/discount/receivable/payments`，
+      缺失时按「全额收款」兜底（见下方口径 1）。
+    - CSV 统一 **UTF-8 BOM + CRLF + 引号转义**（逐字对齐旧版 `csv()` HTML:5293-5295）；
+      四类响应均带 `Content-Disposition`（ASCII `filename` + RFC5987 `filename*`）。
+  - 前端 `apps/admin-web/src/pages/SystemConfigPage.tsx`:
+    - 新增「数据导出」卡（4 按钮）——走 `api/index.ts` 新函数拉 blob + 复用既有 `downloadBlob` 落盘
+      （**不能用 `<a href>` 直链**：`/api/*` 需 Bearer，直链不带 token）。
+    - 新增「各模块数据输入通道一览」表（**FP-SET-01**，旧版 HTML:571-585 的 10 行；
+      `buildChannelRows` 由 `GET /api/snapshot/latest` **实时推导**「当前状态」，未接通快照统一显示「未接通快照」，不编造数字）。
+  - `apps/admin-web/src/api/index.ts` 新增 `fetchExportBackupBlob` / `fetchExportCsvBlob`。
+  - 新增 `bff/routes/export.test.js`（30 断言）并挂到 `npm run test:routes` / `npm test`。
+- 口径（**已知、非缺陷**）:
+  1. **销售应收实收**：当前快照 `sales[]` 只有 `amount`（移动端一次性全额收款，见 FP-SALE-01），
+     故 折扣=空 / 应收=实收=售价合计 / 欠款=0；**不编造折扣与欠款**。带 `payments` 的行按真实口径导出
+     （应收−实收=欠款，用例已覆盖）；待 FP-SALE-07/11 建销售应收模型后，只要行上带字段即**自动**按真实口径导出。
+  2. **菜品成本**：配方成本只计**已定价原料**（`missing_ings` 未计），与 `lib/recipe_cost.js` 既有口径一致。
+  3. 「近30天」= 销售行 `date ≥ today−29`；与旧版 `daysAgo(29)` 同口径。
+- 验证:
+  - `cd bff && npm test` **全绿**（含新增 `routes/export.test.js` **30/30**；`npm run test:routes` 亦然）。
+  - `apps/admin-web` `npx tsc --noEmit` **0 错**。
+  - `powershell -File ci/redline_guard.ps1` **全绿**（R3/R4 受保护文件零改动 · R14 九页标注齐 · R15 模拟态零写库）。
+  - 看板刷新：`scripts/gen-debt-table.ps1` → 151 项 **⬆️ 79 / ⬜ 72**（欠账卡 72：W1 **15** / W2 30 / W3 20 / W4 7）；
+    `-Check` → **CHECK OK**；`node scripts/gen-progress-board.js` → **漂移校验 ok / 数字一致性 OK**；设置 **7/19**。
+- ⚠️ 未验证项（诚实清单）:
+  1. 导出**未做无头浏览器开箱冒烟**（无对应 smoke 脚本）：仅路由层 + 类型层验证，
+     按钮交互、blob 落盘与文件名**未目视确认**。
+  2. 真实大盘快照（86 道菜 / 74 原料）下的 CSV 行数与 Excel 打开效果**未逐值核对**，
+     仅以合成夹具断言列序、成本来源与近30天聚合。
+  3. `Content-Disposition` 的 `filename*` 中文名**未在真实浏览器下载器中验证**（前端已自命名，该头仅兜底）。
+- 回档方案: `git revert` 本提交即可。后端与前端均为**加法式**（新增路由 / 卡片 / API 函数），
+  不删既有键、**无 DB 迁移、无依赖变更**，未触碰红线文件（R3/R4 哈希未变）。
+- 后续: W1 余 **15 张**（DASH 1 / PO 4 / DISH 3 / PRICE 6 / SALE 1）；全局欠账 **⬆️ 79 / ⬜ 72**（合计 151）。
+
+## [2026-10-10] W1 第三批 - 采购「状态列/筛选/行级标记/KPI」（阶段 15 / FP-PO-10/12/14/15）
+
+- 目标: 按欠账总表 W1 顺序推进采购管理页 4 张卡（`W1-02`~`W1-05` = FP-PO-15/12/14/10），全部只读。
+- 变更（纯前端 `apps/admin-web/src/pages/inventory/PurchasePage.tsx` + `utils.ts`，零后端改动）:
+  - **FP-PO-15** 顶部 KPI 卡：本月下单金额 / 累计下单 / 已预付 / 待付供应商；
+    口径对齐旧版 `renderOrderKpi()`（旧 HTML:1777-1786）——「本月」= 近 30 天（`date ≥ today−29`，含今日、非自然月），
+    用全部 `docs` 聚合、**不随供应商/状态筛选变化**（与旧版一致）。
+  - **FP-PO-12** 状态列：`收货中`(橙) / `已结案`(绿) / `已作废`(灰) / `草稿`(蓝)。
+    状态由既有数据**推导**：显式 `status=void/draft/closed` 优先，否则「全部行收齐/作废 → 已结案」，否则收货中（对齐旧版 `orderSt()`）。
+  - **FP-PO-14** 状态筛选下拉：进行中（收货中+草稿）/ 已结案 / 已作废（对齐旧版 `#orderStatusFilter`）。
+  - **FP-PO-10** 明细列行级标记：`已收 x`（绿）/ `未收`（灰）/ `行作废`（灰 Tag，仅显式 `st=canceled`）。
+  - 新增 `utils.ts` 纯函数：`orderLineSt` / `orderSt` / `orderStMeta` / `orderRecvProg`（对齐旧版 :1688-1713）。
+    顺带把「收货进度」（FP-PO-11）改用 `orderRecvProg`，修正 `g` 上限封顶 `qty`（旧口径）。
+  - 作废行 `opacity:0.6`、欠款行 `ant-table-row-warning`（与进货入库页一致）。
+- 口径（**已知、非缺陷**）:
+  1. 状态为**只读推导**，不写库、不依赖尚未实现的结案/作废写动作；FP-PO-04/05（结案/作废）仍是 W2 写类，
+     落地后只改数据、不影响本批展示口径。
+  2. 「本月」= 近 30 天（旧版 `daysAgo(29)` 同口径），非自然月，已在卡上标注「（近30天）」。
+- 验证:
+  - `apps/admin-web` `npx tsc --noEmit` **0 错**。
+  - `cd bff && npm test` **全绿**（无回归；`loss_inventory_diff 旁路失败` 为既有旁路日志，非用例失败）。
+  - `powershell -File ci/redline_guard.ps1` **全绿**（R3/R4 零改动 · R14 九页齐 · R15 模拟态零写库）。
+  - 看板刷新：`scripts/gen-debt-table.ps1` → 151 项 **⬆️ 83 / ⬜ 68**（欠账卡 68：W1 **11** / W2 30 / W3 20 / W4 7）；
+    `-Check` → **CHECK OK**；`node scripts/gen-progress-board.js` → **漂移校验 ok / 数字一致性 OK**；采购 **9/20**。
+- ⚠️ 未验证项（诚实清单）:
+  1. **未做无头浏览器开箱冒烟**（无 smoke 脚本）：KPI 数值、状态 Tag、筛选交互未目视确认，
+     仅类型层 + 逻辑层验证（纯函数与旧版逐行对齐，未跑真实浏览器）。
+  2. 真实大盘采购单数据下，各状态（收货中/已结案/已作废/草稿）的分布与 KPI 数字**未逐值核对**，
+     仅静态对齐旧版口径函数，未跑数据。
+- 回档方案: `git revert` 本提交即可。纯前端加法（新增状态列/筛选/KPI/纯函数），
+  未删既有列与逻辑、无后端改动、无依赖变更、未触碰红线文件。
+- 后续: W1 余 **11 张**（DASH 1 / DISH 3 / PRICE 6 / SALE 1）；全局欠账 **⬆️ 83 / ⬜ 68**（合计 151）。
+
+## [2026-10-10] W1 第四批 - 菜品「近30天销量/毛利额」（阶段 16 / FP-DISH-11/12）
+
+- 目标: 按欠账总表 W1 顺序推进菜品配方页 2 张卡（FP-DISH-11/12），全部只读聚合。
+- 变更（BFF + 前端）:
+  - **BFF `bff/routes/export.js`**: 新增纯函数 `dishSalesAgg(snap)`，复用既有 `dishCostMap`（每份成本：配方→估算回退）
+    + `near30Agg`（近30天销量/营收），输出 `{byId, byName}` → `{q30, gp30}`（`gp30 = 营收 − 每份成本×销量`）。
+    口径对齐旧版 `dishSalesAgg(d,30)`（旧 HTML:2613-2618，`daysAgo(29)` 含今日）。
+  - **BFF `bff/routes/admin.js`**: `/api/admin/dishes` 返回前为每道菜附带 `q30`/`gp30`（只读，不写库）。
+  - **前端 `apps/admin-web`**: `Dish` 类型加 `q30?/gp30?`；`DishesPage.tsx`「销量」列改为「近30天销量」（`q30`，快照回退时退回 `q`），
+    新增「近30天毛利额」列（`gp30`，正绿负红，可排序）。
+- 口径（**已知、非缺陷**）:
+  1. 「近30天」= `date ≥ today−29` 含今日，非自然月，与旧版 `daysAgo(29)` 同口径（同 FP-SET-13 导出口径）。
+  2. 毛利额 = 营收 − 每份成本×销量；每份成本优先配方成本、无配方回退估算成本（`est`），
+     与旧版 `dishCost()` 及「菜品成本 CSV」同源（`dishCostMap`），不重复实现。
+  3. 快照回退路径（`/api/admin/dishes` 失败时）无 `q30`，列显示 `-`（销量退回 `q`）。
+- 验证:
+  - `bff/routes/export.test.js` 新增 `dishSalesAgg` 用例 5 条（id/菜名命中、q30、配方成本毛利额、无配方毛利额=营收−est×销量）。
+  - `cd bff && npm test` **全绿**（无回归；`loss_inventory_diff 旁路失败` 为既有旁路日志，非用例失败）。
+  - `apps/admin-web` `npx tsc --noEmit` **0 错**。
+  - `powershell -File ci/redline_guard.ps1` **全绿**（R3/R4 零改动）。
+  - 看板刷新：`gen-debt-table.ps1` → 151 项 **⬆️ 85 / ⬜ 66**（欠账卡 66：W1 **9** / W2 30 / W3 20 / W4 7）；
+    `-Check` → **CHECK OK**；`node scripts/gen-progress-board.js` → **漂移校验 ok**；菜品配方 **13/18**。
+- ⚠️ 未验证项（诚实清单）:
+  1. **未做无头浏览器开箱冒烟**：`/api/admin/dishes` 附带的 `q30`/`gp30` 未在真实浏览器逐值核对，
+     仅以 `dishSalesAgg` 单测 + `tsc` 类型层验证。
+  2. 真实大盘快照（86 菜 / 74 原料）下的 `q30`/`gp30` 数值**未逐值核对**（尤其「每份成本」配方回退链路）。
+- 回档方案: `git revert` 本提交即可。BFF/前端均为**加法式**（新增纯函数 / 附加字段 / 换列名），
+  不删既有列与逻辑、无 DB 迁移、无依赖变更、未触碰红线文件。
+- 后续: W1 余 **9 张**（DASH 1 / DISH 1 / PRICE 6 / SALE 1）；全局欠账 **⬆️ 85 / ⬜ 66**（合计 151）。
+
+## [2026-10-10] W1 第五批 - 外接比价「本店均价 vs 外部报价」（阶段 17 / FP-PRICE-01/02/03/13/14）
+
+- 目标: 补齐外接比价页的核心价值——「换供应商能省多少钱」（本店均价 vs 外部报价的差价/节省%），5 项全为只读聚合。
+- 变更（BFF + 前端）:
+  - **BFF `bff/lib/price.js`（新）**: 纯聚合 `priceReport`（比价主表 + 统计）、`pricePlan`（待比价清单）、
+    `quotePerStock`（per='buy' 按 conv 折算库存单位价）、`bestQuote`（按折后单位价取最低）、`quoteKeyword`（去规格/容量后缀）。
+    口径逐行对齐旧版 `renderPrice`/`openQuotePlan`/`quoteTaskText`（旧 HTML:4924-5109）。
+  - **BFF `bff/routes/admin.js`**: 新增只读端点 `GET /api/admin/price` → `{report, plan, rev}`。
+  - **前端 `apps/admin-web`**: `Price*` 类型 + `fetchAdminPrice()`；`VendorsPage.tsx` 新增「原料比价」Tab：
+    顶部统计 Alert（待比价 N · 尚无报价 M · 已有报价 K）+ 搜索框（FP-PRICE-01）+ 筛选下拉（FP-PRICE-02）+
+    比价主表（FP-PRICE-03：本店均价/外部最低报价/差价/节省%/来源时间）+ 待比价清单 Modal（FP-PRICE-13/14）。
+- 口径（已知、非缺陷）:
+  1. 「在售原料」= `ings` 中 `on` 为真；本店均价 = `ing.avg`（元/库存单位）。
+  2. 外部报价按 `q.ing === ing.id` 归集；`per='buy'` 为采购单位价（`/conv` 折库存单位），`per='stock'` 原样。
+  3. 差价 = 最低折价 − 本店均价；节省% = |差价|/本店均价；暂无报价的原料显示「暂无报价」且不参与差价。
+  4. 快照 `data.quotes` 为空/稀少时，主表以「暂无报价」展示（合法只读态），统计反映真实在售/已比价数量。
+- 验证:
+  - `bff/lib/price.test.js` 新增 18 条断言（折算/最低价/关键词/主表差价节省%/在售过滤/待比价状态/空快照回退），全绿。
+  - `cd bff && npm test` **全绿**（含新增 price.test.js；`loss_inventory_diff 旁路失败` 为既有旁路日志）。
+  - `apps/admin-web` `npx tsc --noEmit` **0 错**；`read_lints` 改动文件 **0 错**。
+  - `powershell -File ci/redline_guard.ps1` **全绿**（R3/R4 零改动）。
+  - 看板刷新：`gen-debt-table.ps1` → 151 项 **⬆️ 90 / ⬜ 61**（欠账卡 61：W1 **4** / W2 30 / W3 20 / W4 7）；
+    `-Check` → **CHECK OK**；`node scripts/gen-progress-board.js` → **漂移校验 ok**；外接比价 **9/15**。
+- ⚠️ 未验证项（诚实清单）:
+  1. **未做无头浏览器冒烟**：`/api/admin/price` 聚合与「原料比价」Tab 未在真实浏览器逐值核对，仅单测 + tsc 类型层验证。
+  2. 真实大盘快照下的 `ing.avg`/`ing.on`/`data.quotes` 数值**未逐值核对**（尤其 `data.quotes` 与 M10 供应链 `logSupplyQuote` 的字段口径是否同源）。
+- 回档方案: `git revert` 本提交即可。BFF/前端均为**加法式**（新增纯模块/只读端点/新 Tab），
+  不删既有列与逻辑、无 DB 迁移、无依赖变更、未触碰红线文件。
+- 后续: W1 余 **4 张**（DASH 1 / DISH 1 / PRICE 1 / SALE 1）；全局欠账 **⬆️ 90 / ⬜ 61**（合计 151）。
+
+## [2026-10-10] W1 第六批 - 出成率 + 配方编辑实时成本（阶段 18 / FP-ING-04 → FP-DISH-08）
+
+- 目标: W1 只读速补余 4 张均有硬阻塞（DASH 缺 `discount` 字段 / PRICE 写路径纠缠 / SALE 整页缺失 / DISH 依赖出成率）。
+  采纳基线点名「优先」的解锁链：先补 FP-ING-04 出成率（写类小活），解锁 FP-DISH-08 配方编辑实时成本。
+- 变更（BFF + 前端，Node/Python 平价同步）:
+  - **BFF `bff/lib/algorithms/inventory.js` `applyIngUpsert`**: 白名单新增 `yld`（出成率，分数 0.05~1，缺省 1，钳制 `clampYld`）。
+  - **Python `old/store-inventory-legacy/python-runtime/queue_consumer.py`**: `apply_ing_upsert` 同步 `yld`（平价测试强制 Node==Python）。
+  - **BFF `bff/lib/recipe_cost.js`**: `buildCostCard` 行成本做毛料还原 `qty_g / yld`（对齐旧版 `dishRecipeCost` 的 `qty/yld` 口径）。
+  - **前端 `apps/admin-web`**: `IngItem.yld?` 类型；`StockPage.tsx` 编辑弹窗「出成率 %」字段（5~100，提交折算为分数）+ 列表「出成率」列；
+    `RecipesPage.tsx` `calcLine()`（毛料=净料/出成率、行成本=毛料×均价）+ 编辑弹窗行内「毛料消耗/行成本」实时列 + 底部「配方成本（实时）+ 毛利率」条（`Form.useWatch` 联动）。
+- 口径（已知、非缺陷）:
+  1. 出成率存分数（`yld: 0.8` = 80%），表单按百分比展示/录入，提交时 `/100` 并钳制 [0.05, 1]。
+  2. 行成本 = 净料用量 ÷ 出成率 × 库存单位均价；毛利率 = (售价 − 配方成本) / 售价，售价取编辑弹窗「售价」字段，未填则不显示。
+  3. 现有快照原料 `yld` 均为 1（无损耗），故只读成本卡数值与上一版一致，不产生漂移。
+- 验证:
+  - `bff/lib/algorithms/inventory.test.js` 新增 `ingYldMax`/`ingYldMin` 钳制用例，并在 `ingUpdate`/`ingCreate` 补 `yld`，Node/Python 平价全绿。
+  - `cd bff && npm test` **全绿**（`loss_inventory_diff 旁路失败` 为既有旁路日志）。
+  - `apps/admin-web` `npx tsc --noEmit` **0 错**。
+  - `powershell -File ci/redline_guard.ps1` **全绿**（R3/R4 零改动）。
+  - 看板刷新：`gen-debt-table.ps1` → 151 项 **⬆️ 92 / ⬜ 59**（欠账卡 59：W1 **3** / W2 30 / W3 19 / W4 7）；
+    `node scripts/gen-progress-board.js` → **漂移校验 ok**。
+- ⚠️ 未验证项（诚实清单）:
+  1. **未做无头浏览器冒烟**：出成率编辑→入队→配方成本按出成率还原，仅单测 + tsc + 平价层验证，未在真实浏览器逐值核对。
+  2. 配方编辑弹窗行内「毛料/行成本」假设「用量单位 = 原料库存单位」；跨单位（如 g vs 斤）未做换算，属近似估算。
+- 回档方案: `git revert` 本提交即可。BFF/Python 为字段白名单加法 + 一处毛料还原；前端为新增字段/列/实时条，
+  不删既有逻辑、无 DB 迁移、未触碰红线文件。
+- 后续: W1 余 **3 张**（DASH 1 / PRICE 1 / SALE 1）；全局欠账 **⬆️ 92 / ⬜ 59**（合计 151）。
+
+## [2026-10-10] W1 第七批 - 未配配方菜品告警（阶段 19 / FP-SALE-14）
+
+- 目标: W1 余 3 张中成本最低的 `FP-SALE-14`（未配配方菜品告警，前端提示类）。收银挂单/结账前，
+  提示「未配配方菜品不会扣减原料库存」，对齐旧版 `openSale` 内 `sync()` 的实时告警（旧 HTML:4437-4438）。
+- 变更（BFF + KMP + App）:
+  - **BFF `bff/routes/snapshot.js`**: 新增 `markRecipeStatus`，快照下发 `dishes` 时按 `ext.recipes` 给每个 dish
+    标记 `has_recipe`（匹配口径对齐 `pos.js::recipeBomLines`：`sku_id`（或 dish.id）优先、`name` 兜底；
+    `main`/`aux`/`seasoning` 至少一列有料才算有配方）。
+  - **KMP `DishDto`**: 新增 `hasRecipe`（`@SerialName("has_recipe")`，默认 `true`）。
+  - **App `PosScreen.kt`**: 挂单（`onHang`）与结账（`onPay`）确认弹窗，若购物车含 `hasRecipe=false` 菜品，
+    在 summary 追加「⚠ 以下菜品未配置配方，挂单/结账后不会扣减原料库存、成本按估算值：…」。
+- 口径（已知、非缺陷）:
+  1. `ext.recipes` 缺失/为空时不标记（默认视为有配方），避免全店误报。
+  2. 挂单结账（`useCart=false`）场景明细在挂单时已校验，不再重复提示。
+  3. `has_recipe` 由 BFF 快照计算单一来源，移动端不做二次校验。
+- 验证:
+  - `node -e "require('./bff/routes/snapshot.js')"` 加载正常；用真实 `bff/data/snapshot.json` 验证
+    `markRecipeStatus`：95 dishes → 84 个 `has_recipe=false`、11 个 `true`（全部为有 `sku_id` 的菜品）。
+  - `read_lints` 三处改动文件 **0 错**。
+  - `node routes/run-tests.js` 新增 `testSnapshotRecipeMark` **11 条断言**（sku_id / dish.id / name 命中、列全空即未配、
+    ext 缺失不标记防误报、非本路由不接管），路由测试全绿。
+  - `powershell -File scripts/gen-debt-table.ps1` → 151 项 **⬆️ 93 / ⬜ 58**（欠账卡 58：W1 **2** / W2 30 / W3 19 / W4 7）；
+    销售收银 **3/14**。
+- ⚠️ 未验证项（诚实清单）:
+  1. **未在真实 Android 设备/模拟器冒烟**：告警文案与展示时机（挂单/结账确认弹窗）未逐值核对，仅静态 lint + 数据层验证。
+  2. BFF 快照标记依赖 `ext.recipes` 与店内配方表同源，若店内未推配方则该告警静默失效（有 `guard` 不误报）。
+- 回档方案: `git revert` 本提交即可。BFF 为 dish 字段加法、KMP/App 为新增字段 + 告警文本，
+  不删既有逻辑、无 DB 迁移、未触碰红线文件。
+- 后续: W1 余 **2 张**（DASH-08 缺 `discount` 字段 / PRICE-05 折算口径）；全局欠账 **⬆️ 93 / ⬜ 58**（合计 151）。
+
+## [2026-10-10] W1 第八批 - 报价口径 + 实时折算（阶段 20 / FP-PRICE-05）
+
+- 目标: W1 余 2 张中的 `FP-PRICE-05`（录入报价时选口径 + 实时折算「低 X 元（省 X%）」），
+  对齐旧版 `openQuote` 内 `#qPer` / `upd()`（旧 HTML:4998-5000 / :5013-5022）。
+- 变更（admin-web）:
+  - **`apps/admin-web/src/pages/inventory/VendorsPage.tsx`** 录入报价表单：
+    - 「原料」由自由文本改为**在售原料下拉**（选项带本店均价，取 `price.report.rows`）——折算需已知 `conv/avg`；
+    - 新增「报价口径」下拉（按采购单位 `per='buy'` / 按库存单位 `per='stock'`）；
+    - 选中原料 / 填金额 / 切口径后，实时 `Alert` 折算：`折算 ¥X/单位，与本店均价 ¥Y 相比：低 ¥D（省 P%）/ 高 ¥D（贵 P%）/ 基本持平`；
+    - `submitQuote` 透传 `per`（`logSupplyQuote` 与 BFF `/api/supply/quote` 均已支持该字段）。
+- 口径（与旧版逐行对齐）: `unit = per==='buy' ? price / conv : price`；`diff = unit − avg`；阈值 `±0.01`（同旧版 `upd()`）；
+  折算公式同 BFF `bff/lib/price.js::quotePerStock`。
+- 验证:
+  - `npx tsc --noEmit`（admin-web）**exit 0**；`read_lints` **0 错**。
+  - `powershell -File scripts/gen-debt-table.ps1` → 151 项 **⬆️ 94 / ⬜ 57**（欠账卡 57：W1 **1** / W2 30 / W3 19 / W4 7）；
+    外接比价 **10/15**。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **`per` 落库依赖 FP-PRICE-04 的 consumer quote 执行器**（`bff/store-node/consumer.js` 无 quote 执行器 → 报价入队后不落库）；
+     即「口径下拉 + 实时折算」已可用，但 `per` 持久化随该缺口一并修复。
+  2. **未在浏览器手工冒烟**：折算 `Alert` 文案/交互仅静态类型检查，未逐值点击核对。
+- 回档方案: `git revert` 本提交即可。纯前端表单改造（新增字段 + 实时提示），不动既有入队路径，无 DB 迁移、未触碰红线文件。
+- 附带修复: `scripts/gen-debt-table.ps1` 的 **PowerShell 单元素 `.Count` 陷阱**——W1 降到 1 张时「卡数」列与章节标题会空白
+  （`(… | Where-Object …).Count` 对单元素返回 `$null`）。已统一改 `@(…).Count`（6 处），W1 卡数恢复为 1；`-Check` 无漂移。
+- 后续: W1 余 **1 张**（DASH-08，缺快照 `sales[].discount` 数据源）；全局欠账 **⬆️ 94 / ⬜ 57**（合计 151）。
+
+## [2026-10-10] W2 第一批 - 比价平台配置 + 去比价外链（阶段 21 / FP-SET-03/04 + FP-PRICE-09/10）
+
+- 目标: 转 W2 业务闭环首批。选「比价平台配置 + 去比价外链」聚集区 4 项——`config.update` 链路已通、无需新动作、无建模决策依赖。
+- 变更（admin-web）:
+  - 新增 `apps/admin-web/src/pages/inventory/comparePlatforms.ts`：`DEF_COMPARE_PLATFORMS`（旧版 HTML:765-771 逐行照抄）、
+    `normalizeComparePlatforms`（脏数据收敛）、`comparePlatformUrl`（`{kw}` → `encodeURIComponent`，同旧版 `pricePop`）。
+  - **`SystemConfigPage.tsx`**（FP-SET-03/04 + FP-PRICE-10）: 新增「外接比价平台」卡片——名称 / URL 模板逐行可编辑 + 行内「删」+「新增平台」；
+    保存走 `POST /api/admin/config`（`config.update`，仅老板/店长）。
+  - **`VendorsPage.tsx`**（FP-PRICE-09）: 比价主表新增「去比价」列（`Dropdown` 展开各平台外链，关键词取原料名）；
+    平台表读 `config.compare_platforms`（随 `/admin/config` 拉取，缺省用 `DEF_COMPARE_PLATFORMS`）。
+- 存储口径（**关键**）: 存 `data.config.compare_platforms`（`{name, tpl}` 数组）。
+  快照 `data.platforms` 是**外卖平台经营数据**（美团/饿了么，含 orders/amount/rating），与旧版 `DB.platforms`（比价平台）**同名不同义**，勿混用。
+- 口径（与旧版逐行对齐）: 默认平台表 = `DEF_PLATFORMS`（HTML:765-771）；外链 = `tpl.replace('{kw}', encodeURIComponent(名称))`（HTML:1178-1182）；
+  设置页表格 = 名称 + 搜索URL（HTML:5230-5235）；增删 = `push` / `splice`（HTML:5277-5283）。
+- 验证:
+  - `npx tsc --noEmit`（admin-web）**exit 0**；`read_lints` **0 错**。
+  - `powershell -File scripts/gen-debt-table.ps1` → 151 项 **⬆️ 98 / ⬜ 53**（欠账卡 53：W1 1 / W2 **26** / W3 19 / W4 7）；
+    设置 **9/19**、外接比价 **12/15**。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **未在浏览器手工冒烟**：平台卡片增删改与「去比价」下拉仅静态类型检查，未点击核对；
+     落库走店内消费器 `config.update`（`registry.js` 已注册 `inv.applyConfig`，链路通）。
+  2. **FP-SET-02（餐厅名称）仍 ⬜**：`data.rest` 是**顶层字段**而 `config.update` 只改 `data.config`——须先定落点
+     （新增 `rest.update` 动作，或改存 `config.restaurant_name` 并定展示优先级），本批未做。
+- 回档方案: `git revert` 本提交即可。纯前端新增（常量模块 + 两处 UI），不动既有入队路径，无 DB 迁移、未触碰红线文件。
+- 后续: W2 余 **26 张**；全局欠账 **⬆️ 98 / ⬜ 53**（合计 151）。
+
+## [2026-10-10] W2 第二批 - 采购单付款/结案/作废/恢复/删除（阶段 22 / FP-PO-03/04/05/06/07）
+
+- 目标: W2 业务闭环续。清采购页 5 项写类聚集区——付款清欠 + 单据状态流转（结案/作废/恢复/删除）。
+  全部走「建议动作 → `/api/actions` 队列 → 审批执行」，页面**不直写库**（红线②）。
+- 变更（BFF `bff/lib/algorithms/inventory.js`）:
+  - import 补 `r2`；新增内部助手 `_ordersArr` / `_findOrder`（id 或 no 定位）/ `_orderPaid`（`Σ payments[].amount`，对齐旧版 `recvPaid`）/
+    `_setLinesSt`（批量置行状态 `st='closed'|'canceled'`，传 null 清除）。
+  - 新增 5 个执行器并导出：`applyOrderPay` / `applyOrderClose` / `applyOrderVoid` / `applyOrderRestore` / `applyOrderDelete`。
+  - `bff/lib/algorithms/registry.js`: 注册 `order.pay` / `order.close` / `order.void` / `order.restore` / `order.delete`
+    （**未注册会被消费器判 need-manual 静默驳回**，见 `consumer.js`）。
+- 变更（admin-web `apps/admin-web/src/pages/inventory/PurchasePage.tsx`）:
+  - 新增「操作」列（`fixed:'right'`）：**付款**（有欠款时）/ **恢复或结案**（按当前状态二选一）/ **作废**（非作废时）/ **删除**，
+    每个动作均 `Popconfirm` 二次确认。
+  - 付款登记 Modal：金额默认=欠款、日期默认今天、方式取 `PAY_METHODS`（`现金/扫码`·微信·支付宝·银行转账·平台结算·挂账转销）。
+  - `loadDocs` 重构为可复用回调；新增 `submitOrderAction(type, doc, payload, okMsg)` 统一入队 + 刷新快照。
+- 口径（与旧版逐行对齐）:
+  - `order.pay` = `openGet('O')`（HTML:2055-2080）：校验 `0 < amount ≤ 欠款+0.01`，向 `payments` 追加 `{amount, date, method}`；
+    负数 / 0 元 / 超额**一律拒绝**（失败在审批中心可见，不静默截断）。
+  - `order.close` = `closeOrder()`（HTML:1751）：`status='closed'` + 行 `st='closed'`。
+  - `order.void` = `voidOrder()`（HTML:1758）：`status='void'` + 行 `st='canceled'`。
+  - `order.restore` = `restoreOrder()`（HTML:1765）：`status='normal'` + 清行 `st`。
+  - `order.delete` = `delOrder()`（HTML:1822）：从 `data.orders` 物理移除（旧版口径）。
+- 硬规则（**关键**）: 5 个执行器**只改 `data.orders`（status/lines/payments）**，**绝不触碰库存与均价**——
+  采购单本就**不进库存**（对比进货单 `recv.*` 会触发 `rebuildStock`）。作废 ≠ 删除：作废状态留痕、可 `restore`；删除才真正移除。
+- 验证（实际跑过）:
+  - 5 个动作临时自测全通过：付款累加、超额/0 元拦截、结案/作废/恢复的状态与行状态流转、删除、**删除后操作拦截**。
+  - `node bff/lib/algorithms/run-tests.js` → **17/17 通过**；`node bff/store-node/consumer.test.js` → PASS；
+    `node bff/routes/run-tests.js` → 全绿（exit 0）。
+  - `apps/admin-web` `npx tsc --noEmit` → **exit 0**；`read_lints` → **0 错**。
+  - `powershell -File scripts/gen-debt-table.ps1` → 151 项 **⬆️ 103 / ⬜ 48**（欠账卡 48：W1 1 / W2 **21** / W3 19 / W4 7）；
+    采购管理 **14/20**；`-Check` **exit 0**（无漂移）。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **未在浏览器手工冒烟**：操作列与付款弹窗仅静态类型检查，未点击核对；落库链路由店内消费器执行器保证，
+     但**本机未跑「审批执行 → 快照变化」的完整 HTTP 闭环**（未起临时 BFF 复跑，不同于 T6-A 的出口判据实证）。
+  2. **`order.delete` 是物理删除**（照抄旧版 `delOrder`）：与「作废留痕」的迁移原则存在张力；
+     已在界面上把「删除」与「作废」并列并加二次确认，但**如需审计完备，建议后续把删除降级为作废**（属业务裁定项）。
+  3. **付款不落库存**：采购单付款与进货单 `recv.pay` 是两条独立台账，二者不自动对账（旧版亦如此）。
+- 影响范围: `bff/lib/algorithms/{inventory.js,registry.js}`、
+  `apps/admin-web/src/pages/inventory/PurchasePage.tsx`、`docs/迁移基线/FP-采购管理.md`、
+  `scripts/gen-debt-table.ps1`、`docs/下一步任务清单_2026-09-28.md`、本文件。
+  **未触碰**受保护哈希文件（`bff/store-node/{db,merge}.js`、`bff/lib/algorithms/stock.js`）。
+- AI避坑提示:
+  - 采购单**不进库存**：写 `order.*` 执行器时**不要**顺手调 `rebuildStock`，否则会污染库存口径。
+  - `order.delete` 与 `recv.void` 语义不同——前者物理删、后者状态留痕；移植旧版「删除」时要显式登记这一差异，
+    不要把「作废留痕」的红线规则误套到采购单删除上（本批保留旧版删除行为并留痕说明）。
+  - 付款金额校验用 `debt + 0.01` 容差（浮点），与 `recv.pay` 同口径；否则小额补付会被 0.005 级误差误伤。
+- 回档方案: `git revert` 本提交即可——`registry.js` 去掉 5 行注册、`inventory.js` 去掉 5 个执行器、前端去掉操作列与付款 Modal。
+  回档后**已入队/已执行的付款与状态变更会失去对应执行器**（消费器判 need-manual），需人工核对队列。
+- 后续: W2 余 **21 张**；全局欠账 **⬆️ 103 / ⬜ 48**（合计 151）。
+  W2 头部转为 `FP-SET-02`（餐厅名落点决策，见 `gen-debt-table.ps1` W2-01）与 `FP-PO-18`（建议转正式采购单）。
+
