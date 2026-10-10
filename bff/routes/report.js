@@ -1,7 +1,9 @@
 'use strict';
 /*
  * routes/report.js — 经营日报
- *   GET /api/report/daily?date=YYYY-MM-DD
+ *   GET /api/report/daily?date=YYYY-MM-DD&range=7|30|all
+ *     range（FP-DASH-01，旧版 #dashRange HTML:194-198）：默认 30；区间 = [date-(r-1), date]，
+ *     营收/订单数/客单价/采购应付按区间聚合；热度、晨报、打烊、保本达成始终按当日。
  *     有快照且有数据：从 snapshot.data.sales 聚合营收/单数 → mock:false
  *       - heat_mini：真实分时聚合
  *       - todos：经营三类（断货补货 / 建议备料 / 渠道备餐），带 kind+route 深链
@@ -30,8 +32,10 @@ function recordAmount(r) {
   return 0;
 }
 
-function mockReport(date) {
+function mockReport(date, rangeRaw) {
   // 无快照时的真实空态：不编造 KPI / 热度 / 日结；仅保留保本口径（be_day 取自静态价盘，真算法）
+  const range = parseRange(rangeRaw);
+  const rangeFrom = rangeStart(range, date);
   let breakeven = null;
   try {
     const { computeBaobenSummary } = require('../lib/menu_baoben');
@@ -47,9 +51,15 @@ function mockReport(date) {
     date,
     rev: null,
     generated_at: null,
+    // FP-DASH-01：空态也回传周期字段，前端 chips 与区间文字照常可用
+    range,
+    range_label: rangeLabelOf(range, rangeFrom, date),
+    range_from: rangeFrom,
+    range_to: date,
     banner: '暂无店内数据：云端未收到门店快照',
     kpi: [],
     heat_mini: [],
+    low_stock: { total: 0, items: [] },
     todos: [
       { kind: 'restock', route: 'inventory/restock', text: '推送店内快照后可生成断货补货待办', done: false },
       { kind: 'prep', route: 'kitchen', text: '有快照后将汇总今日建议备料工单', done: false }
@@ -63,16 +73,85 @@ function mockReport(date) {
 /* ---------------- 真实数据推导 ---------------- */
 
 // 库存告急：现存 < 安全线（字段容错：qty/stock/amount vs safe/safety/safe_stock）
+// FP-DASH-11：补 id/cat/unit 供概览页明细列表（旧版 #lowStockBox，HTML:1280-1285）
 function lowStockItems(ings) {
   const out = [];
   for (const it of ings) {
     if (!it || typeof it !== 'object') continue;
+    if (it.on === false) continue; // 旧版 lowStocks() 只算在售原料（HTML:1279 `g.on&&`）
     const qty = parseFloat(it.qty != null ? it.qty : (it.stock != null ? it.stock : it.amount));
     const safe = parseFloat(it.safe != null ? it.safe : (it.safety != null ? it.safety : it.safe_stock));
     if (isNaN(qty) || isNaN(safe)) continue;
-    if (qty < safe) out.push({ name: it.name || it.sku || it.sku_id || '未命名', qty, safe });
+    if (qty < safe) {
+      out.push({
+        id: it.id || it.sku_id || null,
+        name: it.name || it.sku || it.sku_id || '未命名',
+        cat: it.cat || '',
+        unit: it.unit || '',
+        qty,
+        safe,
+      });
+    }
   }
   return out;
+}
+
+/* ---------------- FP-DASH-01 统计周期（旧版 DASH_R/inRange/rangeLabel，HTML:1221-1223） ---------------- */
+const DASH_RANGES = ['7', '30', 'all'];
+/** 默认周期 = 旧版 DASH_R 初值 30（HTML:1221；#dashRange 里「近30天」chip 默认 on，HTML:196） */
+const DEFAULT_DASH_RANGE = '30';
+
+/** 查询参数 → 周期；非法值回落默认。仅 HTTP 层调用 */
+function parseRange(q) {
+  const v = String(q == null ? '' : q).trim();
+  return DASH_RANGES.indexOf(v) >= 0 ? v : DEFAULT_DASH_RANGE;
+}
+
+/** 区间下界：近 r 天 = [date-(r-1), date]（旧版下界 daysAgo(r-1)，HTML:1222）；all = 无下界 */
+function rangeStart(range, date) {
+  if (range !== '7' && range !== '30') return null;
+  const d = new Date(date + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() - (parseInt(range, 10) - 1));
+  return dateStr(d);
+}
+
+/** 区间文字（旧版 rangeLabel，HTML:1223）：全部时间 / 近N天（起 至 止） */
+function rangeLabelOf(range, from, to) {
+  return range === 'all'
+    ? '全部时间（截至 ' + to + '）'
+    : '近' + range + '天（' + (from || '—') + ' 至 ' + to + '）';
+}
+
+/**
+ * 周期判定：不传 range（agent/inbox 等程序化调用）时保持既有「当日」口径；
+ * 传 7/30/all 时按 [下界, 截止日] 过滤（旧版无上界，新版加截止日上界，避免未来日期混入）
+ */
+function makeInDashRange(range, rangeFrom, rangeTo) {
+  return function inDashRange(r) {
+    const d = recordDate(r).slice(0, 10);
+    if (!d) return false;
+    if (rangeFrom && d < rangeFrom) return false;
+    return d <= rangeTo;
+  };
+}
+
+/** 进货单是否为有效入库单（排除草稿/待验/取消/作废；口径与打烊「入库」统计同源） */
+function isInboundEffective(r) {
+  const st = String((r && r.status) || '已入库');
+  if (/草稿|待验|取消|作废/i.test(st)) return false;
+  return /已入库|done|入库/i.test(st);
+}
+
+/** FP-DASH-07 库存总值：对齐旧版 stockValue()（HTML:1244/1251）= Σ 库存 × 均价（时点值，不随周期变） */
+function stockValueOf(ings) {
+  const sum = ings.reduce((a, it) => {
+    if (!it || typeof it !== 'object') return a;
+    const q = parseFloat(it.stock != null ? it.stock : (it.qty != null ? it.qty : it.amount));
+    const p = parseFloat(it.avg);
+    return a + ((isNaN(q) ? 0 : q) * (isNaN(p) ? 0 : p));
+  }, 0);
+  return Math.round((sum + Number.EPSILON) * 100) / 100;
 }
 
 // 证照到期天数（字段容错：expire/expiry/valid_until/until）
@@ -90,14 +169,24 @@ function sampleHoursLeft(s, nowMs) {
   return (48 * 3600000 - (nowMs - t)) / 3600000;
 }
 
-function deriveReport(snap, date) {
+function deriveReport(snap, date, rangeRaw) {
   const data = snap.data || {};
   const ext = snap.ext && typeof snap.ext === 'object' ? snap.ext : {};
   const now = Date.now();
+  // FP-DASH-01 统计周期：不传（agent/inbox 等程序化调用）→ 当日口径，行为不变
+  const range = DASH_RANGES.indexOf(String(rangeRaw)) >= 0 ? String(rangeRaw) : null;
+  const rangeFrom = range ? rangeStart(range, date) : null;
+  const rangeTo = date;
+  const inDashRange = range ? makeInDashRange(range, rangeFrom, rangeTo) : null;
   const sales = Array.isArray(data.sales) ? data.sales : [];
   const recs = sales.filter((r) => recordDate(r).startsWith(date));
-  const revenue = recs.reduce((s, r) => s + recordAmount(r), 0);
-  const orders = recs.length;
+  // 当日口径：热度 / 晨报 / 打烊 / 保本达成（既有行为，不随周期切换而变）
+  const dayRevenue = recs.reduce((s, r) => s + recordAmount(r), 0);
+  const dayOrders = recs.length;
+  // 周期口径：KPI 卡（营收 / 订单数 / 客单价 / 采购应付 / 折扣抹零）
+  const rangeRecs = inDashRange ? sales.filter(inDashRange) : recs;
+  const revenue = rangeRecs.reduce((s, r) => s + recordAmount(r), 0);
+  const orders = rangeRecs.length;
   const avg = orders ? revenue / orders : 0;
   const dishes = Array.isArray(data.dishes) ? data.dishes.length : 0;
   const ings = Array.isArray(data.ings) ? data.ings : [];
@@ -255,15 +344,21 @@ function deriveReport(snap, date) {
 
   // 打烊日清：售出 / 入库 / 报损（点进单据，不是 KPI 装饰）
   const recvAll = Array.isArray(data.recv) ? data.recv : [];
-  const recvToday = recvAll.filter((r) => {
-    if (!r || !recordDate(r).startsWith(date)) return false;
-    const st = String(r.status || '已入库');
-    return /已入库|done|入库/i.test(st) && !/草稿|待验|取消/i.test(st);
-  });
+  const recvToday = recvAll.filter((r) => r && recordDate(r).startsWith(date) && isInboundEffective(r));
   const recvAmount = recvToday.reduce((s, r) => {
     const v = parseFloat(r.payable != null ? r.payable : r.amount);
     return s + (isNaN(v) ? 0 : v);
   }, 0);
+  // FP-DASH-06 采购应付（本期）：旧版 Σ DB.recv.payable（HTML:1243/1250），按当前周期过滤
+  const payableIn = recvAll.reduce((s, r) => {
+    if (!r || !isInboundEffective(r)) return s;
+    // 无周期（程序化调用）时按当日，与 KPI「营收」的既有口径保持一致
+    if (inDashRange ? !inDashRange(r) : !recordDate(r).startsWith(date)) return s;
+    const v = parseFloat(r.payable != null ? r.payable : r.amount);
+    return s + (isNaN(v) ? 0 : v);
+  }, 0);
+  // FP-DASH-07 库存总值：时点值，不随周期变化（旧版 stockValue()，HTML:1244/1251）
+  const stockVal = stockValueOf(ings);
 
   const lossReports = Array.isArray(ext.loss_reports) ? ext.loss_reports : [];
   const lossToday = lossReports.filter((r) => r && recordDate(r).startsWith(date));
@@ -284,18 +379,18 @@ function deriveReport(snap, date) {
     if (beDay != null && beDay > 0) {
       breakeven = {
         be_day: beDay,
-        today_rev: Math.round(revenue * 100) / 100,
-        attain_pct: Math.round((revenue / beDay) * 1000) / 10
+        today_rev: Math.round(dayRevenue * 100) / 100,
+        attain_pct: Math.round((dayRevenue / beDay) * 1000) / 10
       };
     }
   } catch (e) { breakeven = null; }
 
   // 一句话晨报：今日营收/保本达成 + 最大风险 + 待办数（老板开屏即读）
   const bannerParts = [];
-  if (revenue <= 0 && orders === 0) bannerParts.push('今日暂无销售');
-  else bannerParts.push('今日营收 ¥' + revenue.toFixed(0) + '·' + orders + '单');
+  if (dayRevenue <= 0 && dayOrders === 0) bannerParts.push('今日暂无销售');
+  else bannerParts.push('今日营收 ¥' + dayRevenue.toFixed(0) + '·' + dayOrders + '单');
   if (breakeven && breakeven.be_day) {
-    const gap = revenue - breakeven.be_day;
+    const gap = dayRevenue - breakeven.be_day;
     bannerParts.push(gap >= 0
       ? '已超保本 ¥' + gap.toFixed(0)
       : '距保本差 ¥' + (-gap).toFixed(0));
@@ -313,6 +408,11 @@ function deriveReport(snap, date) {
     date,
     rev: snap.rev,
     generated_at: snap.generated_at,
+    // FP-DASH-01：周期与区间文字（range=null 表示沿用既有「当日」口径，供程序化调用）
+    range: range || '1',
+    range_label: range ? rangeLabelOf(range, rangeFrom, rangeTo) : '当日（' + rangeTo + '）',
+    range_from: rangeFrom,
+    range_to: rangeTo,
     banner: smartBanner,
     summary: smartSummary,
     kpi: [
@@ -323,14 +423,20 @@ function deriveReport(snap, date) {
       { label: '原料SKU', value: String(ings.length), delta: null },
       { label: '会员数', value: String(members), delta: null },
       { label: '快照rev', value: String(snap.rev), delta: null },
-      { label: '销售记录总数', value: String(sales.length), delta: null }
+      { label: '销售记录总数', value: String(sales.length), delta: null },
+      // FP-DASH-06 采购应付（本期）：区间内有效进货单应付合计（旧版 HTML:1243/1250）
+      { label: '采购应付（本期）', value: '¥' + payableIn.toFixed(2), delta: null },
+      // FP-DASH-07 库存总值：Σ 库存 × 均价（时点值，不随周期变；旧版 HTML:1244/1251）
+      { label: '库存总值', value: '¥' + stockVal.toFixed(2), delta: null }
     ],
     heat_mini,
     todos,
     alerts,
+    // FP-DASH-11 低库存预警明细（旧版 #lowStockBox，HTML:1280-1285；前端按 12 条截断）
+    low_stock: { total: lowStock.length, items: lowStock },
     breakeven,
     day_close: {
-      sold: { label: '售出', count: orders, amount: Math.round(revenue * 100) / 100, route: 'm/pos' },
+      sold: { label: '售出', count: dayOrders, amount: Math.round(dayRevenue * 100) / 100, route: 'm/pos' },
       inbound: { label: '入库', count: recvToday.length, amount: Math.round(recvAmount * 100) / 100, route: 'inventory/recv' },
       loss: { label: '报损', count: lossCount, amount: Math.round(lossAmount * 100) / 100, route: 'm/loss' },
       workorders_open: wosOpen.length
@@ -422,13 +528,15 @@ async function handle(req, res, ctx, pathname) {
   if (req.method === 'GET' && pathname === '/api/report/daily') {
     const qdate = (ctx.query.get('date') || '').trim();
     const date = /^\d{4}-\d{2}-\d{2}$/.test(qdate) ? qdate : todayStr();
+    // FP-DASH-01：?range=7|30|all（默认 30，旧版 #dashRange 默认「近30天」on，HTML:196）
+    const range = parseRange(ctx.query.get('range'));
     const snap = loadSnapshot();
     // 整体无数据（无快照，或 data 空且无 ext）→ 回退 mock
     const hasData = !!(snap && (
       (snap.data && Object.keys(snap.data).length > 0) ||
       (snap.ext && Object.keys(snap.ext).length > 0)
     ));
-    ctx.sendJSON(res, 200, hasData ? deriveReport(snap, date) : mockReport(date));
+    ctx.sendJSON(res, 200, hasData ? deriveReport(snap, date, range) : mockReport(date, range));
     return true;
   }
   return false;

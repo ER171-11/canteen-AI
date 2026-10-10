@@ -1093,3 +1093,55 @@
 - 后续: 结构测算 **20/0 闭合**。T11 W1 只读速补余 **24 张**，下一批建议按欠账总表 W1 顺序推进
   （DASH 5 / SET 5 / PO 4 / DISH 3 / PRICE 6 / SALE 1）；全局欠账 **⬆️ 70 / ⬜ 81**（合计 151）。
 
+## [2026-10-10] W1 第一批 - 经营概览「统计周期 + 三 KPI + 低库存明细」（阶段 13 / FP-DASH-01/06/07/11）
+
+- 目标: 按欠账总表 W1 顺序推进经营概览前 5 张卡（`W1-01`~`W1-05` = FP-DASH-01/06/07/08/11）。
+  **实际落地 4 项**；`FP-DASH-08` 折扣抹零因**缺数据源**保留 ⬜（见下）。
+- 变更:
+  - 后端 `bff/routes/report.js`:
+    - **FP-DASH-01**：`/api/report/daily` 新增 `?range=7|30|all`（默认 `30`，= 旧版 `DASH_R` 初值 HTML:1221、
+      `#dashRange` 里「近30天」默认 on HTML:196），区间定义 = `[date-(r-1), date]`（旧版下界 `daysAgo(r-1)` HTML:1222）；
+      新增 `range / range_label / range_from / range_to` 四个回传字段（区间文字 = 旧版 `rangeLabel` HTML:1223）。
+    - 周期只作用于 **KPI**：营收 / 订单数 / 客单价 / 采购应付；**热度、晨报、打烊日清、保本达成仍按当日**
+      （旧版同样不随 `DASH_R` 变化）。不传 `range` 时 `range='1'`，agent/inbox 等程序化调用**行为不变**。
+    - **FP-DASH-06**：新增 `payableIn` = Σ 区间内有效进货单 `payable ?? amount`；抽出 `isInboundEffective()`
+      （排除草稿/待验/取消/作废），打烊「入库」统计同步复用该函数，两处口径同源。
+    - **FP-DASH-07**：新增 `stockValueOf()` = Σ 库存 × 均价，与前端 `pages/inventory/utils.ts`:36 同口径
+      （旧版 `stockValue()` HTML:1244/1251）。
+    - **FP-DASH-11**：`lowStockItems()` 补 `id / cat / unit` 并加 `on===false` 过滤（对齐旧版 `g.on&&` HTML:1279），
+      下发 `low_stock: { total, items }`。
+  - 前端 `apps/admin-web/src/pages/DashboardPage.tsx`:
+    - 页头新增周期 chips（近7天 / 近30天 / 全部，默认近30天）+ 区间文字（旧版 `dashDateTip` HTML:1235，带 `data-range-label` 锚点）。
+    - KPI 网格去掉 `slice(0, 8)` 上限，现 10 张卡（原 8 + 采购应付 + 库存总值）。
+    - 新增「库存预警（低于安全线 · N 种）」卡：`名称 [分类]` / `现存 X 单位`（红）/ `安全 Y 单位`，
+      **超 12 条截断**并提示「等 N 种，详见「原料库存」」（照抄旧版 HTML:1281-1284）。
+  - 新增 `scripts/smoke-dash-kpi.js` + `scripts/smoke-dash-kpi.ps1`（一键起停 BFF/vite/无头 Edge 的开箱冒烟）。
+- 口径（**已知、非缺陷**）:
+  1. 区间**上界取截止日**是相对旧版（`inRange` 无上界）的**有意收敛**，避免未来日期混入；后续区间口径沿用此定义。
+  2. 库存总值是**时点值**，不随周期变化（旧版 `stockValue()` 同样不进 `inRange`）；含停用原料（照抄旧版不加 `on` 过滤）。
+  3. 采购应付**比旧版更严**：新增排除草稿/待验/取消/作废（旧版不过滤状态）——记账口径上更正确。
+  4. 当前快照下「近7天」营收 = **¥0**：快照最后一条销售是 2026-09-26、距今两周，**真实现象不是 bug**。
+- 验证:
+  - **开箱冒烟 46/46 通过**（`powershell -File scripts/smoke-dash-kpi.ps1`）：接口层 22 条 + 页面层 24 条。
+    关键数值与**快照独立重算**逐一对齐：营收（近30天/全部）**123090**、采购应付（近30天）**5590.64**、
+    库存总值 **5425.34**、低库存 **3 种**（鲁花芝麻油 -4/1.5 瓶 · 芹菜 0.7/1 斤 · 红洋葱 5/6 斤）；
+    并断言「周期越长营收越大（7 ≤ 30 ≤ 全部）」「库存总值不随周期变」「非法 range 回落 30」。
+    只读三指纹（snapshot.json / actions_queue.json `size:mtimeMs`）未变 + 页面控制台 **0 报错**。
+  - `cd bff && node lib/algorithms/run-tests.js` **15/15 全过**；`powershell -File ci/redline_guard.ps1` **全绿**（含 R14 全部 FP 页已标注）。
+  - 看板刷新：`scripts/gen-debt-table.ps1` → 151 项 **⬆️ 74 / ⬜ 77**（欠账卡 77：W1 **20** / W2 30 / W3 20 / W4 7），
+    `-Check` → **CHECK OK**；`node scripts/gen-progress-board.js` → **漂移校验 ok / 数字一致性 OK**；经营概览 **5/10**。
+- ⚠️ 未验证项（诚实清单）:
+  1. **仅程序化验证，未经人工目视**：窄屏下页头 chips 换行、深色模式对比度未目视确认。
+  2. **只在 Edge（Chromium）验过**，未在 Firefox/WebKit 回归。
+  3. **「>12 条截断」分支未走真实数据**：当前快照只有 3 种低库存，只断言了「不出现截断提示」，
+     截断与「等 N 种」文案靠代码同源推断（阈值 12 照抄旧版）。
+  4. 「近7天 / 全部」在当前快照下**没有非零销售数据**（快照陈旧），只验了「随周期切换而变化」，
+     未验真实非零区间数值。
+  5. `data-range-label` 是为开箱断言加的 DOM 锚点，非产品需求。
+- 回档方案: `git revert` 本提交即可。后端为**加法式**（新增字段与查询参数，未删键；不传 `range` 时行为完全不变）；
+  前端为局部改动（页头新增一行 + KPI 网格放开数量 + 新增一张卡）；**无 DB 迁移、无依赖变更**，未触碰红线文件。
+- 后续: W1 余 **20 张**（DASH 1 / SET 5 / PO 4 / DISH 3 / PRICE 6 / SALE 1）。
+  DASH 剩下的 **FP-DASH-08** 与 FP-DASH-02/03/04 同因**快照 `sales[]` 无 `discount/receivable/payments`**
+  而阻塞，须与 FP-SALE-07/08/11 同批建销售应收模型后再补（**不先上 ¥0 假卡**）；
+  全局欠账 **⬆️ 74 / ⬜ 77**（合计 151）。
+

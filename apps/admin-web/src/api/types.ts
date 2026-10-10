@@ -130,10 +130,30 @@ export interface AlertItem {
  * 兼容两种下发形状：契约版 kpis:[{key,label,value,unit,delta,trend}]；
  * 当前 BFF 实际版 kpi:[{label,value,delta}]（value 已带 ¥ 等格式）。
  */
+/** FP-DASH-11 低库存预警明细行（旧版 #lowStockBox，HTML:1280-1285） */
+export interface LowStockItem {
+  id?: string | null
+  name?: string
+  cat?: string
+  unit?: string
+  /** 现存 */
+  qty?: number
+  /** 安全线 */
+  safe?: number
+}
+
 export interface ReportDaily {
   ok?: boolean
   mock?: boolean
   date: string
+  /** FP-DASH-01 统计周期：'1'=当日（程序化调用沿用旧行为）| '7' | '30' | 'all'（旧版 DASH_R，HTML:1221） */
+  range?: string
+  /** 区间文字（旧版 rangeLabel，HTML:1223） */
+  range_label?: string
+  range_from?: string | null
+  range_to?: string
+  /** FP-DASH-11 低库存预警明细：total 为总种数，前端按 12 条截断并给「等 N 种」提示 */
+  low_stock?: { total?: number; items?: LowStockItem[] }
   banner?: string
   kpis?: KpiItem[]
   kpi?: Array<{ label: string; value: string | number; delta?: string | null }>

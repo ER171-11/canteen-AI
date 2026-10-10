@@ -167,9 +167,13 @@ export async function fetchHealth(): Promise<Health> {
 }
 
 /** GET /api/report/daily?date= */
-export async function fetchReportDaily(date?: string): Promise<ReportDaily> {
+/** FP-DASH-01：range = '7' | '30' | 'all'，不传则由 BFF 取默认（30） */
+export async function fetchReportDaily(date?: string, range?: string): Promise<ReportDaily> {
+  const params: Record<string, string> = {}
+  if (date) params.date = date
+  if (range) params.range = range
   const { data } = await client.get<ReportDaily>('/report/daily', {
-    params: date ? { date } : undefined,
+    params: Object.keys(params).length ? params : undefined,
   })
   return data
 }

@@ -25,6 +25,25 @@ const LEVEL_TAG: Record<string, { color: string; text: string }> = {
   info: { color: COLORS.purple, text: '提示' },
 }
 
+/** FP-DASH-01 周期选项：顺序与文案逐字照抄旧版 `#dashRange` chips（HTML:194-198） */
+const RANGE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '7', label: '近7天' },
+  { value: '30', label: '近30天' },
+  { value: 'all', label: '全部' },
+]
+
+/** 默认「近30天」：旧版 DASH_R=30（HTML:1221）且该 chip 默认 on（HTML:196） */
+const DEFAULT_RANGE = '30'
+
+/** FP-DASH-11 明细截断条数：旧版 `low.slice(0,12)`（HTML:1281） */
+const LOW_STOCK_SHOWN = 12
+
+/** 数值展示：千分位 + 最多 1 位小数（旧版 fmt(x,1)，HTML:1282） */
+function fmtNum(n?: number | null): string {
+  if (n == null || !isFinite(Number(n))) return '-'
+  return Number(n).toLocaleString('zh-CN', { maximumFractionDigits: 1 })
+}
+
 /** 归一 kpi：BFF 的 kpi[] → 前端 kpis[] */
 function normalizeReport(data: ReportDaily): ReportDaily {
   const kpis =
@@ -82,20 +101,28 @@ export default function DashboardPage() {
   const [isMock, setIsMock] = useState(false)
   const [loading, setLoading] = useState(true)
   const [date, setDate] = useState<Dayjs>(dayjs())
+  /** FP-DASH-01 统计周期（'7' | '30' | 'all'） */
+  const [range, setRange] = useState<string>(DEFAULT_RANGE)
 
   useEffect(() => {
-    setLoading(true)
-    fetchReportDaily(date.format('YYYY-MM-DD'))
+    let alive = true
+    fetchReportDaily(date.format('YYYY-MM-DD'), range)
       .then((data) => {
+        if (!alive) return
         const n = normalizeReport(data)
         setReport(n)
         setIsMock(!!n.mock)
       })
       .catch(() => {
-        setIsMock(true)
+        if (alive) setIsMock(true)
       })
-      .finally(() => setLoading(false))
-  }, [date])
+      .finally(() => {
+        if (alive) setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [date, range])
 
   useEffect(() => {
     fetchAnalysis()
@@ -143,6 +170,11 @@ export default function DashboardPage() {
   )
   const heatMax = Math.max(1, ...heat)
 
+  /** FP-DASH-11 低库存预警明细（旧版 #lowStockBox，HTML:1280-1285） */
+  const lowStockItems = report?.low_stock?.items ?? []
+  const lowStockTotal = Number(report?.low_stock?.total ?? lowStockItems.length)
+  const lowStockShown = lowStockItems.slice(0, LOW_STOCK_SHOWN)
+
   return (
     <div>
       {isMock && (
@@ -189,6 +221,31 @@ export default function DashboardPage() {
             disabledDate={(d) => d.isAfter(dayjs(), 'day')}
             onChange={(d) => d && setDate(d)}
           />
+        </div>
+        {/* FP-DASH-01 统计周期：chips（旧版 #dashRange HTML:194-198）+ 区间文字（旧版 dashDateTip :200/:1235） */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 10,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span style={{ fontSize: 13, opacity: 0.92 }}>统计周期：</span>
+          {RANGE_OPTIONS.map((o) => (
+            <Tag.CheckableTag
+              key={o.value}
+              checked={range === o.value}
+              onChange={() => setRange(o.value)}
+              data-range={o.value}
+            >
+              {o.label}
+            </Tag.CheckableTag>
+          ))}
+          <span style={{ fontSize: 12, opacity: 0.85 }} data-range-label>
+            {report.range_label ?? ''}
+          </span>
         </div>
         <div style={{ marginTop: 8, opacity: 0.92 }}>
           {report.banner ?? '五福临门，今日加油！'}
@@ -262,7 +319,7 @@ export default function DashboardPage() {
       )}
 
       <Row gutter={[16, 16]}>
-        {(report.kpis ?? []).slice(0, 8).map((kpi) => (
+        {(report.kpis ?? []).map((kpi) => (
           <Col xs={12} sm={12} md={6} key={kpi.key}>
             <Card>
               <Statistic title={kpi.label} value={kpi.value} suffix={kpi.unit} />
@@ -311,6 +368,52 @@ export default function DashboardPage() {
           </div>
         </Card>
       )}
+
+      {/* FP-DASH-11 低库存预警明细（旧版「库存预警」卡 #lowStockBox，HTML:1280-1285） */}
+      <Card
+        title={`库存预警（低于安全线 · ${lowStockTotal} 种）`}
+        size="small"
+        style={{ marginTop: 16 }}
+        extra={
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            详见「原料库存」
+          </Typography.Text>
+        }
+      >
+        {lowStockTotal === 0 ? (
+          <div style={{ color: COLORS.green }}>所有原料库存均高于安全线 ✅</div>
+        ) : (
+          <>
+            <List
+              size="small"
+              dataSource={lowStockShown}
+              renderItem={(it) => (
+                <List.Item>
+                  <span>
+                    {it.name}
+                    {it.cat ? (
+                      <span style={{ color: '#888', fontSize: 12 }}> [{it.cat}]</span>
+                    ) : null}
+                  </span>
+                  <Space size={12}>
+                    <Typography.Text style={{ color: COLORS.red }}>
+                      现存 {fmtNum(it.qty)} {it.unit || ''}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      安全 {fmtNum(it.safe)} {it.unit || ''}
+                    </Typography.Text>
+                  </Space>
+                </List.Item>
+              )}
+            />
+            {lowStockTotal > LOW_STOCK_SHOWN && (
+              <div style={{ color: '#888', fontSize: 12, marginTop: 6 }}>
+                等 {lowStockTotal} 种，详见「原料库存」
+              </div>
+            )}
+          </>
+        )}
+      </Card>
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} md={12}>
