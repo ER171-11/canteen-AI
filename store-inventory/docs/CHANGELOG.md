@@ -3,6 +3,60 @@
 > AI在修改任何模块前，必须查阅此文件，了解历史决策与废弃逻辑，避免引入过时方案。
 > 采用追加式记录，禁止覆盖历史条目。
 
+## [2026-10-13 20:00] 阶段 26 - W3 第一批 · 采购管理录入类补齐（FP-PO-01/02/17/19/20）：采购管理页 20/20 收官
+
+- 背景: 采购管理页 20 项功能中仅余 5 项 ⬜（`FP-PO-01/02` 新建/编辑采购单、`FP-PO-17` 补货参数、`FP-PO-19` 忽略建议行、`FP-PO-20` 行内改量记回主数据），
+  即「采购录单 + 建议行状态回收」链路未闭环。录入职责边界已由 ADR-009 定案（采购端录采购单，统一走标准队列），本次按 W3 顺序一次补齐。
+- 决策（落点）:
+  1. **新增 5 个写类建议动作**（全部走 `/api/actions` 审批队列，不直写库）：
+     `po.create`/`po.edit`（执行器 `applyOrderCreate`/`applyOrderEdit`）、`restock.config`/`restock.ignore`/`restock.adjust`
+     （执行器 `applyRestockConfig`/`applyRestockIgnore`/`applyRestockAdjust`），在 `registry.js` 注册。
+  2. **红线不变**：`po.*` 只 push `data.orders`（+ 新供应商并入 `data.suppliers`），**绝不调 `rebuildStock`**（采购单不入库、不影响均价）；
+     `restock.*` 只改 `data.restock` / `data.plans`（+ 记回 `data.ings` 的 `sup/moq/packQty`），补货建议始终是只读测算层。
+  3. **`restock.config` 加入 `lib/policy.js` 的 `NEVER_AUTO`**：与 `config.update` 同类，配置型写不得由 SI 自动执行。
+  4. **整包规格落新字段 `packQty`**：新系统 `ing.pack` 是包规字符串（如「25kg/袋」，结算单用），旧版 `readRestockRows` 把数值整包规格写进 `ing.pack`
+     会破坏主数据；故拆出 `packQty`（Node 超集，`applyIngUpsert` 白名单同增），`pack` 保持不动。
+  5. **`po.edit` 的 payments 归并**：照抄旧版 `openDocForm` 编辑分支（`payments = paid>0 ? [单条] : []`）；前端预填「实付=已付合计」，
+     故应付/已付/欠款三数不变，仅付款笔数归并。
+- 变更（BFF）:
+  - `bff/lib/algorithms/inventory.js`: 新增并导出 `applyOrderCreate`/`applyOrderEdit`（含 `_orderLinesFromItems`/`_assertOrderLines`/`_ensureSupplier` 辅助）、
+    `applyRestockConfig`/`applyRestockIgnore`/`applyRestockAdjust`（含 `restockDef`/`_plansArr`/`_findPlan`/`_syncPlanStatus`/`_orderLineSt`/`_orderStatus` 辅助）；
+    `applyIngUpsert` 白名单增 `packQty`（Node 超集）。
+  - `bff/lib/algorithms/registry.js`: 登记 `po.create`/`po.edit`/`restock.config`/`restock.ignore`/`restock.adjust`。
+  - `bff/lib/policy.js`: `NEVER_AUTO` 增 `restock.config`。
+- 变更（admin-web）:
+  - 新增 `apps/admin-web/src/pages/inventory/OrderFormModal.tsx`（新建/编辑 CG 采购单共用表单，逐字段对齐旧版 `openDocForm`/`openOrder`，付款方式枚举用旧版 `openDocForm` 的 5 项）。
+  - `PurchasePage.tsx`: 工具条「新建采购单」（`po.create`）、行内「编辑」（`po.edit`，入队后刷新快照）。
+  - `RestockPage.tsx`: 「补货参数」Modal（`restock.config`）、「忽略勾选」（`restock.ignore`）、建议采购量/供应商/起订/整包行内可编辑 + 「保存调整」（`restock.adjust`）、
+    新增「建议行状态」列与建议单信息条；转采购单携带行内改过的采购量/供应商；另取快照读 `data.ings`/`data.restock`/`data.plans`（失败不阻塞建议清单）。
+  - `api/types.ts`: `IngItem` 增 `packQty`/`moq`/`sup`；新增 `RestockConfig`/`RestockPlanLine`/`RestockPlan` 并挂入 `SnapshotData`。
+- 验证（实际跑过）:
+  - `node bff/lib/algorithms/inventory.test.js` → **33/33 通过**（新增 4 组 Node 单测：`po.create` 建单/封顶/并入供应商、`po.edit` 覆盖与付款归并、
+    `restock.config` 钳制、`restock.ignore`+`restock.adjust` 建议行与主数据记回）。
+  - `npm test`（bff 全量）→ **exit 0**；`apps/admin-web` `npx tsc --noEmit` → **exit 0**；`read_lints` → **0 错**。
+  - `powershell -File ci/redline_guard.ps1` → 全通过。
+  - `powershell -File scripts/gen-debt-table.ps1` → 151 项 **⬆️ 122 / ⬜ 25**（欠账卡 25：W1 0 / W2 8 / W3 14 / W4 3）；
+    `node scripts/gen-progress-board.js` → 漂移校验 ok、数字一致性 OK。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **未在浏览器手工冒烟**：新建/编辑采购单、忽略/保存调整仅静态类型检查 + 算法单测，未点击核对；「审批执行 → 快照变化」完整 HTTP 闭环本机未跑。
+  2. **建议行转单不回写状态**：`order.fromRestock` 仍不写回 `data.plans` 行 `st='done'`/`po`（旧版 `restockToOrders` 会写），
+     故同一建议行跨 5min 幂等窗后仍可能重复转单；`_syncPlanStatus` 已就位，接上转单回写即闭环（属 FP-PO-16 范畴）。
+  3. `po.create`/`po.edit`/`restock.*` 均为**新增动作类型**（旧版为浏览器内 JS），无 Node↔Python 平价对照，仅 Node 单测覆盖。
+  4. `packQty` 暂不被建议量算法消费（店内 `seed_recipe_links` 仍读 `ing.pack`），故「整包规格」对建议量取整暂不生效——随 FP-PO-16 口径一并处理。
+- 影响范围: `bff/lib/algorithms/{inventory.js,registry.js,inventory.test.js}`、`bff/lib/policy.js`、
+  `apps/admin-web/src/pages/inventory/{OrderFormModal.tsx（新）,PurchasePage.tsx,RestockPage.tsx}`、`apps/admin-web/src/api/types.ts`、
+  `docs/迁移基线/FP-采购管理.md`（20/20 全部 ⬆️）、`docs/迁移基线/欠账总表.md`、`docs/迁移颗粒度规范.md`（附录 A）、
+  `docs/进度看板.html`（⬆️ 117→122、欠账卡 30→25）、`scripts/gen-debt-table.ps1`（波次登记与页面状态文案）、`HANDOFF.md`、本文件。
+  **未触碰**受保护哈希文件（`bff/store-node/{db,merge}.js`）与 `bff/lib/algorithms/stock.js`。
+- AI避坑提示:
+  - **采购单绝不入库**：`po.create`/`po.edit` 只改 `data.orders`；误调 `rebuildStock` 会虚增库存、扭曲移动加权均价（与 `order.fromRestock` 同一条红线）。
+  - **主数据别写 `ing.pack`**：它是包规字符串（结算单「包规」列在用）；整包规格走 `packQty`，`moq` 才是起订量。三者混写会污染主数据。
+  - **忽略/调整只作用于建议单行**：无待处理建议单时执行器直接抛错（前端已禁用按钮）；不要退化成「本地静默忽略」。
+  - **`restock.config` 禁自动执行**：已入 `NEVER_AUTO`，别从该集合里摘掉。
+- 回档方案: `git revert` 本提交即可——去掉 5 个执行器 + 注册 + `NEVER_AUTO` 项 + 前端表单/按钮/列；已入队未执行的动作会判 need-manual，需人工处理。
+  回档后须重跑 `scripts/gen-debt-table.ps1` 与 `node scripts/gen-progress-board.js`，并把 `FP-采购管理.md` 的 5 行状态回退为 ⬜ 待补。
+- 后续: 采购管理页 **20/20 收官**；全局欠账 **⬆️ 122 / ⬜ 25**（W2 8 / W3 14 / W4 3）。W3 头部转 `FP-ING-05`（手工校准库存/均价）与 `FP-SALE-12`（编辑销售单）。
+
 ## [2026-10-13 18:00] 阶段 20 - 销售应收模型落地（ADR-008 / ADR-009）：经营概览 4 只读 + 销售收银页 3 写类
 
 - 背景: 欠账总表的「执行前置依赖」中，`FP-DASH-02/03/04/08`（应收/实收/欠款/折扣）与 `FP-SALE-07/08/11`（销售单列表/顶部 KPI/分次收款）7 张卡长期被同一个数据缺口卡死——快照 `sales[]` 只有 `amount/qty/date/hour/channel/method`，没有 `discount/receivable/payments`。ADR-008（应收按单日期、实收按收款日期、欠款=应收−实收）与 ADR-009（销售端录销售单、统一走标准业务处理队列）已定案，按 `docs/关键路径-销售应收模型-推行指令.md` Phase A→B 一次打通

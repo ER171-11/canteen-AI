@@ -16,6 +16,7 @@ import {
   Statistic,
   Table,
   Tag,
+  Tooltip,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -23,7 +24,9 @@ import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { fetchSnapshot, postAction } from '../../api'
 import type { IngItem, InventoryDoc } from '../../api/types'
+import { useAuthStore } from '../../store/auth'
 import MockAlert from '../kitchen/components/MockAlert'
+import OrderFormModal from './OrderFormModal'
 import {
   docDebt,
   docPaid,
@@ -38,12 +41,34 @@ import { COLORS } from '../../theme'
 /** 付款方式枚举（照抄旧版 openGet() 的 select 选项，HTML:2069） */
 const PAY_METHODS = ['现金/扫码', '微信', '支付宝', '银行转账', '平台结算', '挂账转销']
 
+/**
+ * 把取数失败翻译成「用户能照做」的一句话。
+ * 采购单没有独立接口，整页数据都来自 `/api/snapshot/latest` 的 `data.orders`：
+ * 连不上 BFF / 服务端还没有快照 / HTTP 报错，三者的处置方式完全不同，不能都说成「暂无数据」。
+ */
+function describeLoadError(e: unknown): string {
+  const err = e as {
+    response?: { status?: number; data?: { error?: string } }
+    code?: string
+  }
+  const status = err?.response?.status
+  if (status === 404) {
+    return '服务端还没有快照（/api/snapshot/latest 返回 404）：店内节点尚未推送数据，请确认 store-node 与 pusher 已启动。'
+  }
+  if (status === 401) return '登录态已失效（401），请重新登录。'
+  if (status) return `接口返回 HTTP ${status}：${err.response?.data?.error || '未知错误'}。`
+  if (err?.code === 'ECONNABORTED') return '请求超时：BFF 无响应。'
+  return '无法连接 BFF（连接被拒绝）：请在 bff 目录执行 node server.js，或双击 启动测试.cmd 重新拉起后端。'
+}
+
 export default function PurchasePage() {
+  const canWrite = useAuthStore((s) => s.canWrite)
   const [docs, setDocs] = useState<InventoryDoc[]>([])
   const [ings, setIngs] = useState<IngItem[]>([])
   const [supplier, setSupplier] = useState<string>()
   const [statusFilter, setStatusFilter] = useState<string>()
   const [isMock, setIsMock] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(true)
   const [fromSnapshot, setFromSnapshot] = useState(true)
   /* FP-PO-03/04/05/06/07：采购单行操作（付款 / 结案 / 作废 / 恢复 / 删除） */
@@ -52,12 +77,16 @@ export default function PurchasePage() {
   const [payAmt, setPayAmt] = useState(0)
   const [payDate, setPayDate] = useState(dayjs().format('YYYY-MM-DD'))
   const [payMethod, setPayMethod] = useState(PAY_METHODS[0])
-
+  /* FP-PO-01/02：新建/编辑采购单，走 po.create / po.edit 审批队列，不直写库 */
+  const [orderOpen, setOrderOpen] = useState(false)
+  const [editDoc, setEditDoc] = useState<InventoryDoc | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
   const loadDocs = useCallback(() => {
     setLoading(true)
     fetchSnapshot()
       .then((snap) => {
         setIngs(snap.data?.ings ?? [])
+        setLoadError('')
         const orders = snap.data?.orders
         if (Array.isArray(orders)) {
           setDocs(orders)
@@ -68,10 +97,11 @@ export default function PurchasePage() {
           setFromSnapshot(true)
         }
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         setDocs([])
         setFromSnapshot(false)
         setIsMock(true)
+        setLoadError(describeLoadError(e))
       })
       .finally(() => setLoading(false))
   }, [])
@@ -263,11 +293,11 @@ export default function PurchasePage() {
         ),
     },
     {
-      /* FP-PO-03/04/05/06/07 行操作（对齐旧版 renderOrders() 行内按钮，HTML:1812-1817）：
-         付款（有欠款时）/ 恢复或结案 / 作废（非作废时）/ 删除 */
+      /* FP-PO-02/03/04/05/06/07 行操作（对齐旧版 renderOrders() 行内按钮，HTML:1812-1817）：
+         编辑 / 付款（有欠款时）/ 恢复或结案 / 作废（非作废时）/ 删除 */
       title: '操作',
       key: 'ops',
-      width: 250,
+      width: 290,
       fixed: 'right',
       render: (_, r) => {
         const st = orderSt(r)
@@ -275,6 +305,18 @@ export default function PurchasePage() {
         const no = r.no ?? r.id ?? ''
         return (
           <Space size={2} wrap>
+            {/* FP-PO-02 编辑：走 po.edit 审批队列，不直写库 */}
+            <Button
+              size="small"
+              type="link"
+              disabled={busy || !canWrite || isMock}
+              onClick={() => {
+                setEditDoc(r)
+                setEditOpen(true)
+              }}
+            >
+              编辑
+            </Button>
             {debt > 0.01 && (
               <Button size="small" type="link" disabled={busy} onClick={() => openPay(r)}>
                 付款
@@ -326,12 +368,20 @@ export default function PurchasePage() {
     },
   ]
 
+  /* 取数失败（≠ 店里没有采购单）：与「真空态」分开渲染，避免把后端不可用误读成没单据 */
+  const failed = isMock && !loading
   const empty =
     fromSnapshot && !isMock && docs.length === 0 && !loading
 
   return (
     <div>
-      {isMock && <MockAlert endpoint="/api/snapshot/latest · data.orders" />}
+      {isMock && (
+        <MockAlert
+          endpoint="/api/snapshot/latest · data.orders"
+          detail={loadError}
+          onRetry={loadDocs}
+        />
+      )}
       {/* FP-PO-15 顶部汇总卡（口径同旧版 renderOrderKpi()，「本月」= 近 30 天） */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
@@ -402,15 +452,35 @@ export default function PurchasePage() {
               value={allValueOf(statusFilter)}
               onChange={(v) => setStatusFilter(fromAll<string>(v))}
             />
+            {/* FP-PO-01 新建采购单：只投 po.create 建议动作，确认前不改账面 */}
+            <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
+              <Button
+                type="primary"
+                disabled={!canWrite || isMock}
+                onClick={() => setOrderOpen(true)}
+              >
+                新建采购单
+              </Button>
+            </Tooltip>
           </Space>
         }
       >
-        {empty ? (
+        {failed ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={
+              <span>
+                未能读取采购单（接口不可用，原因见页顶提示）；此空表不代表店里没有单据，
+                后端恢复后点页顶「重试」重新取数。
+              </span>
+            }
+          />
+        ) : empty ? (
           <Empty
             description={
               <span>
-                暂无采购单。可先到{' '}
-                <Link to="/inventory/restock">补货建议</Link> 生成草稿，或由店内下单后同步到快照。
+                暂无采购单。点右上角「新建采购单」向供应商下单，或先到{' '}
+                <Link to="/inventory/restock">补货建议</Link> 勾选后转采购单。
               </span>
             }
           />
@@ -466,6 +536,28 @@ export default function PurchasePage() {
           </div>
         )}
       </Modal>
+
+      {/* FP-PO-01 新建采购单（对齐旧版 openOrder，HTML:1670-1674）：入队后刷新列表 */}
+      <OrderFormModal
+        open={orderOpen}
+        ings={ings}
+        suppliers={suppliers}
+        onClose={() => setOrderOpen(false)}
+        onQueued={loadDocs}
+      />
+
+      {/* FP-PO-02 编辑采购单：走 po.edit 审批队列，入队后刷新列表 */}
+      <OrderFormModal
+        open={editOpen}
+        editDoc={editDoc}
+        ings={ings}
+        suppliers={suppliers}
+        onClose={() => {
+          setEditOpen(false)
+          setEditDoc(null)
+        }}
+        onQueued={loadDocs}
+      />
     </div>
   )
 }

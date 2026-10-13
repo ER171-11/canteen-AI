@@ -20,6 +20,8 @@ const NEVER_AUTO = new Set([
   'dish.price', 'dish.upsert', 'dish.set_active', 'recipe.upsert', 'recipe.substitute',
   'config.update', 'staff.shift_upsert', 'vip.campaign', 'finance.approve', 'finance.freeze',
   'pos.pay', 'pos.void', 'pos.merge', 'pos.split',
+  /* 补货参数配置（FP-PO-17）：同 config.update，属配置类写，不得由 SI 自动执行 */
+  'restock.config',
   /* 食安人工复核：AI 初判不得替代人工结论，必须由老板/店长点击确认 */
   'safety.review'
 ]);

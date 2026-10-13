@@ -48,6 +48,13 @@ registerAll({
   'order.void': (ctx, data, payload) => inv.applyOrderVoid(data, payload),
   'order.restore': (ctx, data, payload) => inv.applyOrderRestore(data, payload),
   'order.delete': (ctx, data, payload) => inv.applyOrderDelete(data, payload),
+  /* FP-PO-01/02 新建/编辑采购单：与 order.* 同型建议动作，只改 data.orders（不入库） */
+  'po.create': (ctx, data, payload) => inv.applyOrderCreate(data, payload),
+  'po.edit': (ctx, data, payload) => inv.applyOrderEdit(data, payload),
+  /* FP-PO-17/19/20 补货参数 / 忽略建议行 / 行内调整记回主数据（只改 data.restock 与 data.plans） */
+  'restock.config': (ctx, data, payload) => inv.applyRestockConfig(data, payload),
+  'restock.ignore': (ctx, data, payload) => inv.applyRestockIgnore(data, payload),
+  'restock.adjust': (ctx, data, payload) => inv.applyRestockAdjust(data, payload),
   'vendor.upsert': (ctx, data, payload) => inv.upsertVendor(data, payload, ctx),
   'supply.po': (ctx, data, payload) => (
     inv.applyRestock(data, payload) + ' + ' + inv.insertSupplyPo(ctx, payload)

@@ -393,6 +393,124 @@ function main() {
     console.log('  PASS order.fromRestock (standalone)');
   }
 
+  /* ---------- po.create / po.edit：新增动作（旧版为浏览器内 openDocForm，仅 Node 单测） ---------- */
+  {
+    const data = {
+      ings: [
+        { id: 'g1', name: '面粉', unit: '斤', buy: '袋', sup: '供应商A', avg: 50, conv: 25 },
+        { id: 'g2', name: '猪肉', unit: '斤', buy: '斤', sup: '供应商B', avg: 18, conv: 1 }
+      ],
+      suppliers: ['供应商A'],
+      orders: [{ id: 'o0', no: 'CG20261012-01', date: '2026-10-12' }]
+    };
+    const msg = inv.applyOrderCreate(data, {
+      date: '2026-10-13',
+      supplier: '新供应商C',
+      method: '银行转账',
+      note: '早市到货',
+      paid: 1000,
+      items: [
+        { ing_id: 'g1', qty: 2, price: 50 },
+        { ing_id: 'g2', qty: 5, price: 18 }
+      ]
+    });
+    assert.strictEqual(data.orders.length, 2, '应追加 1 张采购单');
+    const o = data.orders[1];
+    assert.strictEqual(o.no, 'CG20261013-01', '同日张数+1 生成单号');
+    // 应付 = 50*2 + 18*5 = 190；实付 1000 应封顶到 190
+    assert.strictEqual(o.payable, 190, '应付 = Σ qty×price');
+    assert.strictEqual(o.payments.length, 1, '实付一条付款');
+    assert.strictEqual(o.payments[0].amount, 190, '超付封顶到应付');
+    assert.strictEqual(o.status, 'normal', '正式采购单 status=normal');
+    // conv=25 → unitCost = 50/25 = 2
+    assert.strictEqual(o.lines[0].unitCost, 2, 'unitCost 按原料 conv 折算');
+    // 新供应商并入 suppliers
+    assert.ok(data.suppliers.indexOf('新供应商C') >= 0, '新供应商并入 data.suppliers');
+    // 红线：不触碰库存
+    assert.strictEqual(data.stock, undefined, '建单不得触碰库存（不 rebuildStock）');
+    assert.ok(msg.indexOf('CG20261013-01') >= 0, 'msg 应含单号');
+
+    // 空供应商 / 零数量明细 → 抛错
+    let e1 = false;
+    try { inv.applyOrderCreate({ orders: [] }, { supplier: '  ', items: [{ ing_id: 'g1', qty: 1, price: 1 }] }); } catch (e) { e1 = true; }
+    assert.ok(e1, '缺供应商应抛错');
+    let e2 = false;
+    try { inv.applyOrderCreate({ orders: [], ings: [] }, { supplier: 'X', items: [{ ing_id: 'g1', qty: 0, price: 1 }] }); } catch (e) { e2 = true; }
+    assert.ok(e2, '数量为 0 应抛错');
+    pass++;
+    console.log('  PASS po.create (standalone)');
+
+    // po.edit：覆盖字段并重置付款为单条（旧版 openDocForm 编辑分支）
+    const data2 = {
+      ings: [{ id: 'g1', name: '面粉', buy: '袋', conv: 25 }],
+      orders: [{
+        id: 'o1', no: 'CG1', date: '2026-10-01', supplier: '旧供应商', payable: 100,
+        lines: [{ ing: 'g1', qty: 2, price: 50, amount: 100, conv: 25, unitCost: 2 }],
+        payments: [{ amount: 30, date: '2026-10-01', method: '现金/转账' },
+          { amount: 20, date: '2026-10-02', method: '微信' }]
+      }]
+    };
+    inv.applyOrderEdit(data2, { order_id: 'o1', date: '2026-10-13', supplier: '新供应商',
+      items: [{ ing_id: 'g1', qty: 4, price: 50 }] });
+    const e = data2.orders[0];
+    assert.strictEqual(e.supplier, '新供应商', '供应商应被覆盖');
+    assert.strictEqual(e.date, '2026-10-13', '日期应被覆盖');
+    assert.strictEqual(e.payable, 200, '应付按新明细重算');
+    assert.strictEqual(e.payments.length, 1, '付款重置为单条（旧版口径）');
+    assert.strictEqual(e.payments[0].amount, 50, '未显式给 paid 时取已付合计（欠款口径不变）');
+    let e3 = false;
+    try { inv.applyOrderEdit({ orders: [] }, { order_id: 'nope' }); } catch (err) { e3 = true; }
+    assert.ok(e3, '找不到采购单应抛错');
+    pass++;
+    console.log('  PASS po.edit (standalone)');
+  }
+
+  /* ---------- restock.config / ignore / adjust：新增动作（旧版为浏览器内 JS，仅 Node 单测） ---------- */
+  {
+    // config：钳制与归一
+    const d1 = {};
+    inv.applyRestockConfig(d1, { days: 0, lead: -3, gap: 2, useOnway: '1' });
+    assert.deepStrictEqual(d1.restock, { days: 1, lead: 0, gap: 2, useOnway: 1 }, '补货参数应钳制并归一');
+    inv.applyRestockConfig(d1, { restock: { days: 45 } });
+    assert.strictEqual(d1.restock.days, 45, '缺省键沿用现值');
+    assert.strictEqual(d1.restock.gap, 2, '未给键保留原值');
+    pass++;
+    console.log('  PASS restock.config (standalone)');
+
+    // ignore / adjust：建议单行状态与主数据记回
+    const d2 = {
+      ings: [{ id: 'g1', name: '面粉', sup: '', moq: '', pack: '25kg/袋' }],
+      orders: [],
+      plans: [{
+        id: 'BY1', no: 'BY20261013-001', date: '2026-10-13', status: 'pending',
+        lines: [
+          { ing: 'g1', qty: 10, supplier: '', st: 'pending' },
+          { ing: 'g2', qty: 5, supplier: '', st: 'pending' }
+        ]
+      }]
+    };
+    inv.applyRestockIgnore(d2, { ing_ids: ['g2'] });
+    assert.strictEqual(d2.plans[0].lines[1].st, 'ignored', '勾选行应置 ignored');
+    assert.strictEqual(d2.plans[0].status, 'part', '单状态应推进为 part');
+
+    const msg2 = inv.applyRestockAdjust(d2, {
+      rows: [{ ing: 'g1', qty: 12, supplier: '供应商A', moq: 5, packQty: 2 }]
+    });
+    assert.strictEqual(d2.plans[0].lines[0].qty, 12, '建议行采购量应更新');
+    assert.strictEqual(d2.plans[0].lines[0].supplier, '供应商A', '建议行供应商应更新');
+    assert.strictEqual(d2.ings[0].sup, '供应商A', '供应商记回原料主数据');
+    assert.strictEqual(d2.ings[0].moq, 5, '起订量记回原料主数据');
+    assert.strictEqual(d2.ings[0].packQty, 2, '整包规格记回 packQty');
+    assert.strictEqual(d2.ings[0].pack, '25kg/袋', '包规 pack（字符串）不得被覆盖');
+    assert.ok(msg2.indexOf('2 项') >= 0 || msg2.indexOf('1 项') >= 0, 'msg 应含记回项数');
+
+    let e4 = false;
+    try { inv.applyRestockIgnore({ plans: [] }, { ing_ids: ['g1'] }); } catch (err) { e4 = true; }
+    assert.ok(e4, '无建议单时应抛错');
+    pass++;
+    console.log('  PASS restock.ignore/adjust (standalone)');
+  }
+
   console.log('[inventory.test] PASS ' + pass + ' cases');
 }
 

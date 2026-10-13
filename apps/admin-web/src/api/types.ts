@@ -792,6 +792,12 @@ export interface IngItem {
   buy?: string
   /** 包规（如「25kg/袋」，旧版 ing.pack） */
   pack?: string
+  /** 【Node 超集】整包规格（采购单位，数值）：补货建议「起订/整包」用；与 `pack`（包规字符串）分列 */
+  packQty?: number
+  /** 起订量（采购单位，补货建议「起订/整包」用；旧版 ing.moq） */
+  moq?: number | string
+  /** 默认供应商（补货建议转单按此拆单；旧版 ing.sup） */
+  sup?: string
   /** 当前库存量 */
   stock?: number
   /** 安全库存线（可能为 0） */
@@ -880,6 +886,53 @@ export interface InventoryDoc {
 
 /** data.recv 历史别名：动态字段兼容 Kimi 验货态 */
 export type RecvRecord = InventoryDoc | Record<string, unknown>
+
+/* ---------------- 补货参数与建议单（data.restock / data.plans） ---------------- */
+
+/** data.restock（旧版 RESTOCK_DEF，旧 HTML:5355）：读时兜底 {days:30,lead:1,gap:1,useOnway:1} */
+export interface RestockConfig {
+  days: number
+  lead: number
+  gap: number
+  /** 1 = 扣减未结案采购量（在途），0 = 不扣减 */
+  useOnway: number
+}
+
+/** data.plans[].lines[] 建议行（旧版 restockLineOf 产物，旧 HTML:1851） */
+export interface RestockPlanLine {
+  ing: string
+  name?: string | null
+  /** 现有库存（库存单位） */
+  cur?: number
+  safe?: number
+  daily?: number
+  onway?: number
+  need?: number
+  /** 建议采购量（采购单位） */
+  sug?: number
+  /** 人工可改采购量（采购单位） */
+  qty?: number
+  unit?: string | null
+  buy?: string | null
+  conv?: number | null
+  price?: number
+  supplier?: string
+  /** pending 待处理 / done 已转单 / closed 已收货 / ignored 已忽略 */
+  st?: 'pending' | 'done' | 'closed' | 'ignored' | string
+  /** 转出的采购单 id（删单后回退 pending） */
+  po?: string
+}
+
+/** data.plans[] 建议单（旧版 BY 单） */
+export interface RestockPlan {
+  id: string
+  no?: string
+  date?: string
+  genAt?: string
+  by?: string
+  status?: 'pending' | 'part' | 'closed' | 'ignored' | string
+  lines?: RestockPlanLine[]
+}
 
 /* ---------------- 食材按标准验收（代理A契约，未上线时页面回落） ---------------- */
 
@@ -1111,6 +1164,9 @@ export interface SnapshotData {
   ings?: IngItem[]
   recv?: RecvRecord[]
   orders?: InventoryDoc[]
+  /* data.restock 补货参数 / data.plans 建议单（FP-PO-17/19/20） */
+  restock?: RestockConfig
+  plans?: RestockPlan[]
   logs?: StockLogItem[]
   quotes?: QuoteItem[]
   vendors?: Vendor[]

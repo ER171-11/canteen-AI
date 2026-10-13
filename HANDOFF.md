@@ -155,7 +155,8 @@ node scripts/gen-progress-board.js                    # 刷新进度看板
   只读 `FP-DASH-02/03/04/08`（应收按单日期 / 实收按收款日期 / 欠款累计 / 折扣抹零）
   + 销售收银 `FP-SALE-07/08/09/10/11`（新增 admin-web「销售收银」页：销售单列表 / 顶部 KPI / 渠道与状态筛选 / 分次收款）。
   新增唯一口径源 `bff/lib/sales_model.js`；写侧 `bff/lib/algorithms/sale.js`（`sale.create/pay/void`，走 `/api/actions` 队列）
-- **W1 只读速补已清空**；下一批按欠账总表 W2/W3 顺序推进（欠账卡 30 张：W2 8 / W3 19 / W4 3）
+- ✅ 阶段 26（2026-10-13）采购管理录入类补齐（`FP-PO-01/02/17/19/20`），采购管理页 **20/20 收官**
+- **W1 只读速补已清空**；下一批按欠账总表 W2/W3 顺序推进（欠账卡 21 张：W2 4 / W3 14 / W4 3）
 - ✅ 已解除的数据缺口（阶段 20）：原先快照 `sales[]` 只有 `amount/qty/date/hour/channel/method`、
   无 `discount/receivable/payments`，曾阻塞 `FP-DASH-02/03/04/08` 与 `FP-SALE-07/08/11`。
   现由 `lib/sales_model.js` 防御性取值兜底（缺字段按「应收=amount、折扣=0、全额即收」），

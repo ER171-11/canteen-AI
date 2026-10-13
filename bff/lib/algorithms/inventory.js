@@ -5,6 +5,11 @@
  * 覆盖动作：
  *   restock.create / analysis.restock → applyRestock
  *   order.fromRestock                 → applyRestockToOrders（勾选建议行按供应商拆单生成正式 CG 单）
+ *   po.create                         → applyOrderCreate（新建采购单 CG）
+ *   po.edit                           → applyOrderEdit（编辑采购单）
+ *   restock.config                    → applyRestockConfig（补货参数 → data.restock）
+ *   restock.ignore                    → applyRestockIgnore（忽略勾选建议行）
+ *   restock.adjust                    → applyRestockAdjust（行内改量/供应商/起订/整包并记回原料主数据）
  *   config.update                     → applyConfig
  *   rest.update                       → applyRest（写顶层 data.rest 餐厅名）
  *   ing.upsert                        → applyIngUpsert
@@ -319,6 +324,162 @@ function applyRestockToOrders(data, payload) {
   return 'orders 按供应商拆单生成 ' + created.length + ' 张采购单（' + rows.length + ' 个品项）：' + created.join(', ');
 }
 
+/* ---------- 补货参数 / 建议单行（FP-PO-17/19/20） ----------
+ * 只改 data.restock 与 data.plans（+ 记回 data.ings 的 sup/moq/packQty），**绝不触碰库存与均价**。
+ * 对齐旧版 restockCfg()/curRestockPlan()/syncPlanStatus()/restockIgnore()/readRestockRows()（HTML:1835-2051）。
+ */
+
+/** 补货参数默认值（照抄旧版 RESTOCK_DEF，HTML:5355） */
+function restockDef() {
+  return { days: 30, lead: 1, gap: 1, useOnway: 1 };
+}
+
+function _plansArr(data) {
+  if (data.plans === undefined || data.plans === null) data.plans = [];
+  if (!Array.isArray(data.plans)) throw new Error('data.plans 不是数组，拒绝写入');
+  return data.plans;
+}
+
+/** 定位建议单：显式 id/no 优先，否则取最新一张未忽略（对齐旧版 curRestockPlan，HTML:1861） */
+function _findPlan(plans, key) {
+  const k = String(key || '').trim();
+  if (k) {
+    for (const p of plans) if (p && (String(p.id || '') === k || String(p.no || '') === k)) return p;
+    throw new Error('找不到补货建议单 ' + k);
+  }
+  const usable = plans.filter((p) => p && p.status !== 'ignored' && p.status !== '已忽略');
+  usable.sort((a, b) => String(b.date || b.genAt || '').localeCompare(String(a.date || a.genAt || '')));
+  if (!usable.length) throw new Error('当前没有待处理的补货建议单（请先在店内生成建议单）');
+  return usable[0];
+}
+
+/** 行状态推导（对齐旧版 orderLineSt，HTML:1688） */
+function _orderLineSt(l) {
+  const st = l && l.st;
+  if (st === 'canceled' || st === 'closed') return st;
+  const q = num(l && l.qty, 0);
+  const got = num(l && l.recvQty, 0);
+  return (q > 0 && got >= q - 1e-6) ? 'closed' : 'normal';
+}
+
+/** 单状态推导（对齐旧版 orderSt，HTML:1694）：void/draft/closed 显式优先，否则全部行收齐即结案 */
+function _orderStatus(o) {
+  if (!o) return 'normal';
+  if (o.status === 'void') return 'void';
+  if (o.status === 'draft' || o.status === '草稿') return 'draft';
+  if (o.status === 'closed') return 'closed';
+  const ls = arr(o.lines);
+  if (ls.length && !ls.some((l) => _orderLineSt(l) === 'normal')) return 'closed';
+  return 'normal';
+}
+
+/** 建议单状态推进（对齐旧版 syncPlanStatus，HTML:1890）：行状态随关联采购单派生 → 单状态聚合 */
+function _syncPlanStatus(data, p) {
+  const orders = arr(data.orders);
+  for (const l of arr(p.lines)) {
+    if (!l || l.st === 'ignored' || !l.po) continue;
+    const o = orders.find((x) => String(x && x.id) === String(l.po));
+    if (!o) { l.st = 'pending'; delete l.po; continue; }
+    const st = _orderStatus(o);
+    l.st = st === 'void' ? 'ignored' : (st === 'closed' ? 'closed' : 'done');
+  }
+  const ls = arr(p.lines);
+  if (!ls.length) { p.status = 'ignored'; return; }
+  if (ls.every((l) => l.st === 'closed')) p.status = 'closed';
+  else if (ls.every((l) => l.st === 'ignored' || l.st === 'closed')) p.status = 'ignored';
+  else if (ls.some((l) => l.st !== 'pending')) p.status = 'part';
+  else p.status = 'pending';
+}
+
+/**
+ * restock.config（FP-PO-17）：补货参数配置 → data.restock。
+ * days ≥ 1 取整；lead/gap ≥ 0；useOnway 归一 0/1（照抄旧版 openRestockCfg 保存，HTML:2045-2048）。
+ */
+function applyRestockConfig(data, payload) {
+  const src = (payload && payload.restock && typeof payload.restock === 'object' && !Array.isArray(payload.restock))
+    ? payload.restock : (payload || {});
+  const cur = (data.restock && typeof data.restock === 'object' && !Array.isArray(data.restock))
+    ? data.restock : restockDef();
+  const pick = (k) => (src[k] != null ? src[k] : cur[k]);
+  const days = Math.max(1, Math.floor(num(pick('days'), 30)));
+  const lead = Math.max(0, num(pick('lead'), 1));
+  const gap = Math.max(0, num(pick('gap'), 1));
+  const useOnway = pick('useOnway') ? 1 : 0;
+  data.restock = { days: days, lead: lead, gap: gap, useOnway: useOnway };
+  return '补货参数已保存：days=' + days + ' lead=' + lead + ' gap=' + gap + ' useOnway=' + useOnway;
+}
+
+/**
+ * restock.ignore（FP-PO-19）：忽略勾选的建议行（旧版 restockIgnore，HTML:2023-2029）。
+ * 只把 `st='pending'` 的行置为 `ignored` 并推进建议单状态；不删行、不生成采购单。
+ */
+function applyRestockIgnore(data, payload) {
+  const plans = _plansArr(data);
+  const p = _findPlan(plans, payload.plan_id || payload.plan_no || payload.id);
+  const ids = arr(payload.ing_ids || payload.ings).map((x) => String(x && x.ing ? x.ing : x));
+  if (!ids.length) throw new Error('restock.ignore 缺 ing_ids（请先勾选要忽略的建议行）');
+  let n = 0;
+  for (const l of arr(p.lines)) {
+    if (l && l.st === 'pending' && ids.indexOf(String(l.ing)) >= 0) { l.st = 'ignored'; n += 1; }
+  }
+  if (!n) throw new Error('restock.ignore 未命中任何待处理建议行（勾选行可能已转单/已忽略）');
+  _syncPlanStatus(data, p);
+  return '建议单 ' + (p.no || p.id || '') + ' 忽略 ' + n + ' 行（单状态 ' + p.status + '）';
+}
+
+/**
+ * restock.adjust（FP-PO-20）：行内改采购量/供应商/起订量/整包 → 记回原料主数据 + 建议行。
+ * 对齐旧版 readRestockRows（HTML:1978-1993）：
+ *   - 原料主数据：`sup`（供应商）、`moq`（起订量）；整包规格写 **Node 超集字段 `packQty`**，
+ *     不写 `ing.pack`（新系统 `pack`＝包规字符串，结算单用，覆盖会破坏主数据）。
+ *   - 建议行：`qty`（采购量，> 0 才写）、`supplier`（供应商）。
+ * 仅记录，不重算库存/不调 rebuildStock。
+ */
+function applyRestockAdjust(data, payload) {
+  const plans = _plansArr(data);
+  const p = _findPlan(plans, payload.plan_id || payload.plan_no || payload.id);
+  const rows = arr(payload.rows || payload.items);
+  if (!rows.length) throw new Error('restock.adjust 缺 rows（请填写要记回的建议行）');
+  const ings = arr(data.ings);
+  const byId = new Map();
+  for (const g of ings) if (g && g.id != null) byId.set(String(g.id), g);
+  const now = nowIso();
+  let nLine = 0;
+  const ingTouched = [];
+  for (const r of rows) {
+    const id = String((r && (r.ing || r.ing_id)) || '').trim();
+    if (!id) continue;
+    const g = byId.get(id);
+    if (g) {
+      let touched = false;
+      if (r.supplier != null) {
+        const v = String(r.supplier).trim();
+        if (v !== String(g.sup || '')) { g.sup = v; touched = true; }
+      }
+      if (r.moq != null) {
+        const v = Math.max(0, num(r.moq, 0));
+        if (v !== num(g.moq, 0)) { g.moq = v; touched = true; }
+      }
+      if (r.packQty != null) {
+        const v = Math.max(0, num(r.packQty, 0));
+        if (v !== num(g.packQty, 0)) { g.packQty = v; touched = true; }
+      }
+      if (touched) { g._u = now; ingTouched.push(id); }
+    }
+    for (const l of arr(p.lines)) {
+      if (String(l.ing) !== id) continue;
+      if (r.qty != null && num(r.qty, 0) > 0) l.qty = r2(r.qty);
+      if (r.supplier != null) l.supplier = String(r.supplier).trim();
+      else if (!l.supplier && g) l.supplier = g.sup || '';
+      nLine += 1;
+    }
+  }
+  if (!nLine) throw new Error('restock.adjust 未命中任何建议行（请确认勾选行在当前建议单内）');
+  _syncPlanStatus(data, p);
+  return '建议单 ' + (p.no || p.id || '') + ' 调整 ' + nLine + ' 行，记回原料主数据 '
+    + ingTouched.length + ' 项（' + ingTouched.join(',') + '）';
+}
+
 /* ---------- config.update ---------- */
 
 /**
@@ -403,6 +564,8 @@ function applyIngUpsert(data, payload) {
     }
     if (payload.est != null) ing.est = toFloat(payload.est);
     if (payload.yld != null) ing.yld = clampYld(toFloat(payload.yld));
+    /* 【Node 超集】整包规格（采购单位，数值）：与 `pack`（包规字符串，结算单用）分列，避免覆盖主数据 */
+    if (payload.packQty != null) ing.packQty = Math.max(0, toFloat(payload.packQty));
     if (payload.qty != null) {
       const q = toFloat(payload.qty);
       ing.qty = q;
@@ -1305,6 +1468,114 @@ function applyOrderDelete(data, payload) {
   return 'orders ' + no + ' 已删除';
 }
 
+/* ---------- po.create / po.edit（FP-PO-01/02） ----------
+ * 新建/编辑采购单（对齐旧版 openOrder / openDocForm，HTML:1559-1675）。
+ * 硬规则：只改 data.orders（+ data.suppliers），**绝不调 rebuildStock**（采购单不入库、不影响均价）。
+ */
+
+/** 采购单明细行：按采购单位 qty/price 生成，conv 取原料主数据、amount=r2(qty·price)、unitCost=r3(price/conv) */
+function _orderLinesFromItems(ings, items) {
+  const ingById = new Map();
+  for (const g of arr(ings)) if (g && g.id != null) ingById.set(String(g.id), g);
+  const lines = [];
+  for (const it of arr(items)) {
+    const id = String((it && (it.ing_id || it.ing || it.name)) || '').trim();
+    if (!id) continue;
+    const g = ingById.get(id) || {};
+    const qty = num(it.qty, 0);
+    const price = num(it.price, 0);
+    const conv = num(g.conv, 0) > 0 ? num(g.conv, 0) : 1;
+    lines.push({
+      ing: id,
+      name: pt(it.name || g.name || id),
+      qty: qty,
+      unit: pt(it.unit || g.buy || g.unit || ''),
+      price: price,
+      conv: conv,
+      amount: r2(qty * price),
+      unitCost: r3(price / conv)
+    });
+  }
+  return lines;
+}
+
+/** 明细校验（对齐旧版：数量 > 0、单价 ≥ 0；否则拒绝保存） */
+function _assertOrderLines(lines, tag) {
+  if (!lines.length) throw new Error(tag + ' 无有效明细行（请至少填写一行原料+数量）');
+  if (lines.some((l) => !(l.qty > 0) || l.price < 0)) {
+    throw new Error(tag + ' 明细数量需 > 0、单价 ≥ 0（请检查数量/单价）');
+  }
+}
+
+/** 新供应商并入 data.suppliers（对齐旧版 `if(!DB.suppliers.includes(sup))DB.suppliers.push(sup)`） */
+function _ensureSupplier(data, supplier) {
+  if (!supplier) return;
+  if (!Array.isArray(data.suppliers)) data.suppliers = [];
+  if (data.suppliers.indexOf(supplier) < 0) data.suppliers.push(supplier);
+}
+
+/**
+ * po.create：新建采购单 CG（旧版 openOrder→openDocForm，HTML:1670-1674）。
+ * 单号 `CG+yyyymmdd-NN`（同日已有张数+1）；payments = paid>0 ? [单条] : []（超额封顶到应付）；
+ * status='normal'（与 order.fromRestock 一致，正式采购单＝收货中，仍由收齐/结案/作废推导）。
+ */
+function applyOrderCreate(data, payload) {
+  const orders = _ordersArr(data);
+  const supplier = String(payload.supplier || '').trim();
+  if (!supplier) throw new Error('po.create 缺供应商（旧版 openDocForm 必填）');
+  const lines = _orderLinesFromItems(data.ings, payload.items);
+  _assertOrderLines(lines, 'po.create');
+  const date = payload.date || today();
+  const method = String(payload.method || '现金/转账');
+  const payable = r2(lines.reduce((s, l) => s + l.amount, 0));
+  const paid = Math.min(Math.max(r2(payload.paid), 0), payable);
+  const sameDay = orders.filter((o) => o && o.date === date).length;
+  const o = {
+    id: uid('O', 10),
+    no: 'CG' + String(date).replace(/-/g, '') + '-' + String(sameDay + 1).padStart(2, '0'),
+    date: date,
+    supplier: supplier,
+    lines: lines,
+    payable: payable,
+    payments: paid > 0 ? [{ amount: paid, date: date, method: method }] : [],
+    note: payload.note != null ? String(payload.note) : '',
+    method: method,
+    status: 'normal'
+  };
+  orders.push(o);
+  _ensureSupplier(data, supplier);
+  return 'orders 新建采购单 ' + o.no + '（' + lines.length + ' 行，应付 ' + payable.toFixed(2)
+    + '，已付 ' + paid.toFixed(2) + '）';
+}
+
+/**
+ * po.edit：编辑采购单（旧版 openOrder(order)，HTML:1642-1643）。
+ * 覆盖 date/supplier/note/method/lines/payable；payments 对齐旧版**重置为「本次实付」单条**
+ * （前端预填 paid=已付合计，故应付/已付/欠款三数不变，仅付款笔数归并）。
+ */
+function applyOrderEdit(data, payload) {
+  const orders = _ordersArr(data);
+  const o = _findOrder(orders, payload.order_id || payload.id || payload.no);
+  const supplier = payload.supplier != null ? String(payload.supplier).trim() : String(o.supplier || '');
+  if (!supplier) throw new Error('po.edit 缺供应商（旧版必填）');
+  const lines = _orderLinesFromItems(data.ings, payload.items);
+  _assertOrderLines(lines, 'po.edit');
+  const date = payload.date || o.date || today();
+  const method = payload.method != null ? String(payload.method) : String(o.method || '');
+  const payable = r2(lines.reduce((s, l) => s + l.amount, 0));
+  const paid = Math.min(Math.max(r2(payload.paid != null ? payload.paid : _orderPaid(o)), 0), payable);
+  o.lines = lines;
+  o.date = date;
+  o.supplier = supplier;
+  o.note = payload.note != null ? String(payload.note) : (o.note || '');
+  o.method = method;
+  o.payable = payable;
+  o.payments = paid > 0 ? [{ amount: paid, date: date, method: method }] : [];
+  o._u = nowIso();
+  _ensureSupplier(data, supplier);
+  return 'orders ' + (o.no || o.id || '') + ' 已更新（' + lines.length + ' 行，应付 ' + payable.toFixed(2) + '）';
+}
+
 /* ---------- vendor.upsert ---------- */
 
 /**
@@ -1498,6 +1769,10 @@ module.exports = {
   applyRecvVoid,
   applyRecvImport,
   applyRestockToOrders,
+  applyRestockConfig,
+  applyRestockIgnore,
+  applyRestockAdjust,
+  restockDef,
   applyStockCount,
   insertStockCount,
   applyOrderMark,
@@ -1506,6 +1781,8 @@ module.exports = {
   applyOrderVoid,
   applyOrderRestore,
   applyOrderDelete,
+  applyOrderCreate,
+  applyOrderEdit,
   upsertVendor,
   insertSupplyPo
 };
