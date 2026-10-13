@@ -9,6 +9,7 @@ import {
   Space,
   Spin,
   Statistic,
+  Table,
   Tag,
   Typography,
 } from 'antd'
@@ -54,6 +55,7 @@ function normalizeReport(data: ReportDaily): ReportDaily {
           label: k.label,
           value: k.value,
           delta: k.delta ?? undefined,
+          sub: k.sub ?? undefined,
           trend: k.delta && String(k.delta).startsWith('-') ? ('down' as const) : ('up' as const),
         }))
       : [])
@@ -323,6 +325,11 @@ export default function DashboardPage() {
           <Col xs={12} sm={12} md={6} key={kpi.key}>
             <Card>
               <Statistic title={kpi.label} value={kpi.value} suffix={kpi.unit} />
+              {kpi.sub && (
+                <Typography.Text style={{ fontSize: 12, color: COLORS.gray }}>
+                  {kpi.sub}
+                </Typography.Text>
+              )}
               {kpi.delta && (
                 <Typography.Text
                   style={{
@@ -337,6 +344,32 @@ export default function DashboardPage() {
           </Col>
         ))}
       </Row>
+
+      {/* FP-DASH-15 菜品毛利排行（近30天 Top12：份数/营收/毛利/毛利率） */}
+      {(report.top_dishes ?? []).length > 0 && (
+        <Card title="菜品毛利排行（近30天 Top12）" size="small" style={{ marginTop: 16 }}>
+          <Table
+            size="small"
+            pagination={false}
+            rowKey="rank"
+            dataSource={(report.top_dishes ?? []).slice(0, 12)}
+            columns={[
+              { title: '#', dataIndex: 'rank', width: 44 },
+              { title: '菜品', dataIndex: 'name' },
+              { title: '分类', dataIndex: 'cat', width: 80 },
+              { title: '份数', dataIndex: 'qty', align: 'right', render: (v) => fmtNum(v) },
+              { title: '营收', dataIndex: 'rev', align: 'right', render: (v) => '¥' + fmtNum(v) },
+              { title: '毛利额', dataIndex: 'gp', align: 'right', render: (v) => '¥' + fmtNum(v) },
+              {
+                title: '毛利率',
+                dataIndex: 'gm',
+                align: 'right',
+                render: (v) => (v != null ? (v * 100).toFixed(1) + '%' : '-'),
+              },
+            ]}
+          />
+        </Card>
+      )}
 
       {heat.length > 0 && (
         <Card title="时段热力（迷你）" style={{ marginTop: 16 }}>

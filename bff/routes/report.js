@@ -13,6 +13,9 @@
  *     UI 时延标注：响应始终带 rev 与 generated_at（mock 时为 null）
  */
 const { loadSnapshot } = require('./snapshot');
+// FP-DASH-05/15：复用导出层既有成本解析（dishCostMap/dishResolver/costOfDish/near30Agg），
+// 单一公式源，不另写第二份成本口径
+const { dishCostMap, dishResolver, costOfDish, near30Agg } = require('./export');
 
 function todayStr() {
   const d = new Date();
@@ -31,6 +34,10 @@ function recordAmount(r) {
   }
   return 0;
 }
+
+function num(v, d) { const n = parseFloat(v); return isNaN(n) ? (d == null ? 0 : d) : n; }
+function arr(x) { return Array.isArray(x) ? x : []; }
+function r2(x) { return Math.round((Number(x) + Number.EPSILON) * 100) / 100; }
 
 function mockReport(date, rangeRaw) {
   // 无快照时的真实空态：不编造 KPI / 热度 / 日结；仅保留保本口径（be_day 取自静态价盘，真算法）
@@ -191,6 +198,58 @@ function deriveReport(snap, date, rangeRaw) {
   const dishes = Array.isArray(data.dishes) ? data.dishes.length : 0;
   const ings = Array.isArray(data.ings) ? data.ings : [];
   const members = Array.isArray(data.members) ? data.members.length : 0;
+
+  // FP-DASH-05 销售毛利率（含成本副标）：区间营收 − 区间食材成本，与「营收」同区间口径。
+  // 复用导出层 dishCostMap + dishResolver + costOfDish，销售菜名经 dishAlias 解析到菜品成本（单一公式源）。
+  const costMap = dishCostMap(snap);
+  const resolveDish = dishResolver(data);
+  function costOfSales(list) {
+    let c = 0;
+    for (const s of list) {
+      const lines = Array.isArray(s.lines) && s.lines.length ? s.lines : null;
+      if (lines) {
+        for (const l of lines) {
+          const ref = l && (l.dish != null ? l.dish : (l.sku != null ? l.sku : l.name));
+          const cc = costOfDish(costMap, resolveDish(ref));
+          if (cc != null) c += cc * num(l.qty, 1);
+        }
+      } else {
+        const cc = costOfDish(costMap, resolveDish(s.dish));
+        if (cc != null) c += cc * num(s.qty, 1);
+      }
+    }
+    return c;
+  }
+  const costInRange = costOfSales(rangeRecs);
+  const grossMargin = revenue > 0 ? (revenue - costInRange) / revenue : null;
+
+  // FP-DASH-15 菜品毛利排行（近30天 Top12：份数/营收/毛利/毛利率），复用 near30Agg + dishCostMap
+  const agg30 = near30Agg(data);
+  const topDishesRaw = [];
+  for (const d of arr(data.dishes)) {
+    if (!d) continue;
+    const id = d.id != null ? String(d.id) : null;
+    const a = (id && agg30[id]) || (d.name && agg30[d.name]) || { qty: 0, rev: 0 };
+    if (!a.qty && !a.rev) continue;
+    const rec = (id && costMap.byId[id]) || (d.name && costMap.byName[d.name]) || { cost: num(d.est, 0) };
+    const qty = num(a.qty, 0);
+    const rev = num(a.rev, 0);
+    const cost = num(rec.cost, 0) * qty;
+    const gp = rev - cost;
+    const gm = rev > 0 ? gp / rev : null;
+    topDishesRaw.push({
+      id,
+      name: d.name,
+      cat: d.cat || '',
+      qty,
+      rev: r2(rev),
+      cost: r2(cost),
+      gp: r2(gp),
+      gm: gm != null ? r2(gm) : null,
+    });
+  }
+  topDishesRaw.sort((x, y) => y.gp - x.gp);
+  const top_dishes = topDishesRaw.slice(0, 12).map((o, i) => ({ rank: i + 1, ...o }));
 
   // heat_mini：真实分时聚合（recs 为空时自然为空数组）
   const byHour = {};
@@ -419,6 +478,13 @@ function deriveReport(snap, date, rangeRaw) {
       { label: '营收', value: '¥' + revenue.toFixed(2), delta: null },
       { label: '订单数', value: String(orders), delta: null },
       { label: '客单价', value: '¥' + avg.toFixed(2), delta: null },
+      // FP-DASH-05 销售毛利率（真实值，清掉前端 MOCK；含成本副标）
+      {
+        label: '销售毛利率',
+        value: grossMargin != null ? (grossMargin * 100).toFixed(1) + '%' : '-',
+        sub: grossMargin != null ? '食材成本 ¥' + costInRange.toFixed(0) + '（区间）' : '区间无销售',
+        delta: null,
+      },
       { label: '菜品SKU', value: String(dishes), delta: null },
       { label: '原料SKU', value: String(ings.length), delta: null },
       { label: '会员数', value: String(members), delta: null },
@@ -434,6 +500,8 @@ function deriveReport(snap, date, rangeRaw) {
     alerts,
     // FP-DASH-11 低库存预警明细（旧版 #lowStockBox，HTML:1280-1285；前端按 12 条截断）
     low_stock: { total: lowStock.length, items: lowStock },
+    // FP-DASH-15 菜品毛利排行（近30天 Top12：份数/营收/毛利/毛利率）
+    top_dishes,
     breakeven,
     day_close: {
       sold: { label: '售出', count: dayOrders, amount: Math.round(dayRevenue * 100) / 100, route: 'm/pos' },

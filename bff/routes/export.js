@@ -169,7 +169,9 @@ function dishResolver(data) {
   };
 }
 
-/** 近 30 天聚合：dishId → {qty, rev}（销售行 date >= today-29） */
+/** 近 30 天聚合：dishId → {qty, rev}（销售行 date >= today-29）
+ *  金额口径：行级 amount 优先；真实数据金额在记录级（lines 无 amount）时回落记录级 amount，
+ *  否则 rev 会恒为 0（见真实 snapshot.json：426 条销售记录行内均无 amount，amount 在记录级）。 */
 function near30Agg(data) {
   const from = daysAgoStr(29);
   const map = {};
@@ -177,12 +179,15 @@ function near30Agg(data) {
   for (const s of arr(data.sales)) {
     const day = String((s && (s.date || s.ts || s.time)) || '').slice(0, 10);
     if (!day || day < from) continue;
+    const hasLines = Array.isArray(s.lines) && s.lines.length;
+    const recAmt = num(s.amount, 0);
     for (const l of saleLines(s)) {
       const id = resolve(l.ref);
       if (id == null) continue;
       if (!map[id]) map[id] = { qty: 0, rev: 0 };
       map[id].qty += num(l.qty, 0);
-      map[id].rev += (l.amount != null ? l.amount : 0);
+      const la = l.amount != null ? num(l.amount) : (hasLines ? recAmt : 0);
+      map[id].rev += la;
     }
   }
   return map;
@@ -390,4 +395,6 @@ module.exports = {
   near30Agg,
   dishSalesAgg,
   saleLines,
+  dishResolver,
+  costOfDish,
 };
