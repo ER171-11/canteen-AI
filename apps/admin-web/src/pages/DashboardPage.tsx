@@ -326,7 +326,16 @@ export default function DashboardPage() {
             <Card>
               <Statistic title={kpi.label} value={kpi.value} suffix={kpi.unit} />
               {kpi.sub && (
-                <Typography.Text style={{ fontSize: 12, color: COLORS.gray }}>
+                <Typography.Text
+                  style={{
+                    fontSize: 12,
+                    // FP-DASH-04：未收欠款 > 0 时副标标红（纯展示，不改口径）
+                    color:
+                      /未收欠款/.test(kpi.label ?? '') && (parseNum(kpi.value) ?? 0) > 0
+                        ? COLORS.red
+                        : COLORS.gray,
+                  }}
+                >
                   {kpi.sub}
                 </Typography.Text>
               )}

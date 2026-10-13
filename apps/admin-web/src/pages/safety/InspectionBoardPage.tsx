@@ -19,6 +19,7 @@ import dayjs, { Dayjs } from 'dayjs'
 import { fetchInspectionBoard } from '../../api'
 import type { InspectionBoardResp, InspectionNode } from '../../api/types'
 import { COLORS } from '../../theme'
+import { allValueOf, fromAll, withAll } from '../../utils/filterAll'
 
 export default function InspectionBoardPage() {
   const [date, setDate] = useState<Dayjs>(dayjs())
@@ -54,13 +55,17 @@ export default function InspectionBoardPage() {
         style={{ marginBottom: 16 }}
         extra={
           <Space>
+            {/* 首项固定「全部板块」：不筛选=看全部板块，且随时一键退回全部 */}
             <Select
               allowClear
               placeholder="全部板块"
               style={{ width: 160 }}
-              value={board}
-              onChange={(v) => setBoard(v)}
-              options={boards.map((b) => ({ value: b.board, label: b.board }))}
+              value={allValueOf(board)}
+              onChange={(v) => setBoard(fromAll<string>(v))}
+              options={withAll(
+                boards.map((b) => ({ value: b.board, label: b.board })),
+                '全部板块',
+              )}
             />
             <DatePicker
               value={date}
@@ -123,8 +128,8 @@ export default function InspectionBoardPage() {
               <Col xs={12} md={8} xl={6}>
                 <Card size="small">
                   <Statistic
-                    title={`卫生间每 ${data.every30.window_min} 分钟`}
-                    value={`${data.every30.rounds_done}/${data.every30.rounds_total}`}
+                    title="卫生间每 30 分钟"
+                    value={`${data.every30.rounds_recorded.length}/${data.every30.rounds_per_day}`}
                     suffix="轮"
                   />
                   {data.every30.rounds_missing.length > 0 && (

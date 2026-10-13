@@ -511,6 +511,18 @@ class BffClient(
             if (!nodeId.isNullOrBlank()) parameter("node_id", nodeId)
         }.body()
 
+    /* ---------- 食安拍照上报（只读进度；写走 ConfirmGateway → /api/actions） ---------- */
+
+    /**
+     * GET /api/safety/progress — 今日食安拍照核验进度（点位 + 当日最新记录）。
+     * 只读端点：不写库、不入队、不改快照；无快照时仍回内置种子点位（hint=no_snapshot）。
+     */
+    suspend fun safetyProgress(date: String? = null): SafetyProgressDto =
+        http.get("$baseUrl/api/safety/progress") {
+            auth()
+            if (!date.isNullOrBlank()) parameter("date", date)
+        }.body()
+
     /* ---------- SOP 视频教材（C 块后台，App 只读播放） ---------- */
 
     /** GET /api/kitchen/sop-videos — 菜品视频教材列表（未部署时 items 为空） */

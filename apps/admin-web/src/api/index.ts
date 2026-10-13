@@ -52,6 +52,7 @@ import type {
   LoginRequest,
   LoginResponse,
   PriceResp,
+  SalesListResp,
   QcRecord,
   QcMediaStatus,
   SopVideo,
@@ -70,6 +71,7 @@ import type {
   SafetyPointSignResp,
   SafetyPointsResp,
   SafetyPointUpsertBody,
+  SafetyProgress,
   StaffModuleResp,
   StaffScheduleResp,
   StaffClockResp,
@@ -186,9 +188,56 @@ export async function fetchReportDaily(date?: string, range?: string): Promise<R
   return data
 }
 
+/**
+ * FP-SALE-07 GET /api/admin/sales — 销售单列表（只读）。
+ * 应收/实收/欠款口径由 BFF `lib/sales_model.js` 统一给出（ADR-008），前端只渲染。
+ */
+export async function fetchSalesList(): Promise<SalesListResp> {
+  const { data } = await client.get<SalesListResp>('/admin/sales')
+  return data
+}
+
 /** GET /api/snapshot/latest */
 export async function fetchSnapshot(): Promise<Snapshot> {
   const { data } = await client.get<Snapshot>('/snapshot/latest')
+  return data
+}
+
+/** FP-SET-07 服务端快照备份项（GET /api/snapshot/backups） */
+export interface SnapshotBackupItem {
+  id: string
+  rev: number | null
+  size: number
+  generated_at: string | null
+  created_at: string
+  operator: string | null
+  note: string
+}
+
+/**
+ * GET /api/snapshot/backups — 快照备份列表（只读，按时间倒序）。
+ * 形态依据 ADR-009 §2.1：服务端 snapshot.json 为唯一数据源，备份存 data/snapshots/。
+ */
+export async function fetchSnapshotBackups(): Promise<{
+  ok: boolean
+  items: SnapshotBackupItem[]
+  keep: number
+}> {
+  const { data } = await client.get('/snapshot/backups')
+  return data
+}
+
+/**
+ * POST /api/snapshot/backup — 手动打快照（仅老板/店长）。
+ * 只写服务端备份文件，**不入审批队列、不写业务库**；回滚（FP-SET-10）另行走队列。
+ */
+export async function createSnapshotBackup(note?: string): Promise<{
+  ok: boolean
+  item: SnapshotBackupItem
+  keep: number
+  dropped: number
+}> {
+  const { data } = await client.post('/snapshot/backup', { note: note || '' })
   return data
 }
 
@@ -824,6 +873,17 @@ export async function presignSafetyPointDemo(body: {
 /** POST /api/safety/points/sign — 批量换取读图 URL（bucket 私有时） */
 export async function signSafetyPointImages(keys: string[]): Promise<SafetyPointSignResp> {
   const { data } = await client.post<SafetyPointSignResp>('/safety/points/sign', { keys })
+  return data
+}
+
+/* ---------------- 食安拍照上报（只读进度；写操作走 /api/actions） ---------------- */
+
+/** GET /api/safety/progress?date= — 今日食安拍照核验进度（只读） */
+export async function fetchSafetyProgress(date?: string): Promise<SafetyProgress> {
+  const { data } = await client.get<SafetyProgress>(
+    '/safety/progress',
+    { params: date ? { date } : undefined },
+  )
   return data
 }
 

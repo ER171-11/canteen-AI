@@ -79,7 +79,21 @@ const fmt = (n?: number | null, d = 2) =>
 const pct = (ratio?: number | null, d = 1) =>
   ratio == null || !Number.isFinite(Number(ratio))
     ? '—'
-    : `${(Number(ratio) * 100).toFixed(d)}%`
+    : `${Number(ratio).toFixed(d)}%`
+
+/** 把后端回显的比例值转成表单「百分比数值」（如 0.15 → 15） */
+function toFormValues(params?: BaobenParams) {
+  if (!params) return {}
+  const out: Record<string, number | null> = {}
+  for (const g of CALC_PARAM_GROUPS) {
+    for (const f of g.fields) {
+      const v = params[f.key]
+      if (v == null) continue
+      out[f.key] = f.pct ? Number(v) * 100 : Number(v)
+    }
+  }
+  return out
+}
 
 function EchoRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
@@ -117,8 +131,9 @@ export default function CalcParamsCard({
   const watched = Form.useWatch([], form) as Record<string, number | null> | undefined
 
   // 生效店参（权威来源为后端回显，不维护第二份本地默认值）
+  // pct 字段按百分比数值回填，与 suffix「%」和提交时 ÷100 保持一致
   useEffect(() => {
-    if (effParams) form.setFieldsValue(effParams as Record<string, number | null>)
+    if (effParams) form.setFieldsValue(toFormValues(effParams))
   }, [effParams, form])
 
   // 未重算提示：旧版是「输入即重算」，新版按快照回源，故必须显式提醒「改了还没算」

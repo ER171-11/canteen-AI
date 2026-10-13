@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { rk } from '../../utils/rowKey'
+import { allValueOf, fromAll, withAll } from '../../utils/filterAll'
 import {
   Button,
   Card,
@@ -368,27 +369,38 @@ export default function PurchasePage() {
         title="采购单（CG）"
         extra={
           <Space>
-            <span>共 {filtered.length} 张</span>
+            {/* 有筛选时给出「筛选后 / 全部」两个数：避免把筛选态误读成「列表少了几条」 */}
+            <span>
+              共 {filtered.length}
+              {supplier || statusFilter ? ` / ${docs.length}` : ''} 张
+            </span>
+            {/* 首项固定「全部…」：不筛选=看全部单据，且随时一键退回全部（避免选过之后找不到回全量的入口） */}
             <Select
               allowClear
               placeholder="供应商"
               style={{ width: 160 }}
-              options={suppliers.map((s) => ({ value: s, label: s }))}
-              value={supplier}
-              onChange={setSupplier}
+              options={withAll(
+                suppliers.map((s) => ({ value: s, label: s })),
+                '全部供应商',
+              )}
+              value={allValueOf(supplier)}
+              onChange={(v) => setSupplier(fromAll<string>(v))}
             />
             {/* FP-PO-14 状态筛选（进行中/已结案/已作废） */}
             <Select
               allowClear
               placeholder="状态"
               style={{ width: 120 }}
-              options={[
-                { value: 'open', label: '进行中' },
-                { value: 'closed', label: '已结案' },
-                { value: 'void', label: '已作废' },
-              ]}
-              value={statusFilter}
-              onChange={setStatusFilter}
+              options={withAll(
+                [
+                  { value: 'open', label: '进行中' },
+                  { value: 'closed', label: '已结案' },
+                  { value: 'void', label: '已作废' },
+                ],
+                '全部状态',
+              )}
+              value={allValueOf(statusFilter)}
+              onChange={(v) => setStatusFilter(fromAll<string>(v))}
             />
           </Space>
         }

@@ -9,10 +9,20 @@
  *   份 = PORTION_PIECES(15) 只；批 = params.一批出成_个（缺省 67）
  *
  * buildCostCard(recipe, data) →
- *   { bom_lines: [{name, qty_text, qty_g, ing, unit_price, line_cost, matched}],
+ *   { bom_lines: [{name, part, qty_text, qty_g, gross_g, unit, yld, waste_pct,
+ *                  price_per_unit, ing, ing_name, unit_price, line_cost, matched}],
  *     batch_cost, batch_pieces, unit_cost, portion_pieces, portion_cost,
  *     price, gross_margin, missing_ings[], baoben{} }
  * unit_price 为 元/克；line_cost 为该行「每批」成本（元）。
+ *
+ * 标准配方卡口径（对齐《金丰菜品标准卡》表格）：
+ *   part        配料类别（面主料 / 主料 / 辅料 / 调料）
+ *   qty_g       配料净重（每批克重，取自 docx/DB 原文，不折算）
+ *   gross_g     配料毛重 = 净重 ÷ 出成率
+ *   waste_pct   损耗率 % = (1 − 出成率) × 100
+ *   price_per_unit 原料价格（元/库存单位；unit 为库存单位）
+ *   line_cost   共计（该行每批成本，元）
+ * 面皮组取 params.面主料（含面粉/色源/食盐），缺省回落到 face_main。
  */
 
 // 与 seed_recipe_links.py 对齐：规格不明的按市售常见规格假定
@@ -119,14 +129,22 @@ function buildCostCard(recipe, data) {
     return { real, ing: byName[String(real).trim()] || null };
   };
 
+  const params = (recipe && recipe.params && typeof recipe.params === 'object') ? recipe.params : {};
+
   const bomLines = [];
   const missing = [];
   let batchCost = 0;
+  // 面皮组优先用 params.面主料（含面粉/色源/食盐完整 BOM），缺省回落到 face_main
+  const faceRaw = (Array.isArray(params['面主料']) && params['面主料'].length)
+    ? params['面主料']
+    : (recipe ? recipe.face_main : null);
   const cols = [
-    ['face_main', '面皮'], ['main', '主料'], ['aux', '辅料'], ['seasoning', '调味']
+    [faceRaw, '面主料'],
+    [recipe ? recipe.main : null, '主料'],
+    [recipe ? recipe.aux : null, '辅料'],
+    [recipe ? recipe.seasoning : null, '调料']
   ];
-  for (const [col, part] of cols) {
-    const v = recipe ? recipe[col] : null;
+  for (const [v, part] of cols) {
     const lines = Array.isArray(v) ? v : (v ? [v] : []);
     for (const line of lines) {
       for (const e of parseBomLine(line)) {
@@ -147,7 +165,12 @@ function buildCostCard(recipe, data) {
           name: e.name,
           part,
           qty_text: e.raw,
-          qty_g: r4(e.qty_g),
+          qty_g: r4(e.qty_g),                       // 配料净重（每批 g）
+          gross_g: r4(e.qty_g / yld),               // 配料毛重 = 净重 ÷ 出成率
+          unit: ing && ing.unit ? String(ing.unit) : 'g',
+          yld,                                      // 出成率
+          waste_pct: r2((1 - yld) * 100),           // 损耗率 %
+          price_per_unit: perUnit > 0 ? perUnit : null, // 原料价格（元/库存单位）
           ing: ing ? String(ing.id) : null,
           ing_name: ing ? String(ing.name) : (alias[e.name] || null),
           unit_price: unitPrice != null ? r4(unitPrice * 1000) / 1000 : null, // 元/克，3 位
@@ -157,8 +180,6 @@ function buildCostCard(recipe, data) {
       }
     }
   }
-
-  const params = (recipe && recipe.params && typeof recipe.params === 'object') ? recipe.params : {};
   let batchPieces = parseInt(params['一批出成_个'], 10);
   if (!(batchPieces > 0)) batchPieces = 67;
   const unitCost = r4(batchCost / batchPieces);           // 每只

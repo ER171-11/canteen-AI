@@ -331,7 +331,8 @@ async function handle(req, res, ctx, pathname) {
       ctx.sendJSON(res, 409, { ok: false, error: 'no snapshot', id });
       return true;
     }
-    const out = executeAction(snap, a);
+    /* await 兼容异步算法（如 safety.ai_judge 需调用视觉模型）；同步算法返回值直接可用 */
+    const out = await executeAction(snap, a);
     if (!out.handled) {
       // 未登记的算法：交回店内消费者（need-manual），不静默丢弃
       ctx.sendJSON(res, 422, { ok: false, error: out.error, id, status: a.status, route: 'store-consumer' });
@@ -419,6 +420,10 @@ async function handle(req, res, ctx, pathname) {
       }
       const snap = loadSnapshot();
       const curRev = snap ? snap.rev : null;
+      // 准入提示锁：比对「云端快照 rev」（pusher 透传的店内 rev 滞后副本）。
+      // 它只给出「你确认时基于的云端视图是否过期」的早期反馈，不是数据安全边界；
+      // 真正的落库乐观锁在消费器 /api/sync 的 baseRev 三方合并（见 store-node/consumer.js）。
+      // 两把锁不能合一：BFF 不直连店内 DB（红线②③⑤），confirm 只能看云端快照。
       if (String(body.rev) !== String(curRev)) {
         ctx.sendJSON(res, 409, {
           ok: false, error: 'rev mismatch', id,

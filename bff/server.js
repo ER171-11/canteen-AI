@@ -88,7 +88,9 @@ const ROUTES = [
   require('./routes/qc_media'),
   require('./routes/sop_media'),
   // 食安点位主数据（巡检 / 消毒统一事实来源）
-  require('./routes/safety_points')
+  require('./routes/safety_points'),
+  // 食安拍照上报：只读进度（写操作走 /api/actions）
+  require('./routes/safety')
 ];
 
 // 默认绑 0.0.0.0：允许同一局域网设备访问（App 安装包下载 / 管理后台联调）。

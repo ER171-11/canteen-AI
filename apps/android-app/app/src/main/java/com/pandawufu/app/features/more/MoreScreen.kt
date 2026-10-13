@@ -12,11 +12,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +43,7 @@ import com.pandawufu.app.AppModule
 import com.pandawufu.app.ui.BossIa
 import com.pandawufu.app.ui.designsystem.BrandBar
 import com.pandawufu.app.ui.designsystem.CardHeader
+import com.pandawufu.app.ui.designsystem.FiveRed
 import com.pandawufu.app.ui.designsystem.Ink
 import com.pandawufu.app.ui.designsystem.Line
 import com.pandawufu.app.ui.designsystem.ModuleCell
@@ -111,12 +120,16 @@ private fun ModuleGrid(
 }
 
 @Composable
-fun MoreScreen(onOpenModule: (String) -> Unit) {
+fun MoreScreen(
+    onOpenModule: (String) -> Unit,
+    onLogout: () -> Unit = { AppModule.logout() }
+) {
     val context = LocalContext.current
     val prefs = AppModule.modulePrefs
     var query by remember { mutableStateOf("") }
     var favTick by remember { mutableStateOf(0) }
     var recentTick by remember { mutableStateOf(0) }
+    var confirmLogout by remember { mutableStateOf(false) }
 
     val visible = remember(favTick, recentTick) {
         allModules.filter { AppModule.canOpenRoute(it.route) }
@@ -171,7 +184,24 @@ fun MoreScreen(onOpenModule: (String) -> Unit) {
     ) {
         BrandBar(
             title = "我的",
-            subtitle = listOfNotNull(storeLine, BossIa.Tab.MINE_JOB).joinToString(" · ")
+            subtitle = listOfNotNull(storeLine, BossIa.Tab.MINE_JOB).joinToString(" · "),
+            trailing = {
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .clickable { confirmLogout = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Outlined.Logout,
+                        contentDescription = "退出登录",
+                        tint = Sub,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         )
 
         Text(
@@ -292,5 +322,43 @@ fun MoreScreen(onOpenModule: (String) -> Unit) {
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 4.dp)
         )
+
+        // 退出登录入口：测试阶段切换账号 / 门店（结算端）的便捷途径
+        PandaCard {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(FiveRed.copy(alpha = 0.06f), RoundedCornerShape(14.dp))
+                    .clickable { confirmLogout = true }
+                    .padding(vertical = 14.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Outlined.Logout,
+                    contentDescription = null,
+                    tint = FiveRed,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("退出登录 · 切换账号/门店", color = FiveRed, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        if (confirmLogout) {
+            AlertDialog(
+                onDismissRequest = { confirmLogout = false },
+                title = { Text("退出登录？") },
+                text = { Text("退出后需重新登录才能切换账号或门店，确定退出？") },
+                confirmButton = {
+                    TextButton(onClick = { confirmLogout = false; onLogout() }) {
+                        Text("退出", color = FiveRed, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmLogout = false }) { Text("取消", color = Ink) }
+                }
+            )
+        }
     }
 }

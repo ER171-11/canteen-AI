@@ -89,6 +89,27 @@ fun KitchenWorkbenchScreen(onOpen: (String) -> Unit = {}) {
             )
         }
 
+        /* 食安拍照上报：厨房侧直达入口（此前仅存在于「我的」二级目录） */
+        if (AppModule.can("foodsafe")) {
+            ModuleCard("食安拍照核验") {
+                Text(
+                    "点位拍照上报 → AI 初判 → 店长复核；上报后无需等待 AI 结果。",
+                    color = Sub,
+                    fontSize = 12.sp
+                )
+                OutlinedButton(
+                    onClick = { onOpen(Routes.M_SAFETY_CHECK) },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                ) {
+                    Text(
+                        if (AppModule.can("foodsafe", write = true)) "去拍照上报" else "查看核验进度",
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+
         if (d.workorders.isEmpty()) {
             ModuleCard("暂无工单") {
                 Text("按本餐缺口建单后，此处显示每单的制作标准（醒发/剂子/成品/点凉水）与品控进度。", color = Sub, fontSize = 12.sp)

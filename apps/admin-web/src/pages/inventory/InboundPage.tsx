@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { rk } from '../../utils/rowKey'
+import { allValueOf, fromAll, withAll } from '../../utils/filterAll'
 import {
   Button,
   Card,
@@ -564,20 +565,28 @@ export default function InboundPage() {
         title="进货入库（JH 进货单）"
         extra={
           <Space wrap>
-            <span>共 {filtered.length} 张</span>
+            {/* 有筛选时给出「筛选后 / 全部」两个数：避免把筛选态误读成「列表少了几条」 */}
+            <span>
+              共 {filtered.length}
+              {supplier ? ` / ${docs.length}` : ''} 张
+            </span>
             <DatePicker
               value={acceptDate}
               allowClear={false}
               onChange={(d) => d && setAcceptDate(d)}
               title="验收记录日期"
             />
+            {/* 首项固定「全部供应商」：不筛选=看全部单据，且随时一键退回全部 */}
             <Select
               allowClear
               placeholder="供应商"
               style={{ width: 160 }}
-              options={suppliers.map((s) => ({ value: s, label: s }))}
-              value={supplier}
-              onChange={setSupplier}
+              options={withAll(
+                suppliers.map((s) => ({ value: s, label: s })),
+                '全部供应商',
+              )}
+              value={allValueOf(supplier)}
+              onChange={(v) => setSupplier(fromAll<string>(v))}
             />
             {/* FP-RECV-05 批量生成结算单（只读输出层） */}
             <Button disabled={!filtered.length} onClick={() => setSettleBatchOpen(true)}>

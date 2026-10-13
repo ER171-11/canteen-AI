@@ -138,7 +138,38 @@ function run(action, ext) {
   ok('safety_point.remove 逻辑删除 / 未知 id 驳回');
 }
 
-/* ---------- 8. 对象键：演示图 ---------- */
+/* ---------- 8. remove 兼容店内 SQLite store（update 返回 rowcount） ---------- */
+{
+  const rows = [{ id: 'U1', name: 'A', zone: '后厨', kind: 'inspection', enabled: 1, sort: 0 }];
+  const sqliteLikeStore = {
+    ext: { fs_points: rows },
+    query(t) { return this.ext[t] || []; },
+    upsert() { return { rowid: 1, matched: true }; },
+    update(table, patch, where) {
+      const list = this.ext[table] || [];
+      let n = 0;
+      list.forEach((r) => {
+        if (Object.keys(where).every((k) => String(r[k]) === String(where[k]))) {
+          Object.assign(r, patch); n += 1;
+        }
+      });
+      return { rowcount: n };
+    }
+  };
+  const out = executeAction(snap({}), {
+    type: 'safety_point.remove', payload: { id: 'U1', kind: 'inspection' }
+  }, { store: sqliteLikeStore });
+  assert.strictEqual(out.ok, true, out.error);
+  assert.strictEqual(rows[0].enabled, 0, '店内 store 下 remove 应生效');
+
+  const miss = executeAction(snap({}), {
+    type: 'safety_point.remove', payload: { id: 'NOPE', kind: 'inspection' }
+  }, { store: sqliteLikeStore });
+  assert.strictEqual(miss.ok, false, '店内 store 下未知 id 应驳回');
+  ok('safety_point.remove 兼容店内 SQLite store（rowcount）');
+}
+
+/* ---------- 9. 对象键：演示图 ---------- */
 {
   assert.strictEqual(objstore.configured(), false);
   const key = objstore.buildPointDemoKey({ store_id: 'ST001', kind: 'inspection', id: 'K01', date: '2026-10-10' });

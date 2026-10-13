@@ -1,5 +1,7 @@
 package com.pandawufu.app.features.auth
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -86,6 +88,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, modifier: Modifier = Modifier) {
     val online by AppModule.networkMonitor.online.collectAsState()
     val offlineReady = remember { AppModule.canEnterOffline() }
     val sessionSummary = remember { AppModule.localSessionSummary() }
+    val webUrl = remember { deriveWebLoginUrl() }
 
     fun runLogin(acc: String, pw: String) {
         if (loading) return
@@ -451,6 +454,25 @@ fun LoginScreen(onLoggedIn: () -> Unit, modifier: Modifier = Modifier) {
         }
 
         Spacer(Modifier.height(8.dp))
+        if (!webUrl.isNullOrBlank()) {
+            TextButton(
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)))
+                    }.onFailure { e ->
+                        error = "无法打开网页版：${e.message}"
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "网页版登录（测试）· 浏览器打开",
+                    color = AiPurple,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp
+                )
+            }
+        }
         Text(
             "写操作一律经确认台 · 不直连店内库",
             fontSize = 10.sp,
@@ -482,6 +504,19 @@ private val QUICK_LOGIN_ACCOUNTS = listOf(
     "只读" to "newbie"
 )
 private const val QUICK_LOGIN_PASSWORD = "wufu123"
+
+/** 由 BFF 地址推导网页版（admin-web）登录地址：同 host，端口替换为 5173 */
+private fun deriveWebLoginUrl(): String? {
+    return try {
+        val base = BuildConfig.BFF_BASE_URL
+        val u = java.net.URI(base)
+        val host = u.host ?: return null
+        val scheme = if (u.scheme.equals("https", ignoreCase = true)) "https" else "http"
+        "$scheme://$host:5173"
+    } catch (e: Exception) {
+        null
+    }
+}
 
 @Composable
 private fun QuickAccountChip(

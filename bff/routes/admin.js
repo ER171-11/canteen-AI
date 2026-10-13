@@ -14,7 +14,7 @@ const auth = require('../lib/auth');
 const audit = require('../lib/audit');
 const { loadSnapshot } = require('./snapshot');
 const { enqueue } = require('./actions');
-const { dishSalesAgg } = require('./export');
+const { dishSalesAgg, salesList } = require('./export');
 const { priceReport, pricePlan } = require('../lib/price');
 
 const READONLY_KEYS = ['dishes', 'recipes', 'staff', 'members', 'tables', 'vendors'];
@@ -129,6 +129,15 @@ async function handle(req, res, ctx, pathname) {
       plan: pricePlan(snap),
       rev: snap ? snap.rev : null
     });
+    return true;
+  }
+
+  /* FP-SALE-07 销售单列表（只读）。
+   * 口径：应收/实收/欠款三数走 lib/sales_model（ADR-008 唯一口径源），
+   * 与 `routes/report.js` 的店级聚合同源；本端点只做行级组装，不写库、不入队（红线①③）。 */
+  if (req.method === 'GET' && pathname === '/api/admin/sales') {
+    const snap = loadSnapshot();
+    ctx.sendJSON(res, 200, salesList(snap));
     return true;
   }
 

@@ -5,7 +5,7 @@
  * 覆盖 POST /api/inventory/recv/import/preview（FP-RECV-02 预览阶段，0 写入）：
  *   · GET → 405（预览只接受 POST）
  *   · CSV base64 → 200 + groups/totalAmount；能按「供应商+日期」拆单
- *   · 未匹配原料 → 400 + 明确文案（不静默跳过、也不代建原料）
+ *   · 未匹配原料 → 200 + 计入明细并标 isNew（自动建档为待完善草稿，不阻断；2026-10-12 撤销不代建偏离）
  *   · 旧版二进制 .xls → 400 + 「另存为 .xlsx 或 CSV」提示（明确不支持的格式必须可见，红线⑥）
  *   · 缺 body / 文件超限 → 400 / 413
  *   · **红线：预览零写** —— data 目录文件数与 snapshot.json 字节内容在预览前后完全一致
@@ -101,7 +101,7 @@ async function main() {
   ok('预览不生成单号/id（留给执行器）',
     res.body && res.body.groups[0].no === undefined && res.body.groups[0].id === undefined, res.body);
 
-  /* 3) 未匹配原料 → 400 + 明确文案（不静默代建） */
+  /* 3) 未匹配原料 → 200 + 计入 groups（自动建档，不阻断；回归旧版 createIngFromImport 语义） */
   res = {};
   await inventory.handle(
     {
@@ -113,8 +113,11 @@ async function main() {
     },
     res, mkctx(), P,
   );
-  ok('全部原料未匹配 → 400', res.code === 400, res.body);
-  ok('未匹配原料报错含「原料档案」提示', /原料档案/.test(res.body && res.body.error || ''), res.body);
+  ok('全部原料未匹配 → 仍 200（自动建档，不阻断）', res.code === 200, res.body);
+  ok('未匹配行计入 groups 且标 isNew',
+    res.body && res.body.groups[0].lines[0].isNew === true, res.body && res.body.groups);
+  ok('响应登记 newIngs（挪威三文鱼）',
+    res.body && res.body.newIngs && res.body.newIngs[0] && res.body.newIngs[0].name === '挪威三文鱼', res.body && res.body.newIngs);
 
   /* 4) 旧版二进制 .xls → 明确「不支持」，提示另存为 */
   res = {};

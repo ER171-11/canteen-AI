@@ -122,6 +122,8 @@ object Routes {
     const val M_RESTAURANT = "m/restaurant"
     /** 闭店巡检：50 节点拍照验证（C 块） */
     const val M_INSPECTION = "m/inspection"
+    /** 食安拍照核验：员工拍照上报（AI 初判异步，人工复核在后台） */
+    const val M_SAFETY_CHECK = "m/safety-check"
 
     /** 前厅子模块：底栏高亮「前厅」而非「我的」 */
     val frontChildRoutes = setOf(M_POS, M_BOOKING, M_TAKEOUT, M_VIP, M_REVIEW)
@@ -287,10 +289,13 @@ fun AppNav(modifier: Modifier = Modifier) {
                             KitchenScreen(onOpenModule = { navController.navigate(it) })
                         }
                         composable(Routes.MORE) {
-                            MoreScreen(onOpenModule = { route ->
-                                runCatching { AppModule.modulePrefs.touch(route) }
-                                navController.navigate(route)
-                            })
+                            MoreScreen(
+                                onOpenModule = { route ->
+                                    runCatching { AppModule.modulePrefs.touch(route) }
+                                    navController.navigate(route)
+                                },
+                                onLogout = { handleLogout() }
+                            )
                         }
                         composable(Routes.M_ANALYSIS) { AnalysisScreen() }
                         composable(Routes.M_STAFF) { StaffScreen() }
@@ -383,6 +388,9 @@ fun AppNav(modifier: Modifier = Modifier) {
                         }
                         composable(Routes.M_INSPECTION) {
                             com.pandawufu.app.features.inspection.InspectionScreen()
+                        }
+                        composable(Routes.M_SAFETY_CHECK) {
+                            com.pandawufu.app.features.safety.SafetyCheckScreen()
                         }
                     }
                 }

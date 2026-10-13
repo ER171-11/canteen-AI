@@ -535,6 +535,97 @@ async function testSafetyPointsRoute(ok) {
     q.some((a) => String(a.type).indexOf('safety_point.') === 0), { actId: actId });
 }
 
+/**
+ * 食安拍照上报只读进度端点（routes/safety.js）。
+ * 守护：空态回退内置种子点位、当日口径、**只读红线**（不写 snapshot.json、不接管非 GET、不入队）。
+ */
+async function testSafetyProgressRoute(ok) {
+  const safety = require('./safety');
+  const plan = require('../lib/safety_plan');
+  const snapFile = path.join(dir, 'snapshot.json');
+  const had = fs.existsSync(snapFile) ? fs.readFileSync(snapFile, 'utf8') : null;
+
+  /* 1) 无快照：仍回满内置种子点位（新环境初始化后进度页有点位列表） */
+  if (fs.existsSync(snapFile)) fs.unlinkSync(snapFile);
+  let res = {};
+  await safety.handle({ method: 'GET' }, res, mkMediaCtx('老板'), '/api/safety/progress');
+  ok('safety.progress 无快照空开 200 + hint=no_snapshot',
+    res.code === 200 && res.body.ok === true && res.body.hint === 'no_snapshot', res.body && res.body.hint);
+  ok('safety.progress 无快照回满内置种子点位',
+    res.body.points.length === plan.DEFAULT_POINTS.length
+    && res.body.total_points === plan.DEFAULT_POINTS.length, res.body.total_points);
+  ok('safety.progress 无快照标注 using_defaults 且计数为 0',
+    res.body.using_defaults === true && res.body.completed_points === 0
+    && res.body.pass_count === 0 && res.body.fail_count === 0
+    && res.body.review_count === 0 && res.body.error_count === 0, res.body);
+  ok('safety.progress 未上报点位 status=none',
+    res.body.points.every((p) => p.status === 'none' && p.effective_result === null && p.check_id === null));
+
+  /* 2) 打入快照：2 条当日记录（1 条 AI fail 待复核 / 1 条已复核改判 fail） */
+  const day = '2026-10-12';
+  fs.writeFileSync(snapFile, JSON.stringify({
+    rev: 42,
+    generated_at: day + 'T09:30:00.000Z',
+    size: 1,
+    data: {
+      safety: {
+        checks: [
+          { id: 'chk_a', point_id: 'SC-01', operator: '张三', photo_url: 'https://cdn.example.com/a.jpg',
+            ai_result: 'fail', ai_reason: '未离地存放', ai_confidence: 88.5, final_result: null,
+            review_reason: null, status: 'ai_done', created_at: day + 'T01:12:30.000Z' },
+          { id: 'chk_b', point_id: 'SC-02', operator: '李四', photo_url: 'https://cdn.example.com/b.jpg',
+            ai_result: 'pass', ai_reason: '密封良好', ai_confidence: 93.2, final_result: 'fail',
+            review_reason: '现场复查有反复解冻', status: 'reviewed', created_at: day + 'T01:20:05.000Z' },
+          { id: 'chk_prev', point_id: 'SC-01', ai_result: 'fail', final_result: null, created_at: '2026-10-11T23:00:00.000Z' }
+        ]
+      }
+    },
+    ext: {}
+  }), 'utf8');
+  const before = fs.readFileSync(snapFile, 'utf8');
+
+  res = {};
+  await safety.handle({ method: 'GET' }, res, mkMediaCtx('老板', 'date=' + day), '/api/safety/progress');
+  ok('safety.progress 读快照聚合（total/completed）',
+    res.code === 200 && res.body.total_points === plan.DEFAULT_POINTS.length
+    && res.body.completed_points === 2, res.body);
+  ok('safety.progress pass/fail/review/error 口径正确',
+    res.body.pass_count === 0 && res.body.fail_count === 2
+    && res.body.review_count === 1 && res.body.error_count === 0, res.body);
+  ok('safety.progress rev 透传（前端可判断数据新旧）', res.body.rev === 42, res.body.rev);
+  ok('safety.progress 点位透传 AI 初判与人工结论',
+    res.body.points.filter((p) => p.point_id === 'SC-01')[0].ai_result === 'fail'
+    && res.body.points.filter((p) => p.point_id === 'SC-02')[0].final_result === 'fail', res.body.points[0]);
+  ok('safety.progress 点位 status：AI fail 待复核 → review；已复核 → fail',
+    res.body.points.filter((p) => p.point_id === 'SC-01')[0].status === 'review'
+    && res.body.points.filter((p) => p.point_id === 'SC-02')[0].status === 'fail');
+  ok('safety.progress 非当日记录不计入今日',
+    res.body.points.filter((p) => p.point_id === 'SC-01')[0].check_id === 'chk_a');
+
+  /* 3) 只读红线：不写库、不入队、不改快照、无图片本体 */
+  ok('safety.progress 绝不修改快照文件（只读）', fs.readFileSync(snapFile, 'utf8') === before);
+  const store = require('../lib/store');
+  ok('safety.progress 不入队（actions 队列无新增动作）',
+    store.readJSON('actions_queue.json', []).every((a) => String(a.type).indexOf('safety.') !== 0));
+  ok('safety.progress 响应不含图片本体（无 base64/data:image）',
+    JSON.stringify(res.body).indexOf('base64') < 0 && JSON.stringify(res.body).indexOf('data:image') < 0);
+
+  /* 4) 只读语义：非 GET 不接管；非本路由不接管；未知子路径不吞 404 */
+  const p = {};
+  ok('safety 非 GET 不接管（写操作一律走 /api/actions）',
+    (await safety.handle({ method: 'POST' }, p, mkMediaCtx('老板'), '/api/safety/progress')) === false);
+  const o1 = {};
+  ok('safety 非本路由不接管',
+    (await safety.handle({ method: 'GET' }, o1, mkMediaCtx('老板'), '/api/other')) === false);
+  const o2 = {};
+  ok('safety 不吞同前缀的写路由（/api/safety/points 交给 safety_points.js）',
+    (await safety.handle({ method: 'GET' }, o2, mkMediaCtx('老板'), '/api/safety/points')) === false);
+
+  /* 还原快照，避免污染后续用例 */
+  if (had === null) { if (fs.existsSync(snapFile)) fs.unlinkSync(snapFile); }
+  else fs.writeFileSync(snapFile, had, 'utf8');
+}
+
 async function main() {
   let fail = 0;
   const ok = (name, cond, extra) => {
@@ -605,6 +696,7 @@ async function main() {
   await testActionsDedup(ok);
   await testSnapshotRecipeMark(ok);
   await testSafetyPointsRoute(ok);
+  await testSafetyProgressRoute(ok);
 
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(fail ? '== routes 测试失败 ' + fail + ' 项 ==' : '== routes 测试全部通过 ==');

@@ -77,6 +77,12 @@ function mockReport(date, rangeRaw) {
   };
 }
 
+/* -------- FP-DASH-02/03/04/08 销售应收模型（ADR-008 口径唯一出口） --------
+ * 取值与派生一律走 lib/sales_model.js（唯一口径源），本文件只做店级聚合；
+ * 防御性取值：真实快照 sales[] 缺 discount/receivable/payments 时回退
+ * 「应收=amount、折扣=0、全额即收」，不造 MOCK、不在快照里手写假数据。 */
+const saleModel = require('../lib/sales_model');
+
 /* ---------------- 真实数据推导 ---------------- */
 
 // 库存告急：现存 < 安全线（字段容错：qty/stock/amount vs safe/safety/safe_stock）
@@ -195,6 +201,18 @@ function deriveReport(snap, date, rangeRaw) {
   const revenue = rangeRecs.reduce((s, r) => s + recordAmount(r), 0);
   const orders = rangeRecs.length;
   const avg = orders ? revenue / orders : 0;
+  /* FP-DASH-02/03/04/08（ADR-008）：应收按单日期、实收按收款日期、欠款累计、折扣按单日期。
+   * 无周期（agent/inbox 等程序化调用）时退化为当日口径，与既有 KPI 口径一致；
+   * 作废单（sale.void 留痕）不计入应收/实收/欠款（口径见 lib/sales_model.js）。 */
+  const saleAgg = saleModel.summarize(sales, {
+    from: range ? rangeFrom : date,
+    to: rangeTo,
+  });
+  const receivableInRange = saleAgg.receivable;
+  const receivedInRange = saleAgg.received;
+  const discountInRange = saleAgg.discount;
+  const debtCumulative = saleAgg.debt;
+
   const dishes = Array.isArray(data.dishes) ? data.dishes.length : 0;
   const ings = Array.isArray(data.ings) ? data.ings : [];
   const members = Array.isArray(data.members) ? data.members.length : 0;
@@ -484,6 +502,22 @@ function deriveReport(snap, date, rangeRaw) {
         value: grossMargin != null ? (grossMargin * 100).toFixed(1) + '%' : '-',
         sub: grossMargin != null ? '食材成本 ¥' + costInRange.toFixed(0) + '（区间）' : '区间无销售',
         delta: null,
+      },
+      /* FP-DASH-02 应收合计（按单日期）/ FP-DASH-03 实收合计（按收款日期）
+       * FP-DASH-04 未收欠款（累计，不设区间上界）/ FP-DASH-08 折扣抹零（本期，按单日期） */
+      { label: '应收合计', value: '¥' + receivableInRange.toFixed(2), sub: '按单日期（本期）', delta: null },
+      { label: '实收合计', value: '¥' + receivedInRange.toFixed(2), sub: '按收款日期（本期）', delta: null },
+      {
+        label: '未收欠款',
+        value: '¥' + debtCumulative.toFixed(2),
+        sub: debtCumulative > 0 ? '累计未收' : '已全部收讫',
+        delta: null
+      },
+      {
+        label: '折扣/抹零',
+        value: '¥' + discountInRange.toFixed(2),
+        sub: '本期（按单）',
+        delta: null
       },
       { label: '菜品SKU', value: String(dishes), delta: null },
       { label: '原料SKU', value: String(ings.length), delta: null },

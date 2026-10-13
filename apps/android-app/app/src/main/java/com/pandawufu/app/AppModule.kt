@@ -41,6 +41,8 @@ import com.pandawufu.shared.repository.QcMediaRepository
 import com.pandawufu.shared.repository.QcMediaRepositoryImpl
 import com.pandawufu.shared.repository.InspectionRepository
 import com.pandawufu.shared.repository.InspectionRepositoryImpl
+import com.pandawufu.shared.repository.SafetyRepository
+import com.pandawufu.shared.repository.SafetyRepositoryImpl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -136,6 +138,8 @@ object AppModule {
         private set
     lateinit var inspectionRepository: InspectionRepository
         private set
+    lateinit var safetyRepository: SafetyRepository
+        private set
 
     fun init(context: Context) {
         if (initialized) return
@@ -163,6 +167,7 @@ object AppModule {
         siRepository = SiRepositoryImpl(bffClient)
         qcMediaRepository = QcMediaRepositoryImpl(bffClient)
         inspectionRepository = InspectionRepositoryImpl(bffClient)
+        safetyRepository = SafetyRepositoryImpl(bffClient)
 
         ConfirmGateway.init(actionRepository)
         syncEngine = SyncEngine(
@@ -232,6 +237,8 @@ object AppModule {
         route == "inventory" || route.startsWith("inventory/") -> "inventory"
         route == "kitchen" -> "kitchen"
         route == "m/inspection" -> "inspection"
+        /* 食安拍照上报：归「食安」权限模块（与 BFF org.MODULES 对齐，厨房/只读岗可见） */
+        route == "m/safety-check" -> "foodsafe"
         else -> null
     }
 

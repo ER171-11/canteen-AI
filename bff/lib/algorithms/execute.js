@@ -106,17 +106,33 @@ function executeAction(snapshot, action, opts) {
     rev: snap.rev,
     traceId: (action && action.trace_id) || null,
     now: (opts && opts.now) || new Date().toISOString(),
-    store: (opts && opts.store) || makeExtStore(snap.ext)
+    store: (opts && opts.store) || makeExtStore(snap.ext),
+    /* 可选注入（测试/店内消费器）：异步算法用的外部能力，如视觉初判 */
+    vision: (opts && opts.vision) || undefined
   };
   // 让 store 的 ext 变更（若有）回写到快照
   if (!snap.ext && ctx.store && ctx.store.ext) snap.ext = ctx.store.ext;
 
+  // 成功收口：store.ext 的变更回写快照副本后再返回
+  const done = (result) => {
+    if (ctx.store && ctx.store.ext) snap.ext = ctx.store.ext;
+    return { ok: true, handled: true, type, result, snapshot: snap };
+  };
+  const failed = (e) => ({ ok: false, handled: true, type, error: (e && e.message) || String(e) });
+
   try {
     const res = registry.run(type, ctx, snap.data, (action && action.payload) || {});
-    if (ctx.store && ctx.store.ext) snap.ext = ctx.store.ext;
-    return { ok: true, handled: true, type, result: res.result, snapshot: snap };
+    /*
+     * 异步算法支持：handler 返回 Promise 时（如 safety.ai_judge 需调用视觉模型），
+     * executeAction 同步返回该 Promise —— 调用方 `await` 即可（await 同步值同样安全）。
+     * 同步算法行为完全不变，既有调用方与既有单测零改动。
+     */
+    if (res && res.result && typeof res.result.then === 'function') {
+      return res.result.then(done, failed);
+    }
+    return done(res.result);
   } catch (e) {
-    return { ok: false, handled: true, type, error: (e && e.message) || String(e) };
+    return failed(e);
   }
 }
 

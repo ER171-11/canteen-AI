@@ -91,7 +91,9 @@ function removeSafetyPoint(ctx, data, payload) {
   requireStore(ctx, 'remove');
 
   const out = ctx.store.update('fs_points', { enabled: 0, ts: nowIso() }, { id: id, kind: kind });
-  if (!out || !out.count) throw new Error('未找到可删除的自定义点位: ' + id);
+  // 兼容两种 store 契约：BFF ext store 返回 {count}，店内 SQLite 适配器返回 {rowcount}
+  const changed = out ? (out.count != null ? out.count : out.rowcount) : 0;
+  if (!changed) throw new Error('未找到可删除的自定义点位: ' + id);
   return 'fs_points.remove id=' + id;
 }
 

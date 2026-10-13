@@ -14,7 +14,7 @@
  *   ④ recvQty：× / 未收 → 整行不进单；「原4包改3包」→ 3（:2792）
  *   ⑤ JSON / 网页表格（伪 .xls）/ .xlsx（ZIP+XML）三条输入通道
  *   ⑥ 旧版二进制 .xls 明确报错（Node 侧未移植 BIFF8），不得静默当成空文件
- *   ⑦ 未匹配原料：剔除并列清单，不代建（previewImport 的差异说明）
+ *   ⑦ 未匹配原料：**不再剔除**——标记 isNew 并计入明细（自动建档，待完善草稿），预览不阻断
  *
  * 用法：node bff/lib/algorithms/recv_import_parse.test.js
  */
@@ -256,21 +256,28 @@ ok('二进制 .xls（OLE2）：返回明确错误，提示另存为 xlsx/CSV', (
   assert.ok(/另存为/.test(pv.error), pv.error);
 });
 
-/* ⑨ 未匹配原料：剔除并给出清单，不代建 */
-ok('未匹配原料：剔除、列清单、bad 计数；全部未匹配则返回可读错误', () => {
+/* ⑨ 未匹配原料：自动建档（不再剔除、不阻断），预览照常 ok */
+ok('未匹配原料：计入明细并标 isNew、登记 newIngs；预览仍 ok（旧版自动建档语义）', () => {
   const csv = '原料名称,数量,单价\n五花肉,1,10\n挪威三文鱼,1,99\n南极冰菜,0,5\n';
   const r = ri.parseImportFile(Buffer.from(csv, 'utf8'), 'a.csv');
   const pv = ri.buildPreview(r.docs, INGS);
   assert.strictEqual(pv.unmatched.length, 1);
   assert.strictEqual(pv.unmatched[0], '挪威三文鱼');
+  assert.strictEqual(pv.newIngs[0].name, '挪威三文鱼');
   assert.strictEqual(pv.bad, 1, '数量 0 的行应计 bad');
-  assert.strictEqual(pv.groups[0].lines.length, 1);
+  /* 未匹配行不再被剔除：五花肉 + 挪威三文鱼 共 2 行 */
+  assert.strictEqual(pv.groups[0].lines.length, 2);
+  assert.strictEqual(pv.groups[0].lines[0].isNew, false);
+  assert.strictEqual(pv.groups[0].lines[1].isNew, true);
+  assert.strictEqual(pv.groups[0].lines[1].ingId, '');
   const none = ri.previewImport(
     { contentBase64: Buffer.from('原料名称,数量,单价\n挪威三文鱼,1,99\n', 'utf8').toString('base64') },
     INGS
   );
-  assert.strictEqual(none.ok, false);
-  assert.ok(/请先到原料档案建档|不存在/.test(none.error), none.error);
+  /* 全部未匹配 → 也照常出预览（旧版同日逻辑：自动建档，不阻断结算） */
+  assert.strictEqual(none.ok, true);
+  assert.strictEqual(none.totalAmount, 99);
+  assert.strictEqual(none.newIngs.length, 1);
 });
 
 /* ⑩ previewImport 是纯函数：同一输入两次结果完全一致（不含随机 id / 时间戳） */

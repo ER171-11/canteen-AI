@@ -140,6 +140,8 @@ fun ChatScreen(onOpenModule: (String) -> Unit = {}) {
         val workbenches = buildList {
             if (AppModule.can("inventory")) add("采购工作台" to Routes.M_WB_PROCUREMENT)
             if (AppModule.can("kitchen")) add("厨师工作台" to Routes.M_WB_KITCHEN)
+            /* 食安拍照上报：与工作台同级的直达入口（按 foodsafe 权限） */
+            if (AppModule.can("foodsafe")) add("食安拍照核验" to Routes.M_SAFETY_CHECK)
         }
         SiToolRow(
             decide = siState.inbox?.counts?.decide ?: 0,

@@ -3,6 +3,11 @@ import { MENU } from '../config/menu'
 
 /*
  * RBAC：角色 → 菜单/路由可见性（与 BFF 岗位名对齐）。
+ *
+ * 双轨提醒（见 docs/分端机制与开发接入指南.md §6.E）：Android 读 token 的 permissions，
+ * admin-web 读本文件；改权限必须双写。新增食安页面时务必确认非老板角色的谓词覆盖：
+ *   /safety/progress（拍照核验）由 老板/店长/只读 的通用规则 + 厨房 的 `/safety` 前缀规则覆盖，
+ *   财务/收银不可见——漏加谓词会导致「只有老板能看」。
  */
 const RULES: Record<Role, (path: string) => boolean> = {
   老板: () => true,

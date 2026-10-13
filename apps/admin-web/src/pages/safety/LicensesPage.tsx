@@ -38,6 +38,7 @@ import type {
 } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
 import { COLORS } from '../../theme'
+import { allValueOf, fromAll, withAll } from '../../utils/filterAll'
 
 const LEVEL_META: Record<CertLevel, { text: string; color: string }> = {
   expired: { text: '已逾期 · 禁营', color: COLORS.red },
@@ -310,13 +311,17 @@ export default function LicensesPage() {
         title="证照临期分级台账"
         extra={
           <Space wrap>
+            {/* 首项固定「全部分级」：不筛选=看全部证照，且随时一键退回全部 */}
             <Select
               allowClear
               placeholder="全部分级"
               style={{ width: 140 }}
-              value={level}
-              onChange={(v) => setLevel(v)}
-              options={DEFAULT_LEVELS.map((l) => ({ value: l, label: LEVEL_META[l].text }))}
+              value={allValueOf(level)}
+              onChange={(v) => setLevel(fromAll<CertLevel>(v))}
+              options={withAll(
+                DEFAULT_LEVELS.map((l) => ({ value: l, label: LEVEL_META[l].text })),
+                '全部分级',
+              )}
             />
             <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
               <Button

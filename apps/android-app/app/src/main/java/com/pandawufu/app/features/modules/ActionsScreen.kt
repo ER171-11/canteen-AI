@@ -67,7 +67,9 @@ fun ActionsScreen() {
                     error = fail.error ?: fail.hint ?: (resp.error ?: "加载失败")
                     items = emptyList()
                 } else {
-                    items = resp.items
+                    // 服务端返回的是队列入库顺序（最老在前，消费器靠它做 FIFO）。
+                    // 界面按提交时间倒序，避免刚提交、待审批的动作沉到列表最底部。
+                    items = resp.items.sortedByDescending { it.createdAt ?: "" }
                 }
             } catch (e: Exception) {
                 val fail = com.pandawufu.shared.util.LoadFailure.from(e)

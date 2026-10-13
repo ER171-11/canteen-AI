@@ -17,6 +17,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { fetchAdminDishes, fetchSnapshot, submitAndConfirmAction } from '../../api'
 import type { Dish } from '../../api/types'
 import MockAlert from './components/MockAlert'
+import { allValueOf, fromAll, withAll } from '../../utils/filterAll'
 import { COLORS } from '../../theme'
 
 export default function DishesPage() {
@@ -187,13 +188,17 @@ export default function DishesPage() {
       title="菜品菜单"
       extra={
         <Space>
+          {/* 首项固定「全部分类」：不筛选=看全部菜品，且随时一键退回全部 */}
           <Select
             allowClear
             placeholder="按分类筛选"
             style={{ width: 140 }}
-            value={cat}
-            onChange={setCat}
-            options={cats.map((c) => ({ value: c, label: c }))}
+            value={allValueOf(cat)}
+            onChange={(v) => setCat(fromAll<string>(v))}
+            options={withAll(
+              cats.map((c) => ({ value: c, label: c })),
+              '全部分类',
+            )}
           />
           <Input.Search
             allowClear

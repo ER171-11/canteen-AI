@@ -296,6 +296,9 @@ async function processAction(action, storeUrl, bffUrl, token, dbPath, opts) {
       recordAction(dbPath, action, 'failed', undefined, traceId);
       return { outcome: 'failed', detail: err };
     }
+    // baseRev = 店内实时 rev（现取，非 confirm 阶段校验的云端快照 rev）。
+    // 这才是落库乐观锁的基准：/api/sync 用它做三方合并，冲突时服务端胜出、本机新增不丢，
+    // 保证 confirm 的「准入提示锁」放行后，落库仍不会被店内新变更盲覆盖。
     const baseRev = doc.rev;
     let data = doc.data;
     if (!data || typeof data !== 'object') data = {};

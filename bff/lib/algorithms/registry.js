@@ -12,6 +12,8 @@ const dish = require('./dish');
 const ops = require('./ops');
 const inspection = require('./inspection');
 const safetyPoint = require('./safety_point');
+const safetyCheck = require('./safety_check');
+const sale = require('./sale');
 
 /* 库存算法：入库/盘点后重算 stock/qty/avg */
 registerAll({
@@ -80,6 +82,14 @@ registerAll({
   'pos.split': (ctx, data, payload) => pos.applyPosMergeSplit(data, payload, 'split', ctx)
 });
 
+/* 销售收银域（FP-SALE-07/08/11）：ADR-008 销售应收模型 + ADR-009 统一动作队列。
+ * 与 recv.update/void/pay 同型（唯一写入口、动作注册、状态机、作废留痕、rev 乐观锁）； */
+registerAll({
+  'sale.create': (ctx, data, payload) => sale.applySaleCreate(data, payload, ctx),
+  'sale.pay': (ctx, data, payload) => sale.applySalePay(data, payload, ctx),
+  'sale.void': (ctx, data, payload) => sale.applySaleVoid(data, payload, ctx)
+});
+
 /* 餐饮运营/人员/食安/会员/财务/设备：迁移自 queue_consumer.py 的 insert_* / apply_* / upsert_* */
 registerAll({
   'qc.record': (ctx, data, payload) => ops.insertQcRecord(ctx, data, payload),
@@ -133,6 +143,15 @@ registerAll({
   'safety_point.remove': (ctx, data, payload) => safetyPoint.removeSafetyPoint(ctx, data, payload)
 });
 
+/* 食安拍照上报域：员工拍照 → AI 初判 → 人工复核，写快照 data.safety.checks（走审批队列）
+ * 红线：AI 初判（ai_result）与人工结论（final_result）分列存储，人工优先；
+ *       safety.review 已在 lib/policy.js 的 NEVER_AUTO 中，永不允许自动执行。 */
+registerAll({
+  'safety.check': (ctx, data, payload) => safetyCheck.submitSafetyCheck(ctx, data, payload),
+  'safety.ai_judge': (ctx, data, payload) => safetyCheck.aiJudgeSafetyCheck(ctx, data, payload),
+  'safety.review': (ctx, data, payload) => safetyCheck.reviewSafetyCheck(ctx, data, payload)
+});
+
 /* loss.report 的 data 侧与 SQLite 旁路均已由 inv.applyLossReport 处理（内含 loss_reports 写入） */
 
-module.exports = { stock, inv, dish, pos, ops, inspection, safetyPoint };
+module.exports = { stock, inv, dish, pos, ops, inspection, safetyPoint, safetyCheck };

@@ -3,6 +3,43 @@
 > AI在修改任何模块前，必须查阅此文件，了解历史决策与废弃逻辑，避免引入过时方案。
 > 采用追加式记录，禁止覆盖历史条目。
 
+## [2026-10-13 18:00] 阶段 20 - 销售应收模型落地（ADR-008 / ADR-009）：经营概览 4 只读 + 销售收银页 3 写类
+
+- 背景: 欠账总表的「执行前置依赖」中，`FP-DASH-02/03/04/08`（应收/实收/欠款/折扣）与 `FP-SALE-07/08/11`（销售单列表/顶部 KPI/分次收款）7 张卡长期被同一个数据缺口卡死——快照 `sales[]` 只有 `amount/qty/date/hour/channel/method`，没有 `discount/receivable/payments`。ADR-008（应收按单日期、实收按收款日期、欠款=应收−实收）与 ADR-009（销售端录销售单、统一走标准业务处理队列）已定案，按 `docs/关键路径-销售应收模型-推行指令.md` Phase A→B 一次打通
+- 决策:
+  1. **新增 `bff/lib/sales_model.js` 作销售应收模型的唯一口径源**：只做「防御性取值 + 派生」，不建路由、不写库、不落派生值。缺 `receivable` 回退 `amount`、缺 `discount` 回退 0、缺 `payments` 回退「全额即收（收款日=单日期）」——是按数据**算出来**为 0，不是写死 ¥0 假卡；`debtOf = max(0, receivable − Σpayments)` 恒为派生值，**快照不存欠款字段**（红线②）
+  2. `bff/routes/report.js` `deriveReport` 追加 4 张 KPI：应收合计（按单日期）、实收合计（按收款日期）、未收欠款（累计，不设区间上界）、折扣/抹零（本期），全部走 `sales_model.summarize`，复用既有阶段 13 区间 `[date-(r-1), date]`；作废单不计入这四个口径（既有「营收」KPI 行为不变，故存在作废单时应收 < 营收，属有意）
+  3. **`payments: []` 与「字段缺失」语义分离**（实现期踩到并修正）：空数组 = 分文未收；字段缺失才回退全额即收。若把空数组也当成全额即收，新建待收款单会被读成已收清、欠款永远为 0
+  4. 新增 `bff/lib/algorithms/sale.js` 三个写侧执行器并与 `recv.update/void/pay` **同构**：`sale.create`（追加单，含 receivable/discount/payments 初值）、`sale.pay`（**只**追加 `payments[]`，不动 receivable，超额/重复提交被拒）、`sale.void`（只置 status='已作废' + 记作废人/时间/rev/trace，**绝不 DELETE**）；在 `registry.js` 注册（未注册即 need-manual），rev 乐观锁仍由 `actions.js` confirm（409）与 `consumer.js` baseRev 承担，`consumer.js`/`pos.js` 无需改动
+  5. 只读行级输出：`routes/export.js` 新增 `salesList(snap)`（销售单列表 JSON，含应收/实收/欠款/成本/毛利率/**派生状态**），`salesRows()` 改为复用 `sales_model`；`routes/admin.js` 新增 `GET /api/admin/sales`
+  6. 前端新增 `apps/admin-web/src/pages/dinein/SalesPage.tsx`（销售单列表 + 顶部 KPI + 渠道/状态筛选 + 行内收款/作废）与 `SalePayModal.tsx`（分次收款），菜单 `/dinein/sales`「销售收银」；顶部 KPI **直接取 `report.kpi[]`**，不在列表端点另算一遍（守红线③「口径唯一出口」）；`DashboardPage.tsx` 「未收欠款 > 0」副标标红
+  7. 测试：新增 `bff/lib/algorithms/sale.test.js`（23 例，行为契约，算法层自动收集）与 `bff/lib/sales_model.test.js`（10 例，含推行指令 §6「昨日开单今日收款」口径自证），并挂入 `bff/package.json` 的 `test`/`test:routes`
+- 影响范围: `bff/lib/sales_model.js`（新）、`bff/lib/algorithms/sale.js`（新）、`bff/lib/algorithms/registry.js`、`bff/lib/algorithms/sale.test.js`（新）、`bff/lib/sales_model.test.js`（新）、`bff/routes/report.js`、`bff/routes/export.js`、`bff/routes/admin.js`、`bff/package.json`、`apps/admin-web/src/pages/dinein/SalesPage.tsx`（新）、`SalePayModal.tsx`（新）、`apps/admin-web/src/pages/DashboardPage.tsx`、`apps/admin-web/src/api/index.ts`、`apps/admin-web/src/api/types.ts`、`apps/admin-web/src/config/menu.tsx`、`apps/admin-web/src/App.tsx`、`docs/关键路径-销售应收模型-推行指令.md`（§7 回填状态/差异登记）、`docs/迁移基线/FP-经营概览.md`（DASH-02/03/04/08 → ⬆️，11/15）、`docs/迁移基线/FP-销售收银.md`（SALE-07/08/09/10/11 → ⬆️，8/14）、`docs/迁移基线/欠账总表.md`、`docs/迁移颗粒度规范.md`（附录 A）、`docs/进度看板.html`（⬆️ 108→117、欠账卡 39→30）、`scripts/gen-debt-table.ps1`（波次依赖文案刷新）、本文件
+- AI避坑提示:
+  - **不要在 `snapshot.json` 手写 `discount/receivable/payments` 假数据**：真实数据缺口用 `sales_model` 的防御性取值兜住即可；也**不要把「欠款」写进快照**（派生值落库必漂移）
+  - `sales[]` 的 `receivable` = 售价合计 − 折扣，`amount` 语义收敛为「本单原始成交额（售价合计）」；新增销售单请走 `sale.create`（它会同时写 amount/receivable/discount/payments），不要自己拼字段
+  - 销售单**无 status 落库惯例**：结清/有欠款由 `sales_model.statusOf` 派生，只有 `sale.void` 会写 `status='已作废'`（那是「作废」事实本身）。别在别处写 status
+  - admin-web 侧销售单**不扣料**（BOM 扣料只发生在移动端 POS `pos.pay`），故 `sale.void` 不做库存回补；FP-SALE-13 的「回补库存」须与 POS 扣料对齐后再补，避免只回补不扣料一边倒
+  - 作废单已从应收/实收/欠款/折扣四个口径剔除，但**未**从既有「营收」口径剔除（保持既有行为）；看到「应收合计 < 营收」不要当成 bug
+  - 前端只渲染不复算：欠款/毛利率一律取 BFF 下发值（红线③），别在 `SalesPage.tsx` 里做减法
+- 回档方案: 反向撤销上述文件改动即可。回档后须重跑 `scripts/gen-debt-table.ps1` 与 `node scripts/gen-progress-board.js`，并把 `FP-经营概览.md`（DASH-02/03/04/08）、`FP-销售收银.md`（SALE-07/08/09/10/11）状态回退为 ⬜ 待补；注册表若保留 `sale.*` 而不回退执行器会导致消费器有类型无实现，须一并回退
+
+## [2026-10-13 11:00] 阶段 19 - 经营概览只读补齐（FP-DASH-05 / FP-DASH-15）
+
+- 背景: 进度看板 W1 波次仅余 `FP-DASH-08`（折扣抹零，被数据缺口卡死：快照 `sales[]` 无 `discount/receivable/payments`），故转做未阻塞只读项 `FP-DASH-05`（真实毛利率）与 `FP-DASH-15`（近30天菜品毛利排行 Top12），二者均纯只读、复用既有成本解析，低风险可立即验收
+- 决策:
+  1. `bff/routes/report.js` `deriveReport` 新增销售毛利率 KPI：区间营收 − 区间食材成本，毛利率 = (营收−成本)/营收；区间口径与既有「营收」KPI 完全一致（默认近30天，可随周期切换），并带「食材成本 ¥X（区间）」副标
+  2. 复用 `bff/routes/export.js` 既有纯函数 `dishCostMap`/`dishResolver`/`costOfDish`（单一公式源，不另写第二份成本口径）；销售菜名经 `data.dishAlias` 解析到菜品成本
+  3. `deriveReport` 新增 `top_dishes`（近30天 Top12：份数/营收/毛利额/毛利率），复用 `near30Agg` + `dishCostMap`，按毛利额降序
+  4. **修正 `near30Agg` 金额口径**：真实 `snapshot.json` 的 426 条销售记录 `lines` 内无 `amount`（金额在记录级 `s.amount`），原实现取行级 `amount` 致 `rev` 恒为 0，连带 `dishSalesAgg`/`dishesRows` 真实数据毛利额失真；现改为行级 `amount` 优先、缺失时回落记录级 `amount`（fixture 不受影响）
+  5. 前端 `DashboardPage.tsx`：`KpiItem` 增加 `sub` 副标渲染；新增「菜品毛利排行（近30天 Top12）」表格卡（`top_dishes`）
+- 影响范围: `bff/routes/report.js`、`bff/routes/export.js`、`apps/admin-web/src/pages/DashboardPage.tsx`、`apps/admin-web/src/api/types.ts`、`docs/迁移基线/FP-经营概览.md`（FP-DASH-05/15 改 ⬆️）、`docs/迁移基线/欠账总表.md`（W2 18→16，欠账卡 41→39）、`docs/进度看板.html`（⬆️ 106→108）、本文件
+- AI避坑提示:
+  - 毛利率/毛利排行一律取后端回传，前端不得持第二份公式或 MOCK 假值（原 FP-DASH-05 曾标「前端 MOCK 掩盖缺口」，经核查当前前端 `kpis` 已全由后端下发、无硬编码毛利率，该风险已消除）
+  - `near30Agg` 的金额回退逻辑改动会影响 FP-DISH-11/12（已上线），须保证 fixture 与真实数据均正确；勿再退回「取行级 amount」写法
+  - `FP-DASH-08` 仍被数据缺口阻塞，不得上 ¥0 假卡
+- 回档方案: 反向撤销上述文件改动即可；基线行状态回退为 ⬜ 待补需同步重跑 `scripts/gen-debt-table.ps1` 与 `scripts/gen-progress-board.js`
+
 ## [2026-09-12 21:00] v1.0.0 - 真实数据基线建立
 
 - 背景: 原系统内置演示数据(虚构采购单/销售单/报价/原料)，与真实经营数据不符
@@ -1521,4 +1558,134 @@
   已入队未执行的 `order.fromRestock` 动作会判 need-manual，需人工处理。
 - 后续: W2 余 **19 张**；全局欠账 **⬆️ 105 / ⬜ 46**（合计 151）。
   W2 头部转为 `FP-SET-07/10`（快照备份/回滚，受「服务端快照」ADR 阻塞）与 `FP-SALE-07`（销售单列表，受「销售应收模型」ADR 阻塞）。
+
+## [2026-10-12] W2 第五批 - 服务端快照备份（阶段 25 / FP-SET-07（+ FP-SET-10 列表查看半））
+
+- 背景: 进度看板（生成于 2026-10-10 · `22dc5aa`）数字滞后于工作区实际。**按实际进度校正**：
+  ADR-009（2026-10-12 签署）已把「服务端快照」形态定案为「服务端主存 + 历史快照；回滚须运营管理员审批」，
+  并批准 `FP-SET-05/06/08/09` 转 ⚰️ 废弃，故基线实测 **⬆️ 105 / ⬜ 42 / ⚰️ 4**（原看板记 105/46）。
+- 目标: 落 W2 头部 `FP-SET-07`（手动打快照备份）——旧版 `#btnSnapNow`（HTML:600 / :1091-1093）。
+- 决策（形态，依 ADR-009 §2.1）: 服务端 `data/snapshot.json` 仍是唯一数据源；用户手动备份 = **在其之下存一份历史快照全文**
+  （`bff/data/snapshots/`），**只写备份文件**——不写业务库、不入审批队列（与 FP-SET-18 结算单模板同属「只写独立文件」）。
+- 变更（BFF）:
+  - `bff/lib/snapshot_store.js`（新增）: `save/list/read` + `KEEP=20` 保留策略（超出淘汰最旧并删文件）；
+    原子写（tmp+rename）；id 形如 `20261012-153012-r284`，同秒重复点击自动加 `-2/-3` 后缀不覆盖；id 白名单防路径穿越。
+  - `bff/routes/snapshot.js`: `POST /api/snapshot/backup`（**仅老板/店长**）/ `GET /api/snapshot/backups` / `GET /api/snapshot/backup?id=`。
+  - `bff/routes/snapshot.test.js`（新增，27 条断言）+ `bff/package.json`（挂入 `npm test` / `test:routes`）。
+- 变更（admin-web）:
+  - `src/api/index.ts`: `fetchSnapshotBackups` / `createSnapshotBackup` + `SnapshotBackupItem` 类型。
+  - `src/pages/SystemConfigPage.tsx`: 新增「快照备份」卡片（备份说明输入 + 立即备份 + 备份列表）；
+    同批把本页在基线中的**全部新版行号按 665 行版本重取**（原为 418 行快照）。
+- 验证（实际跑过）:
+  - `cd bff && node routes/snapshot.test.js` → **27/27 通过**；`npm test`（bff 全量）→ **exit 0**。
+  - 红线硬断言（测试内）: 备份前后 `snapshot.json` **字节完全一致**；备份不产生 `actions_queue.json`。
+  - `apps/admin-web` `npx tsc --noEmit` → **exit 0**；`npm run build` → **exit 0**；本批两个文件 ESLint **0 warning**。
+  - `node scripts/lint-zero-dep.js` → 通过（161 文件）；`scripts/gen-debt-table.ps1 -Check` → **exit 0**（无漂移）；
+    `node scripts/gen-progress-board.js` → 漂移 ok、数字一致性 OK（**⬆️ 106 / ⬜ 41**）。
+  - ⚠️ **仓库级两道门禁在本批开工前即为红（非本批引入，属未提交的「审批中心语义双轨」治理工作）**：
+    `npm run lint` 4 条 warning（`VendorsPage.tsx:293`、`RecipesPage.tsx:90`、`PointEditModal.tsx:23`、`PointsPanel.tsx:193`）；
+    `ci/redline_guard.ps1` R13 命中 `ActionsPage.tsx:105` 注释中的字面量 `/api/sync`（假阳性）。按「一提交一件事」未在本批顺手改。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **未做浏览器手工冒烟**：卡片版式、列表列宽、非老板/店长时的禁用与提示文案未逐目核对（本机无浏览器会话）。
+  2. **未做真实 HTTP 端到端**：只到路由层 + 类型/构建层，未跑「登录 → 打快照 → 列表出现该条」全链路。
+  3. 保留策略**只按份数（20）淘汰，未按体积设上限**：单份快照若达 MB 级，20 份可能数十 MB。
+- **FP-SET-10 回滚半步为何不做（本批实测发现的架构缺口）**:
+  - 店内节点才是数据真源，而**备份文件在云端**；消费器侧执行器（`consumer.js::processAction` 的 `ctx` 仅 `store/rev/traceId/now`）
+    **读不到云端 `data/snapshots/`**，故 `snapshot.rollback` 在现有契约内无法落地。
+  - **只回滚云端 `snapshot.json` 会被店内下一次推进盖回，属假绿**——不以半截实现换取表面清零。
+  - 处置: `FP-SET-10` 保持 ⬜，处置列写明「须先补『回滚 payload 下发形态（备份内容内联 vs 新增下推端点）』ADR，
+    再走审批队列实现」；本批只交付它的「列表查看半」（备份列表 + 备份全文读取端点）。
+- 影响范围: `bff/lib/snapshot_store.js`（新）、`bff/routes/snapshot.js`、`bff/routes/snapshot.test.js`（新）、`bff/package.json`、
+  `apps/admin-web/src/{api/index.ts,pages/SystemConfigPage.tsx}`、`docs/迁移基线/FP-设置.md`、`docs/迁移基线/欠账总表.md`、
+  `docs/迁移颗粒度规范.md`（附录 A）、`docs/进度看板.html`、`docs/下一步任务清单_2026-09-28.md`、
+  `docs/第一版发布范围确认清单.md`、本文件。
+  **未触碰**受保护哈希文件（`bff/store-node/{db,merge}.js`、`bff/lib/algorithms/stock.js`）。
+- AI避坑提示:
+  - **打快照不是业务写**：不要为了「统一走队列」把备份也塞进 `/api/actions`——备份不产生业务数据变更，
+    入队只会让审批中心堆积无意义待办；判据是「是否改变业务集合」。
+  - **备份目录必须 gitignore**：`bff/.gitignore` 的 `data/` 已覆盖 `data/snapshots/`；若改存别处，务必同步忽略，否则运行态数据会入库。
+  - **回滚别只在云端做**：云端 `snapshot.json` 只是店内快照的**下游副本**，店内推进会盖回；任何「整库回滚」都必须落店内真源。
+  - **基线行号是证据**：本批动了 `SystemConfigPage.tsx`（418 → 665 行），基线里该文件的**每一处行号都会漂移**，
+    必须同批重取；只改自己新增那一行会留下失效证据。
+- 回档方案: `git revert` 本提交即可（新增文件 + 新增端点 + 前端新增卡片，未改既有出参语义，无 DB 迁移、无依赖变更）。
+  已产生的 `bff/data/snapshots/*.json` 属运行态数据，不受回档影响。
+- 后续: W2 余 **18 张**；全局欠账 **⬆️ 106 / ⬜ 41 / ⚰️ 4**（合计 151）；设置页 **11/19**。
+  下一步 = W2 续，候选：`FP-SALE-07/08/09/10`（销售单列表 + KPI + 两筛选，ADR-008 已定口径）、
+  `FP-PO-01/02`（采购单新建/编辑，ADR-009 已定边界）、`FP-PRICE-11`（待比价任务 JSON 导出，只读）。
+  `FP-SET-10` 回滚须先补 ADR；`FP-DASH-02/03/04/08`、`FP-SALE-11` 须先落销售应收模型（`receivable/discount/payments`）。
+
+---
+
+## [2026-10-12] 撤销偏离 - 进货导入未匹配原料自动建档（待完善草稿）+ 新增原料表单瘦身
+
+- 背景: T6-C（`FP-RECV-02`，2026-09-29）把「旧版未匹配原料自动建档」判为【有意偏离】，改为「剔除 + 不代建 + 全未匹配则 400」。
+  上线后实测割裂：供应商配送单常夹带新品（时令菜/临时耗材），门店被要求「先去原料档案建档再回来导入」，
+  一次导入被拆成两步；且首屏只给「已剔除、不会导入」的结果，门店误以为**整单没导进去**。
+- 决策（用户当面裁定，2026-10-12）:
+  1. **撤销该偏离、回归旧版自动建档**（旧版 `createIngFromImport` HTML:2806，调用点 :3656-3658）：未匹配原料不再剔除、
+     不再阻断，**进货单 / 结算照常生成**（明确要求「不阻止生成结算单」）。
+  2. **加一道审核**：自动建出来的料带 `pending:true`（待完善草稿），在「原料档案」页归类为「待完善」；
+     门店补全分类 / 库存单位等信息后点「确认转正」。**不做**「暂不入账」——草稿料照常参与库存与成本，
+     只是主数据未被核对（既不像旧版那样把不确定的单位/分类静默写进主数据，也不阻断记账；红线⑥ 界面明示）。
+  3. **新增原料表单瘦身**：新建只要求「原料名」，分类 / 单位 / 采购单位 / 包规 / 换算 / 规格 / 供应商 / MOQ /
+     安全线 / 日耗 / 出成率全部可后补（未补齐 = 待完善）。
+  4. 「库存/产品库」与「原料」的**命名与类型分层本批不动**——该问题牵连厨房制作的原料消耗口径，实现方式未定（用户裁定暂缓）。
+- 变更（BFF）:
+  - `bff/lib/recv_import.js`: `buildPreview` 未匹配行不再 `continue` 剔除，改为计入 `groups`（`lines[].isNew=true`、`ingId=''`）
+    并汇总 `newIngs:[{name,unit,cat}]`；`previewImport` 去掉「未匹配→400」分支（**仅**「整批无任何可用明细行」才失败）。
+  - `bff/lib/algorithms/inventory.js`: 新增 `nextIngId()` / `createIngFromImport()`（旧版建料口径：cat 兜底「其他」、
+    unit 兜底「斤」、buy=unit、conv=1、stock/avg=0；另加 `pending:true`）；`applyRecvImport` 明细解析改为
+    「档案 id 精确 → 名称精确（旧版 `findIngByName` 同口径）→ 自动建档」，**同批同名只建一次**；摘要加「自动新建原料 N 种」。
+  - `applyIngUpsert`（`ing.upsert`）支持 **【Node 超集】待完善标记**：`payload.pending===true` 置位，
+    `payload.confirm===true` / `payload.pending===false` 清除 —— **仅显式传入时才写该键**，
+    保证与 Python 平价测试（`ingCreate` / `ingCreateNulls`）逐字段一致。
+- 变更（admin-web）:
+  - `RecvImportModal.tsx`: Tag「未匹配原料 N 种（不代建）」→「**新增原料 N 种（自动建档 · 待完善）**」；明细表新料行加「新增」标；
+    提示条改为「将自动建档为待完善草稿，导入后到原料档案补全并确认转正」；提交时把预览 `newIngs` 的分类一并下发（执行器建档用）。
+  - `StockPage.tsx`: 顶部「**待完善 N 项**」告警条 + 「只看待完善」筛选；名称列加「待完善」Tag、pending 行操作按钮变「完善」；
+    编辑弹窗 pending 时标题「完善原料 · x」、`okText`「确认转正」、内置说明条；**新建表单默认只露「原料名」**
+    （「+ 现在补充分类/单位/供应商等信息」可展开）；「库存单位」不再强制必填；
+    保存口径 = 「分类 + 库存单位齐全即转正，否则保持待完善」。
+  - `api/recvImport.ts`（`RecvImportLine.isNew`、新增 `RecvImportNewIng`）、`api/types.ts`（`IngItem.pending`）。
+- 测试（改 3 份 / 新增 3 例）:
+  - `bff/lib/algorithms/recv_import.test.js`: 头注 ⑤ 改写；新增 ⑧「自动建档照常入账（pending/单位/分类/库存/均价）」、
+    ⑨「缺 unit/cat 兜底为斤/其他」、⑩「同批同名新料去重」→ **10/10**。
+  - `bff/lib/algorithms/recv_import_parse.test.js`: ⑦/⑨ 改为「计入明细 + `isNew` + `newIngs`，全未匹配也照常出预览」→ **10/10**。
+  - `bff/routes/recv_import.test.js`: 用例 3 由「全未匹配 → 400」改为「仍 200 + `isNew` + `newIngs`」→ **17 条全通过**。
+- 验证（实际跑过）:
+  - `cd bff && npm test` → **exit 0**（含算法平价 `inventory.test.js` **29 例**全 PASS）。
+  - `node scripts/lint-zero-dep.js` → **通过**（161 文件 + 3 条卫生规则）。
+  - `apps/admin-web`: `npx tsc --noEmit` → **exit 0**；改动 4 文件 ESLint **0 warning**。
+  - `scripts/gen-debt-table.ps1 -Check` → **CHECK OK**（本次未改基线表行，故无漂移；`FP-DISH-18` 属菜品配方导入，**仍为 ⬜ 待补**，
+    本批只覆盖进货导入这一条通路）。
+  - `ci/redline_guard.ps1` → R5 / R10 / R14 / R15 **全通过**；R13 仍命中 `ActionsPage.tsx:105` 注释字面量 `/api/sync` 的**既有假阳性**
+    （本批开工前即为红，非本批引入，按「一提交一件事」未顺手改）。
+  - **真实 HTTP 端到端实证**（沙箱栈：store-node `8765` + BFF `8787` 隔离 `BFF_DATA_DIR`，库 = `餐厅系统_演练.db`，真实主库未触碰）：
+    ① 预览：`POST /api/inventory/recv/import/preview` 喂「芹菜(已有) + 测试新品-紫苏叶(新)」→ **200**（旧版行为，不再 400）、
+    `totalLines=2`、`unmatched=[测试新品-紫苏叶]`、`newIngs=[测试新品-紫苏叶/斤/其他]`、明细 `isNew=false/true` 各一；
+    ② 写入：`POST /api/actions {recv.import}` → `confirm`（`待执行`）→ 消费器（5s）执行 → 快照 **rev 279→280**、
+    `recv 9→10`（进货单照常生成，未阻断）、`ings 96→97`；
+    ③ 建档结果：`I252 测试新品-紫苏叶 cat=蔬菜类 unit=斤 stock=2 avg=8.5 on=true` 且 **`pending=true`**（`pending` 计数 1/1）
+    —— 既「自动建档 + 照常入账」，又带「待完善」标记，与设计口径逐项吻合。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **未做浏览器手工冒烟**：待完善告警条版式、「只看待完善」筛选、编辑弹窗折叠态与转正按钮文案未逐目核对
+     （沙箱页已在本地起好，待人工目视）。
+  2. **「确认转正」只验证到 action 层**：`ing.upsert {id, confirm:true}` 会清 `pending`，但未在浏览器里点完「完善 → 确认转正」整条交互。
+  3. `pending` 是**新增字段**，`kmp-shared` / Android App 侧 DTO 未同步（App 端不展示「待完善」，但也不会因此报错）。
+- 影响面: `bff/lib/recv_import.js`、`bff/lib/algorithms/inventory.js`、`bff/lib/algorithms/recv_import.test.js`、
+  `bff/lib/algorithms/recv_import_parse.test.js`、`bff/routes/recv_import.test.js`、
+  `apps/admin-web/src/pages/inventory/{RecvImportModal,StockPage}.tsx`、`apps/admin-web/src/api/{recvImport,types}.ts`、
+  `docs/迁移基线/FP-进货入库.md`、`docs/Python到Node忠实性映射表.md`、本文件。
+  **未触碰**受保护哈希文件（`bff/store-node/{db,merge}.js`、`bff/lib/algorithms/stock.js`），无依赖变更、无 DB 迁移。
+- AI 避坑提示:
+  - **`applyIngUpsert` 的 `pending` 只能显式写**：若改成「按字段缺失去推断 pending」，平价 fixture（payload 无 cat/unit）
+    会凭空多出一个键，`inventory.test.js` 的 `deepStrictEqual` 立刻挂——这个门禁就是为防这类「善意推断」设的。
+  - **`recv.import` 的原料匹配故意用「名称精确」而不是 `resolveIngId`**：后者带「双向包含」兜底（为 `recv.inbound` 设的），
+    放到导入通路会把「小葱」错误挂到已有「葱」上；旧版 `findIngByName` 是精确匹配，保持一致。
+  - **不要为了「更安全」把草稿料排除出库存**：用户口径是「照常入账」；排除会让货到账不平，且与「不阻止生成结算单」冲突。
+  - **欠账总表是派生的**：`FP-DISH-18`（导入自动建档）在菜品配方侧仍未做，别看到本批动了「导入自动建档」就把那行改成已做。
+- 回档方案: `git revert <本次提交>` —— 未匹配原料恢复「剔除 + 400」，`pending` 字段与界面「待完善」列 / 告警条一并回退；
+  **已产生的 `pending:true` 数据不会自动消失**（`ing.upsert` 传 `confirm:true` 可手工转正），回档前请先确认是否有此类数据。
+- 后续: 同名能力在**菜品配方导入**（`FP-DISH-16/18`，`W3-19`）仍是 ⬜ —— 若要打通，应复用同一套 `createIngFromImport` + `pending` 口径，
+  并把 `W3-17` 的「手动指定列」一起补上；`kmp-shared` DTO 同步 `pending`。
 

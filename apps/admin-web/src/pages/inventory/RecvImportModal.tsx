@@ -35,9 +35,10 @@ import { fmt } from './settle/data'
  *   · **提交 = 一个动作**：整批只投一条 `recv.import`，批内原子；确认前账面零变化。
  *   · 解析失败 / 不支持的格式一律**显式报错**，不静默丢弃任何一行（红线⑥）。
  *
- * 与旧版的已知差异（都写在界面上）：
- *   ① 旧版会因 mismatch 自动新建原料（createIngFromImport :2806），本版**不代建**
- *      ——未匹配原料剔除并列清单，请先到「原料档案」建档。
+ * 与旧版的关系（都写在界面上）：
+ *   ① 未匹配原料**回归旧版行为：自动建档**（createIngFromImport :2806；2026-10-12 撤销原「不代建」偏离），
+ *      但不像旧版那样把不确定的单位/分类静默写进主数据 —— 新料建成「待完善草稿」（pending:true），
+ *      导入不阻断，由门店到「原料档案 → 待完善」补全信息并「确认转正」。
  *   ② 旧版二进制 .xls（BIFF8）**不支持**，见界面提示（先另存为 .xlsx / CSV）。
  *   ③ 旧版「手动指定列」(:3465) 未移植：表头靠别名自动识别，识别不了会明确报错并要求改列名。
  *   ④ 导入产生的是「 orders 之外的新 JH 单」，不会回写采购单收货进度（同采购管理页欠账）。
@@ -76,7 +77,16 @@ export interface RecvImportModalProps {
 }
 
 const lineCols: ColumnsType<RecvImportLine> = [
-  { title: '原料', dataIndex: 'name' },
+  {
+    title: '原料',
+    dataIndex: 'name',
+    render: (v: string, r) => (
+      <Space size={4}>
+        <span>{v}</span>
+        {r.isNew ? <Tag color="orange">新增</Tag> : null}
+      </Space>
+    ),
+  },
   { title: '订购量', dataIndex: 'qty', width: 90, align: 'right' },
   {
     title: '单价',
@@ -141,6 +151,8 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
   const submit = async () => {
     if (!preview || !groups.length) return
     setBusy(true)
+    /* 新增原料的分类（预览给出，供执行器建档时写入 cat；缺省执行器兜底「其他」） */
+    const catOf = new Map((preview.newIngs ?? []).map((n) => [n.name, n.cat]))
     try {
       await postAction({
         type: 'recv.import',
@@ -157,6 +169,7 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
               qty: l.qty,
               price: l.price,
               unit: l.unit,
+              cat: catOf.get(l.name),
             })),
           })),
           markPaid,
@@ -243,8 +256,8 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
                 <Tag color="orange">实收数为「×/未收」跳过 {preview.skipped} 行</Tag>
               ) : null}
               {preview.unmatched.length > 0 ? (
-                <Tag color="red">
-                  未匹配原料 {preview.unmatched.length} 种（不代建）
+                <Tag color="orange">
+                  新增原料 {preview.unmatched.length} 种（自动建档 · 待完善）
                 </Tag>
               ) : null}
             </Space>
@@ -255,11 +268,11 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
                 showIcon
                 message={
                   <span>
-                    以下原料在「原料档案」中不存在，已剔除，不会导入：
+                    以下原料在「原料档案」中不存在，将<b>自动建档为「待完善」草稿</b>（不阻塞本单导入）：
                     <b>{preview.unmatched.join('、')}</b>
                   </span>
                 }
-                description="请先在「原料档案」建档后再导入（本版批量导入不自动新建原料，与旧版不同）"
+                description="导入后请到「原料档案 → 待完善」补全分类/库存单位等信息并点「确认转正」（原料档案页顶部会显示待完善 N 项）"
               />
             ) : null}
 
@@ -323,7 +336,8 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
               message="提交后进入审批中心，确认后由店内消费器一次性重算库存与欠款"
               description={
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  已知差异：① 未匹配原料不自动建档（旧版会新建）；② 旧版二进制 .xls 不支持；
+                  已知差异：① 未匹配原料自动建档为「待完善」草稿（与旧版一致，导入不阻断）；
+                  ② 旧版二进制 .xls 不支持；
                   ③ 无「手动指定列」，表头靠别名自动识别；④ 不回写采购单收货进度。
                 </Typography.Text>
               }

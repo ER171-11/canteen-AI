@@ -97,6 +97,13 @@
      （`recv_import.test.js` 用例 3 断言 `rebuild_stock` 在返回摘要里只出现 1 次）。
   3. **明确不支持必须可见**：旧版二进制 .xls（OLE2/BIFF8）**不支持**，解析层直接返回「另存为 .xlsx 或 CSV」；
      界面「支持格式」清单同时写清 xlsx / 伪 .xls(html) / csv / tsv / json（红线⑥ 不静默降级）。
-  4. **与旧版的已知差异**（界面已明示）：① 未匹配原料**不自动建档**（旧版 `createIngFromImport` 会新建）；
+  4. **与旧版的已知差异**（界面已明示）：① **未匹配原料自动建档**（2026-10-12 撤销原「不代建」偏离，
+     回归旧版 `createIngFromImport` :2806 / :3656-3658）；与旧版的唯一差别是新建的料带 **`pending:true`**
+     （待完善草稿）—— 不阻断进货单/结算生成，门店随后到「原料档案 → 待完善」补全分类/单位并「确认转正」，
+     避免把不确定的单位/分类静默写进主数据；
      ② 无「手动指定列」（旧版 `openColMap` :3465），表头靠别名自动识别；③ 数量非数字的行计 `bad` 并剔除，
      与此区分的是「实收数为 ×/未收」的业务性跳过（计 `skipped`，旧版两者混为一谈）；④ 不回写采购单收货进度。
+  5. **⚠️ 待人工裁定（红线①）：** `ings[].pending` 是 **Node 超集字段**（Python `queue_consumer.py` 无对应实现，
+     `recv.import` 本身也无 Python 分支，故无差分野），只由 `recv.import` 自动建档与 `ing.upsert`
+     （payload 显式传 `pending:true` 时）写入；不传时输出与 Python 逐字段一致，平价测试不受影响。
+     `applyIngUpsert` 的新增 `pending` 分支属写入白名单变更，已登记于 `docs/Python到Node忠实性映射表.md` §1 补注。

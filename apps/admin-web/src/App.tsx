@@ -30,6 +30,7 @@ import LossPage from './pages/inventory/LossPage'
 import LedgerPage from './pages/inventory/LedgerPage'
 import RestockPage from './pages/inventory/RestockPage'
 import TablesPage from './pages/dinein/TablesPage'
+import SalesPage from './pages/dinein/SalesPage'
 import BookingPage from './pages/dinein/BookingPage'
 import SchedulePage from './pages/hr/SchedulePage'
 import AttendancePage from './pages/hr/AttendancePage'
@@ -39,6 +40,7 @@ import LicensesPage from './pages/safety/LicensesPage'
 import TracePage from './pages/safety/TracePage'
 import SamplePage from './pages/safety/SamplePage'
 import SafetyPointsPage from './pages/safety/SafetyPointsPage'
+import SafetyProgressPage from './pages/safety/SafetyProgressPage'
 import DeviceEnergyPage from './pages/safety/DeviceEnergyPage'
 import FinancePage from './pages/finance/FinancePage'
 
@@ -99,6 +101,7 @@ export default function App() {
           <Route path="inventory/loss" element={<LossPage />} />
 
           {/* 堂食外卖 */}
+          <Route path="dinein/sales" element={<SalesPage />} />
           <Route path="dinein/tables" element={<TablesPage />} />
           <Route path="dinein/booking" element={<BookingPage />} />
           <Route path="dinein/orders" element={<ModuleBrowsePage routeKey="dinein/orders" />} />
@@ -124,6 +127,7 @@ export default function App() {
           <Route path="safety/trace" element={<TracePage />} />
           <Route path="safety/sample" element={<SamplePage />} />
           <Route path="safety/points" element={<SafetyPointsPage />} />
+          <Route path="safety/progress" element={<SafetyProgressPage />} />
           <Route path="safety/devices" element={<DeviceEnergyPage />} />
 
           {/* 财务 */}

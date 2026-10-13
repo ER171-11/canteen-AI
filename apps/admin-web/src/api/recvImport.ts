@@ -17,13 +17,22 @@ export interface RecvImportGroup {
 }
 
 export interface RecvImportLine {
-  /** 原料档案 id（预览阶段已匹配；未匹配的行不会进这里，见 unmatched） */
+  /** 原料档案 id（预览阶段已匹配）；未匹配行为空串，导入时由执行器自动建档 */
   ingId: string
   name: string
   qty: number
   price: number
   unit: string
   amount: number
+  /** true = 原料档案里没有，导入时自动建档为「待完善草稿」（旧版 createIngFromImport 语义） */
+  isNew?: boolean
+}
+
+/** 本批导入将自动建档的新原料（待完善草稿） */
+export interface RecvImportNewIng {
+  name: string
+  unit: string
+  cat: string
 }
 
 /**
@@ -41,8 +50,10 @@ export interface RecvImportPreview {
   bad: number
   /** 实收数为 ×/未收/已划掉 的业务性跳过的行数 */
   skipped: number
-  /** 「原料档案」中不存在的原料名（本版不代建） */
+  /** 「原料档案」中不存在、本批将**自动建档**（待完善草稿）的原料名 */
   unmatched: string[]
+  /** 同上，带 unit/cat 明细 */
+  newIngs?: RecvImportNewIng[]
   groups: RecvImportGroup[]
   single: boolean
   totalLines: number

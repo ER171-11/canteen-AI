@@ -150,11 +150,16 @@ node scripts/gen-progress-board.js                    # 刷新进度看板
 - ✅ 外接比价 **9/15**（阶段 17 补齐 W1 只读 5 项：`FP-PRICE-01/02/03/13/14` 搜索/筛选/比价主表/待比价清单/统计；
   新增 `lib/price.js` 纯聚合（`priceReport`/`pricePlan`/`bestQuote`/`quotePerStock`/`quoteKeyword`）+ `GET /api/admin/price`，
   口径对齐旧版 `renderPrice`/`openQuotePlan`/`quoteTaskText`）
-- **下一批（W1 只读速补，余 3 张）**：按欠账总表 W1 顺序推进
-  —— DASH 1 / PRICE 1（FP-PRICE-05 折算口径，与写路径纠缠）/ SALE 1（口径与红线分级见 `docs/迁移颗粒度规范.md`）
-- ⚠️ 已知数据缺口：快照 `sales[]` 只有 `amount/qty/date/hour/channel/method`，
-  **没有 `discount/receivable/payments`**，`FP-DASH-02/03/04/08` 因此全部阻塞，
-  须与 FP-SALE-07/08/11 同批建销售应收模型
+- ✅ 阶段 19（2026-10-13）经营概览补齐 `FP-DASH-05` 真实毛利率 / `FP-DASH-15` 菜品毛利排行
+- ✅ 阶段 20（2026-10-13）**销售应收模型落地（ADR-008/009）**，一次解锁 9 张卡：
+  只读 `FP-DASH-02/03/04/08`（应收按单日期 / 实收按收款日期 / 欠款累计 / 折扣抹零）
+  + 销售收银 `FP-SALE-07/08/09/10/11`（新增 admin-web「销售收银」页：销售单列表 / 顶部 KPI / 渠道与状态筛选 / 分次收款）。
+  新增唯一口径源 `bff/lib/sales_model.js`；写侧 `bff/lib/algorithms/sale.js`（`sale.create/pay/void`，走 `/api/actions` 队列）
+- **W1 只读速补已清空**；下一批按欠账总表 W2/W3 顺序推进（欠账卡 30 张：W2 8 / W3 19 / W4 3）
+- ✅ 已解除的数据缺口（阶段 20）：原先快照 `sales[]` 只有 `amount/qty/date/hour/channel/method`、
+  无 `discount/receivable/payments`，曾阻塞 `FP-DASH-02/03/04/08` 与 `FP-SALE-07/08/11`。
+  现由 `lib/sales_model.js` 防御性取值兜底（缺字段按「应收=amount、折扣=0、全额即收」），
+  真实字段由 `sale.create` 写入后同一聚合自动生效；**欠款是派生值，不落快照**
 - 欠账总表尾部列出的其余项按 ⛔ / ⚠ 分级处理
 
 每完成一项，先按第 4 节跑一遍验证，再按第 5 节的粒度提交。

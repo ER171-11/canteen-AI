@@ -7,8 +7,16 @@
  *        module 按顶层 key 过滤 data 子集（?module=dishes）；
  *        module=ext.* 过滤 ext 子集（?module=ext.recipes 只回 ext.recipes）；
  *        无快照 404 {ok:false,error:"no snapshot"}
+ *
+ * 服务端快照备份（FP-SET-07 手动打快照，形态见 ADR-009 §2.1）：
+ *   POST /api/snapshot/backup      打完当前快照 → data/snapshots/<id>.json + index.json（仅老板/店长）
+ *   GET  /api/snapshot/backups     备份列表（只读元信息，倒序）
+ *   GET  /api/snapshot/backup?id=  读某份备份的**全文**（只读；供下载/后续回滚取数）
+ *   红线：只写 data/snapshots/ 下的备份文件，**不写业务库、不入队**；回滚（FP-SET-10）不当场执行，
+ *        须走 POST /api/actions 审批队列（ADR-009 §2.2）。
  */
 const store = require('../lib/store');
+const snapshotStore = require('../lib/snapshot_store');
 
 const MAX_BODY = 5 * 1024 * 1024; // 5MB
 
@@ -141,7 +149,63 @@ async function handle(req, res, ctx, pathname) {
     return true;
   }
 
+  /* ---- FP-SET-07 手动打快照备份（只写 data/snapshots/，不写业务库、不入队）---- */
+  if (req.method === 'POST' && pathname === '/api/snapshot/backup') {
+    /* 与其他设置页写类同口径：**仅老板/店长**（比 mayWriteActions 更严，排除收银/厨房/财务） */
+    const role = ctx.auth ? ctx.auth.role : null;
+    if (!ctx.auth || (role !== '老板' && role !== '店长')) {
+      ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: 仅老板/店长可打快照备份（当前角色 ' + (role || '未登录') + '）' });
+      return true;
+    }
+    const snap = loadSnapshot();
+    if (!snap) {
+      ctx.sendJSON(res, 404, { ok: false, error: 'no snapshot' });
+      return true;
+    }
+    let body = null;
+    try {
+      const r = await ctx.readBody(req, 64 * 1024);
+      if (!r.tooLarge && r.buf && r.buf.length) body = JSON.parse(r.buf.toString('utf8'));
+    } catch (e) { body = null; }
+    const operator = ctx.auth.account || ctx.auth.role || null;
+    let out;
+    try {
+      out = snapshotStore.save(snap, { operator, note: (body && body.note) || '' });
+    } catch (e) {
+      ctx.sendJSON(res, 400, { ok: false, error: e.message });
+      return true;
+    }
+    ctx.sendJSON(res, 200, { ok: true, item: out.item, keep: out.keep, dropped: out.dropped });
+    return true;
+  }
+
+  /* ---- FP-SET-10（列表查看半）备份列表：只读元信息 ---- */
+  if (req.method === 'GET' && pathname === '/api/snapshot/backups') {
+    ctx.sendJSON(res, 200, { ok: true, items: snapshotStore.list(), keep: snapshotStore.KEEP });
+    return true;
+  }
+
+  /* ---- FP-SET-10 备份全文读取（只读；供下载 / 后续回滚取数）---- */
+  if (req.method === 'GET' && pathname === '/api/snapshot/backup') {
+    const id = (ctx.query.get('id') || '').trim();
+    const snap = snapshotStore.read(id);
+    if (!snap) {
+      ctx.sendJSON(res, 404, { ok: false, error: 'no such backup: ' + id });
+      return true;
+    }
+    ctx.sendJSON(res, 200, {
+      ok: true,
+      id,
+      rev: snap.rev,
+      generated_at: snap.generated_at,
+      size: snap.size,
+      data: snap.data,
+      ext: snap.ext === undefined ? null : snap.ext
+    });
+    return true;
+  }
+
   return false;
 }
 
-module.exports = { handle, loadSnapshot, markRecipeStatus };
+module.exports = { handle, loadSnapshot, markRecipeStatus, snapshotStore };

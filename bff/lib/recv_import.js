@@ -8,6 +8,7 @@
  *   findHeaderRow :2977     rowsToObjs :2977+          pickTable :3012
  *   IMP_PO_DEFS :3362       NOISE_RE :3360             recvQty :2792
  *   cleanName :2786         normDate :2772             numOr :2771
+ *   createIngFromImport :2806（未匹配原料自动建档，见下方 buildPreview 的说明）
  *
  * 红线核对：
  *   ① 本文件只允许 require Node **内置**模块（zlib 用于解压 .xlsx），不得引入第三方包。
@@ -672,10 +673,15 @@ function parseImportFile(bytes, fileName) {
 /**
  * docs → 预览模型（移植旧版 previewRecvImport :3591 的校验与聚合规则）
  *
- * 与旧版的**唯一有意偏离**：旧版未匹配的原料会「自动新建」到原料档案（createIngFromImport :2806），
- * 本版**不代建**（与单张录入 recv.inbound 的已知差异⑤ 同口径）——未匹配行剔除并列出清单，
- * 由用户先到「原料档案」建档。理由：批量导入自动建档会把错误的单位/分类写进主数据，且不可撤销。
- * 该差异在预览界面明示，不静默（红线⑥）。
+ * **2026-10-12 撤销原「不代建」偏离，回归旧版行为**：旧版未匹配的原料会「自动新建」到原料档案
+ * （createIngFromImport :2806，见 HTML:3656-3658），本版同样**自动建档、不再剔除、不再阻断导入**
+ * ——进货单 / 结算照常生成（不阻塞门店记账）。
+ *
+ * 与旧版的差别只在「建出来的是什么料」：本版建的是**待完善草稿**（`ings[].pending=true`，Node 超集字段），
+ * 单位/分类用旧版兜底值（单据单位或「斤」/ 单据分类或「其他」），导入后在「原料档案 → 待完善」补全
+ * 并「确认转正」。这样既不像旧版那样把不确定的单位/分类静默写进主数据，也不阻断记账（红线⑥）。
+ *
+ * 预览层**零写**：这里只把未匹配行标 `isNew`、汇总进 `newIngs`，真正的建档在执行器 recv.import。
  *
  * @param {Array} docs [{supplier,date,note,lines:[{ingName,qty,price,unit,cat}]}]
  * @param {Array} ings 快照 data.ings
@@ -687,7 +693,8 @@ function buildPreview(docs, ings) {
     if (n && !byName.has(n)) byName.set(n, g);
   }
   const groups = [];
-  const unmatched = [];
+  const newNames = [];
+  const newIngs = [];
   let bad = 0;
   let totalLines = 0;
   let totalAmount = 0;
@@ -703,17 +710,21 @@ function buildPreview(docs, ings) {
         continue;
       }
       const g = byName.get(nm);
-      if (!g) {
-        unmatched.push(nm);
-        continue;
+      const unit = String((l && l.unit) || '').trim() || String((g && g.unit) || '').trim() || '斤';
+      const cat = String((l && l.cat) || '').trim() || '其他';
+      /* 未匹配 → 自动建档（旧版同款）：预览阶段只登记清单，不写库；执行器里才真正 new 出 pending 料 */
+      if (!g && newNames.indexOf(nm) < 0) {
+        newNames.push(nm);
+        newIngs.push({ name: nm, unit: unit, cat: cat });
       }
       const amount = r2(qty * price);
       rows.push({
-        ingId: String(g.id),
-        name: String(g.name),
+        ingId: g ? String(g.id) : '',
+        name: g ? String(g.name) : nm,
+        isNew: !g,
         qty: qty,
         price: r2(price),
-        unit: String((l && l.unit) || '').trim() || String(g.unit || '').trim() || '斤',
+        unit: unit,
         amount: amount
       });
       totalLines++;
@@ -731,7 +742,10 @@ function buildPreview(docs, ings) {
   return {
     groups: groups,
     bad: bad,
-    unmatched: Array.from(new Set(unmatched)),
+    /* 将自动建档的新原料名（去重）；保留 unmatched 字段名以兼容既有前端/测试 */
+    unmatched: newNames,
+    /* 新增：自动建档原料的明细（带 unit/cat），供界面提示与执行器参考 */
+    newIngs: newIngs,
     totalLines: totalLines,
     totalAmount: r2(totalAmount),
     single: groups.length === 1
@@ -741,6 +755,9 @@ function buildPreview(docs, ings) {
 /**
  * 预览总入口（供 routes/inventory.js 调用）：base64 → 预览模型。
  * **红线：本函数只读，不写任何文件/数据库。**
+ *
+ * 未匹配原料不再导致失败：它们已按旧版逻辑计入 groups（`lines[].isNew=true`），
+ * 只有「整批没有任何可用明细行」才算失败。
  *
  * @param {{contentBase64?:string, bytes?:Buffer, fileName?:string}} input
  * @param {Array} ings 快照 data.ings
@@ -769,14 +786,10 @@ function previewImport(input, ings) {
   if (!pv.groups.length) {
     return {
       ok: false,
-      error: pv.unmatched.length
-        ? '识别到 ' + pv.unmatched.length + ' 种原料在「原料档案」中不存在：'
-          + pv.unmatched.slice(0, 10).join('、')
-          + (pv.unmatched.length > 10 ? '…' : '')
-          + '。请先在原料档案建档（本版批量导入不代建原料）'
-        : '未解析出可导入的明细行（数量需 >0、单价需 ≥0）',
+      error: '未解析出可导入的明细行（数量需 >0、单价需 ≥0）',
       format: parsed.format,
-      unmatched: pv.unmatched
+      unmatched: pv.unmatched,
+      newIngs: pv.newIngs
     };
   }
   return {
@@ -788,7 +801,9 @@ function previewImport(input, ings) {
     skipped: parsed.skipped || 0,
     /* bad = 解析层剔除（数量非数字等） + 预览层剔除（单价非数字/负单价/数量≤0/缺名） */
     bad: (parsed.bad || 0) + pv.bad,
+    /* unmatched / newIngs：本批将自动建档（待完善草稿）的新原料，界面据此提示 */
     unmatched: pv.unmatched,
+    newIngs: pv.newIngs,
     single: pv.single,
     totalLines: pv.totalLines,
     totalAmount: pv.totalAmount,

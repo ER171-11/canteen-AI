@@ -1,5 +1,9 @@
 @echo off
 setlocal EnableExtensions
+rem Switch the console to UTF-8 (65001). This file is saved as UTF-8, but the
+rem default console code page on zh-CN is 936 (GBK), which would mis-decode the
+rem Chinese DB path below and make "if exist" fail on an existing sandbox DB.
+chcp 65001 >nul
 cd /d "%~dp0"
 
 set "ROOT=%~dp0"
@@ -133,7 +137,10 @@ pause
 exit /b 1
 
 :ready
-start "" "%WEB_URL%"
+rem Open the URL via explorer: explorer hands the address to the system
+rem default browser. The old start "" "URL" form depends on the shell file
+rem association and can silently do nothing on some machines.
+explorer "%WEB_URL%"
 echo.
 echo ==============================================================
 echo   SANDBOX READY  (real DB is NOT touched)

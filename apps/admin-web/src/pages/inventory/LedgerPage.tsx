@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { rk } from '../../utils/rowKey'
+import { allValueOf, fromAll, withAll } from '../../utils/filterAll'
 import { Card, Empty, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchSnapshot } from '../../api'
@@ -176,21 +177,28 @@ export default function LedgerPage() {
         title="库存流水"
         extra={
           <Space>
+            {/* 首项固定「全部…」：不筛选=看全部流水，且随时一键退回全部 */}
             <Select
               allowClear
               placeholder="原料"
               style={{ width: 180 }}
-              options={ings.map((g) => ({ value: g.id, label: g.name }))}
-              value={ingFilter}
-              onChange={setIngFilter}
+              options={withAll(
+                ings.map((g) => ({ value: g.id, label: g.name })),
+                '全部原料',
+              )}
+              value={allValueOf(ingFilter)}
+              onChange={(v) => setIngFilter(fromAll<string>(v))}
             />
             <Select
               allowClear
               placeholder="类型"
               style={{ width: 140 }}
-              options={types.map((t) => ({ value: t, label: t }))}
-              value={typeFilter}
-              onChange={setTypeFilter}
+              options={withAll(
+                types.map((t) => ({ value: t, label: t })),
+                '全部类型',
+              )}
+              value={allValueOf(typeFilter)}
+              onChange={(v) => setTypeFilter(fromAll<string>(v))}
             />
           </Space>
         }

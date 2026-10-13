@@ -76,6 +76,7 @@ export const MENU: MenuGroup[] = [
     label: '堂食外卖',
     icon: <ShoppingOutlined />,
     children: [
+      { path: '/dinein/sales', title: '销售收银' },
       { path: '/dinein/tables', title: '桌台管理', reserved: true },
       { path: '/dinein/booking', title: '预订排队', reserved: true },
       { path: '/dinein/orders', title: '外卖订单', reserved: true },
@@ -116,6 +117,7 @@ export const MENU: MenuGroup[] = [
       { path: '/safety/trace', title: '溯源批次' },
       { path: '/safety/sample', title: '留样登记' },
       { path: '/safety/points', title: '食安点位统筹' },
+      { path: '/safety/progress', title: '拍照核验' },
       { path: '/safety/devices', title: '设备维保能耗' },
     ],
   },
@@ -189,6 +191,7 @@ export function resolveDeepLink(
   if (/外卖|对账/.test(t)) return '/dinein/delivery'
   if (/健康证/.test(t)) return '/hr/health-cert'
   if (/消毒|巡检/.test(t)) return '/safety/points'
+  if (/拍照核验|食安拍照|食安核验/.test(t)) return '/safety/progress'
   if (/留样/.test(t)) return '/safety/sample'
   if (/证照/.test(t)) return '/safety/licenses'
   if (/分账|财务/.test(t)) return '/finance/split'

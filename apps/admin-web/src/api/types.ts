@@ -101,6 +101,8 @@ export interface KpiItem {
   /** 同比/环比描述，如 "+12.3%" */
   delta?: string
   trend?: 'up' | 'down' | 'flat'
+  /** 副标（如毛利率的成本副标），旧版 KPI 副文案 */
+  sub?: string
 }
 
 /** 待办事项（BFF：text/kind/route/desc；前端归一 title） */
@@ -158,7 +160,7 @@ export interface ReportDaily {
   low_stock?: { total?: number; items?: LowStockItem[] }
   banner?: string
   kpis?: KpiItem[]
-  kpi?: Array<{ label: string; value: string | number; delta?: string | null }>
+  kpi?: Array<{ label: string; value: string | number; delta?: string | null; sub?: string }>
   heat_mini?: Array<{ hour: number; orders: number } | number>
   todos?: TodoItem[]
   alerts?: AlertItem[]
@@ -167,6 +169,73 @@ export interface ReportDaily {
   kitchen?: { workorders_total?: number; workorders_done?: number }
   /** 保本实况（代理A新增）：无此字段时前端回落 baoben_summary.kpi 静态价盘 */
   breakeven?: { be_day?: number; today_rev?: number; attain_pct?: number } | null
+  /** FP-DASH-15 菜品毛利排行（近30天 Top12：份数/营收/毛利/毛利率） */
+  top_dishes?: TopDishMargin[]
+}
+
+/** FP-DASH-15 菜品毛利排行单行（近30天） */
+export interface TopDishMargin {
+  rank: number
+  id?: string | null
+  name?: string
+  cat?: string
+  /** 近30天销量（份） */
+  qty?: number
+  /** 近30天营收（元） */
+  rev?: number
+  /** 近30天食材成本（元） */
+  cost?: number
+  /** 近30天毛利额（元） */
+  gp?: number
+  /** 毛利率 0-1（无营收为 null） */
+  gm?: number | null
+}
+
+/**
+ * FP-SALE-07 销售单列表行（GET /api/admin/sales）。
+ * 口径：应收/实收/欠款三数由 BFF `lib/sales_model.js`（ADR-008 唯一口径源）给出，
+ * 前端**只渲染不复算**；status 为派生结论（已作废 / 有欠款 / 已结清），不落库。
+ */
+export interface SaleListItem {
+  id?: string | null
+  no?: string | null
+  date?: string
+  channel?: string
+  method?: string
+  /** 菜品明细文字（菜名x份；…） */
+  detail?: string
+  /** 售价合计（amount 语义，ADR-008 §2.5） */
+  sub?: number
+  /** 折扣/抹零（默认 0） */
+  discount?: number
+  /** 应收合计 */
+  receivable?: number
+  /** 累计实收 */
+  received?: number
+  /** 欠款 = 应收 − 实收（派生值，不落库） */
+  debt?: number
+  /** 收款笔数（分次收款后可 > 1） */
+  payments_count?: number
+  /** 食材成本（配方成本 × 份数） */
+  cost?: number
+  /** 毛利率 0-1（无应收为 null） */
+  gm?: number | null
+  /** 已作废 / 有欠款 / 已结清 */
+  status?: string
+  void_operator?: string | null
+  void_at?: string | null
+  void_reason?: string | null
+  note?: string
+}
+
+/** GET /api/admin/sales 响应 */
+export interface SalesListResp {
+  ok?: boolean
+  count?: number
+  items?: SaleListItem[]
+  /** 累计汇总（应收/实收/折扣/欠款），与全量列表同口径 */
+  summary?: { receivable?: number; received?: number; discount?: number; debt?: number }
+  rev?: number | string | null
 }
 
 /** 审批中心动作状态（BFF 实际下发集合：queued 为入队初态英文遗留，其余中文） */
@@ -284,6 +353,8 @@ export interface RecipeItem {
   /** 五色：red/black/yellow/green/purple 或 红/黑/黄/绿/紫 */
   color: string
   filling?: string
+  /** 菜单真源副标题（menu-wufu 合并补全） */
+  subtitle?: string | null
   /** 后端可能下发数组，也可能因 UI 保存把 face_main 落成纯字符串 */
   face_main?: BomEntry[] | string
   main?: BomEntry[]
@@ -452,10 +523,14 @@ export interface InspectionRecord {
 }
 
 export interface InspectionEvery30 {
-  window_min: number
-  rounds_total: number
-  rounds_done: number
-  rounds_missing: string[]
+  /** 需每 30 分钟记录的节点数（卫生间类） */
+  node_total: number
+  /** 每日轮次数（48） */
+  rounds_per_day: number
+  /** 已记录的轮次序号 */
+  rounds_recorded: number[]
+  /** 尚未记录的轮次序号 */
+  rounds_missing: number[]
 }
 
 /* ---------------- 食安点位主数据（巡检 / 消毒 统一事实来源） ---------------- */
@@ -537,6 +612,91 @@ export interface SafetyPointSignResp {
   items: { key: string; url: string | null; public_url: string | null }[]
 }
 
+/* ---------------- 食安拍照上报（快照 data.safety.*；见 docs/safety-schema.md） ---------------- */
+
+/**
+ * 核验记录流程状态：
+ * pending 待 AI 初判 / ai_done AI 已判待复核 / reviewed 已人工复核 / error AI 初判失败（记录保留）
+ */
+export type SafetyCheckStatus = 'pending' | 'ai_done' | 'reviewed' | 'error'
+
+/** AI 初判结果（error = 初判调用失败，不删记录，可重试） */
+export type SafetyAiResult = 'pending' | 'pass' | 'fail' | 'error'
+
+/** 人工结论文域：AI 初判不得替代人工复核 */
+export type SafetyResult = 'pass' | 'fail'
+
+/** 点位展示态：none 未上报 / review 待人工复核 / error AI 失败待处理 */
+export type SafetyPointStatus = 'none' | 'pending' | 'pass' | 'fail' | 'review' | 'error'
+
+/** data.safety.checks 单条核验记录 */
+export interface SafetyCheck {
+  id: string
+  point_id: string
+  operator: string | null
+  /** 照片访问地址（对象存储直传）；不存图片本体 */
+  photo_url: string | null
+  /** AI 初判（与 final_result 分列存储，人工优先） */
+  ai_result: SafetyAiResult
+  ai_reason: string | null
+  /** 0-100；null = 未回/不可用 */
+  ai_confidence: number | null
+  /** 人工复核结论；null = 未复核 */
+  final_result: SafetyResult | null
+  review_reason: string | null
+  status: SafetyCheckStatus
+  created_at: string
+  reviewed_at?: string | null
+  reviewed_by?: string | null
+  model?: string | null
+}
+
+/**
+ * 进度页点位行（点位 + 当日最新核验记录）。
+ * 命名说明：`SafetyPoint` 已被巡检/消毒主数据（ext.fs_points）占用，
+ * 此处用 `SafetyProgressPoint` 以免破坏既有类型（任务 10「不破坏现有类型」）。
+ */
+export interface SafetyProgressPoint {
+  point_id: string
+  name: string
+  zone: string
+  /** 核验要点（AI 判定依据） */
+  target?: string
+  demo_image_url?: string | null
+  status: SafetyPointStatus
+  check_id: string | null
+  operator: string | null
+  photo_url: string | null
+  ai_result: SafetyAiResult | null
+  ai_reason: string | null
+  ai_confidence: number | null
+  final_result: SafetyResult | null
+  review_reason: string | null
+  reviewed_by?: string | null
+  created_at: string | null
+  /** 派生口径：人工优先，AI 兜底（pending/error 时为 null） */
+  effective_result: SafetyResult | null
+}
+
+/** GET /api/safety/progress?date= */
+export interface SafetyProgress {
+  ok: boolean
+  date: string
+  total_points: number
+  completed_points: number
+  pass_count: number
+  fail_count: number
+  review_count: number
+  error_count: number
+  /** true = 展示内置种子点位（尚未落 data.safety.points） */
+  using_defaults?: boolean
+  points: SafetyProgressPoint[]
+  rev?: number | string | null
+  generated_at?: string | null
+  hint?: string | null
+  updated_at?: string
+}
+
 /** GET /api/kitchen/board?date= → items 元素（按五色分组） */
 export interface KitchenBoardItem {
   color: string
@@ -561,11 +721,30 @@ export interface ListResp<T> {
 
 export type RecipesResp = ListResp<RecipeItem>
 
-/** 成本卡 BOM 行（均价口径动态成本） */
+/** 成本卡 BOM 行（均价口径动态成本；标准配方卡栏目见 lib/recipe_cost.js） */
 export interface CostCardLine {
   name: string
+  /** 配料类别：面主料 / 主料 / 辅料 / 调料 */
+  part?: string
   qty_text?: string
-  line_cost?: number
+  /** 配料净重（每批 g） */
+  qty_g?: number
+  /** 配料毛重 = 净重 ÷ 出成率（每批 g） */
+  gross_g?: number
+  /** 原料价格（元/库存单位） */
+  price_per_unit?: number | null
+  /** 库存单位 */
+  unit?: string
+  /** 出成率 0~1 */
+  yld?: number | null
+  /** 损耗率 % */
+  waste_pct?: number | null
+  /** 原料编号 */
+  ing?: string | null
+  ing_name?: string | null
+  /** 元/克（3 位） */
+  unit_price?: number | null
+  line_cost?: number | null
   /** 原料已建档且有均价 */
   matched?: boolean
 }
@@ -574,10 +753,18 @@ export interface CostCardLine {
 export interface CostCard {
   bom_lines?: CostCardLine[]
   batch_cost?: number
+  /** 一批出成（个） */
+  batch_pieces?: number
+  /** 每只成本（元） */
   unit_cost?: number
+  /** 一份 = 几只 */
+  portion_pieces?: number
+  /** 每份成本（元） */
+  portion_cost?: number
   price?: number
   gross_margin?: number
   missing_ings?: string[]
+  note?: string
 }
 
 export interface RecipeDetailResp {
@@ -621,6 +808,11 @@ export interface IngItem {
   last?: number | null
   /** 是否启用（false = 停用，不参与补货/告急统计） */
   on?: boolean
+  /**
+   * 【Node 超集】待完善草稿：进货批量导入自动建档的原料 = true。
+   * 照常参与库存与成本，只是主数据（分类/单位等）未被核对；补全后「确认转正」清除此标记。
+   */
+  pending?: boolean
   _u?: string
 }
 

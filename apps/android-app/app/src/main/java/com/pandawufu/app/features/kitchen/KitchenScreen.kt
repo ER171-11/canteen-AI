@@ -116,6 +116,36 @@ fun KitchenScreen(onOpenModule: (String) -> Unit = {}) {
             Text("按菜谱标准制作与品控 ›", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.8f))
         }
 
+        /*
+         * 食安拍照核验：厨房端直达入口。
+         * 此前该页只在「我的 → 人与合规」二级目录里，现场（厨师/帮厨）根本找不到拍照上报入口。
+         * 可见性按 foodsafe 权限；无写权限（如只读岗）仍可进页面看进度，只是拍不了。
+         */
+        if (AppModule.can("foodsafe")) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White)
+                    .clickable { onOpenModule(com.pandawufu.app.ui.Routes.M_SAFETY_CHECK) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "食安拍照核验",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = FiveGreen
+                )
+                Text(
+                    if (AppModule.can("foodsafe", write = true)) "点位拍照上报 ›" else "仅可查看进度 ›",
+                    fontSize = 10.5.sp,
+                    color = Sub
+                )
+            }
+        }
+
         com.pandawufu.app.features.modules.SiVerdictCard("kitchen")
 
         if (state.error != null || state.emptyHint != null) {

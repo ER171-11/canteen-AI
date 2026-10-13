@@ -11,7 +11,8 @@
  *   ② 应付 = Σ(qty×price)；markPaid → payments=[{amount:应付}]，否则 []（默认挂账）
  *   ③ **批末只 rebuildStock 一次**（N 张单据也是一次，防止 O(N×库存行数)）
  *   ④ 明细非法（数量≤0 / 单价非数字 / 缺原料名）整体拒绝，**绝不静默跳过**（红线⑥）
- *   ⑤ 不代建原料（与单张录入同口径），供应商名单去重并入 data.suppliers
+ *   ⑤ **未匹配原料自动建档**为「待完善草稿」（`pending:true`），不阻断导入、照常入账；
+ *      同批同名只建一次；供应商名单去重并入 data.suppliers
  *   ⑥ 空批次直接拒绝，且**不改动账面**
  *
  * 用法：node bff/lib/algorithms/recv_import.test.js
@@ -182,6 +183,64 @@ ok('手工单与导入单同日序号连续（无一单号重复）', () => {
   });
   assert.strictEqual(data.recv[0].no, 'JH20260929-01');
   assert.strictEqual(data.recv[1].no, 'JH20260929-02');
+});
+
+/* ⑧ 未匹配原料：自动建档为待完善草稿（撤销原「不代建」偏离，回归旧版 createIngFromImport :2806） */
+ok('未匹配原料：自动新建 pending 料、照常入账，进货单 1 张 2 行', () => {
+  const data = mkData();
+  const msg = inv.applyRecvImport(data, {
+    docs: [{
+      supplier: '海南菜篮子',
+      date: '2026-09-29',
+      lines: [
+        { ingId: 'i1', name: '五花肉', qty: 1, price: 10 },
+        { name: '挪威三文鱼', qty: 2, price: 99, unit: '斤', cat: '水产类' }
+      ]
+    }]
+  });
+  assert.strictEqual(data.recv.length, 1);
+  assert.strictEqual(data.recv[0].lines.length, 2);
+  assert.strictEqual(data.recv[0].payable, 208);
+  /* 自动建档 1 种：pending=true、单位/分类取单据列、buy=unit、conv=1 */
+  assert.strictEqual(data.ings.length, 3);
+  const nu = data.ings[2];
+  assert.strictEqual(nu.name, '挪威三文鱼');
+  assert.strictEqual(nu.pending, true);
+  assert.strictEqual(nu.unit, '斤');
+  assert.strictEqual(nu.cat, '水产类');
+  assert.strictEqual(nu.buy, '斤');
+  assert.strictEqual(nu.conv, 1);
+  /* 货照常入账：库存 = 2、均价 = 99；明细挂到新料 id */
+  assert.strictEqual(nu.stock, 2);
+  assert.strictEqual(nu.avg, 99);
+  assert.strictEqual(data.recv[0].lines[1].ing, nu.id);
+  assert.ok(/自动新建原料 1 种/.test(msg), msg);
+});
+
+/* ⑨ 未匹配行缺分类/单位：兜底「其他」「斤」（旧版 createIngFromImport 同款） */
+ok('新料缺 unit/cat：兜底为斤/其他，pending=true', () => {
+  const data = mkData();
+  inv.applyRecvImport(data, {
+    docs: [{ supplier: '甲', date: '2026-09-29', lines: [{ name: '南极冰菜', qty: 1, price: 5 }] }]
+  });
+  const nu = data.ings[2];
+  assert.strictEqual(nu.unit, '斤');
+  assert.strictEqual(nu.cat, '其他');
+  assert.strictEqual(nu.pending, true);
+});
+
+/* ⑩ 同批同名新料去重：只建 1 条，两行都挂同一个 ing */
+ok('同批同名新料去重：只建 1 条（第二次按名称精确命中上一条）', () => {
+  const data = mkData();
+  inv.applyRecvImport(data, {
+    docs: [
+      { supplier: '甲', date: '2026-09-29', lines: [{ name: '冬瓜', qty: 1, price: 3 }] },
+      { supplier: '乙', date: '2026-09-29', lines: [{ name: '冬瓜', qty: 2, price: 3 }] }
+    ]
+  });
+  assert.strictEqual(data.ings.length, 3);
+  assert.strictEqual(data.recv[0].lines[0].ing, data.recv[1].lines[0].ing);
+  assert.strictEqual(data.ings[2].stock, 3);
 });
 
 console.log('\n== recv.import 行为用例: ' + pass + '/' + pass + ' 通过 ==');

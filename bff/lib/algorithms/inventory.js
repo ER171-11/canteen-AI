@@ -112,6 +112,55 @@ function resolveIngId(data, payload) {
   return null;
 }
 
+/** 下一个原料 id：现有最大 I 数字 + 1，无则从 800 起（与 applyIngUpsert 同口径） */
+function nextIngId(ings) {
+  const nums = [];
+  for (const ing of arr(ings)) {
+    const m = String((ing && ing.id) || '');
+    if (m[0] === 'I' && /^\d+$/.test(m.slice(1))) nums.push(parseInt(m.slice(1), 10));
+  }
+  return 'I' + (nums.length ? Math.max(...nums) + 1 : 800);
+}
+
+/**
+ * 进货批量导入：未匹配原料自动建档（忠实回归旧版 createIngFromImport :2806）。
+ *
+ * 旧版建料口径：cat 兜底「其他」、unit 兜底「斤」、buy=unit、conv=1、stock/avg=0
+ * （入库后由 rebuildStock 依采购价生成均价）。
+ *
+ * 【Node 超集】`pending:true` —— 标为「待完善草稿」：门店记账不被阻断，但主数据信息
+ * （分类/库存单位/采购单位/包规…）算「未确认」，需人工到「原料档案 → 待完善」补全并「确认转正」。
+ * 2026-10-12 撤销「未匹配原料不代建」偏离后新增（旧版无此字段，recv.import 无 Python 对拍）。
+ */
+function createIngFromImport(ings, name, unit, cat) {
+  const u = String(unit || '').trim() || '斤';
+  const c = String(cat || '').trim() || '其他';
+  const row = {
+    id: nextIngId(ings),
+    name: String(name || '').trim(),
+    cat: c,
+    unit: u,
+    buy: u,
+    pack: u,
+    conv: 1,
+    spec: '',
+    moq: '',
+    sup: '',
+    qty: 0,
+    stock: 0,
+    safe: 0,
+    safety: 0,
+    est: 0,
+    yld: 1,
+    avg: 0,
+    on: true,
+    pending: true,
+    _u: nowIso()
+  };
+  ings.push(row);
+  return row;
+}
+
 /** 写库统一入口：无 ctx.store 则跳过（返回 false） */
 function storeInsert(ctx, table, row) {
   if (ctx && ctx.store && typeof ctx.store.insert === 'function') {
@@ -366,6 +415,12 @@ function applyIngUpsert(data, payload) {
     }
     if (payload.avg != null) ing.avg = toFloat(payload.avg);
     if (payload.on != null) ing.on = (payload.on === true || payload.on === 1 || payload.on === '1' || payload.on === 'true');
+    /* 【Node 超集】待完善草稿标记：confirm:true / pending:false → 转正；pending:true → 标为待完善 */
+    if (payload.confirm === true || payload.pending === false) {
+      delete ing.pending;
+    } else if (payload.pending === true) {
+      ing.pending = true;
+    }
     if (!ing.pack && ing.buy) ing.pack = ing.buy;
     ing._u = now;
   };
@@ -376,12 +431,7 @@ function applyIngUpsert(data, payload) {
       return 'ing 更新 ' + ing.id + ' ' + ing.name;
     }
   }
-  const nums = [];
-  for (const ing of ings) {
-    const m = String(ing.id || '');
-    if (m[0] === 'I' && /^\d+$/.test(m.slice(1))) nums.push(parseInt(m.slice(1), 10));
-  }
-  const newId = iid || ('I' + (nums.length ? Math.max(...nums) + 1 : 800));
+  const newId = iid || nextIngId(ings);
   const row = {
     id: newId,
     name: name || newId,
@@ -403,8 +453,10 @@ function applyIngUpsert(data, payload) {
     on: true,
     _u: now
   };
+  /* 【Node 超集】仅当调用方显式要求时才标「待完善」（缺省不写该键，保证与 Python 平价测试逐字段一致） */
+  if (payload.pending === true) row.pending = true;
   ings.push(row);
-  return 'ing 新建 ' + newId + ' ' + row.name;
+  return 'ing 新建 ' + newId + ' ' + row.name + (row.pending ? '（待完善）' : '');
 }
 
 /* ---------- quote.upsert ---------- */
@@ -919,7 +971,9 @@ function applyRecvVoid(data, payload, ctx) {
  *     云端只在预览通过后才投这一个动作 → 批内原子（整批成功或整批失败）。
  *   · 明细非法（数量 ≤0 / 单价非数字 / 单价 <0 / 无原料名）**直接 throw 拒绝**，
  *     不静默跳过（红线⑥）——预览层已经过滤过，执行期再出错说明数据被改过，必须留失败痕迹。
- *   · **不代建原料**：与应用层安全项一致（批量自动建档会把错误的单位/分类写进主数据，且不可撤销）。
+ *   · **未匹配原料自动建档**（忠实回归旧版 createIngFromImport :2806；2026-10-12 撤销原「不代建」偏离）：
+ *     依次按「档案 id 精确 → 名称/别名」匹配，仍匹配不上才新建，且建出来的是 `pending:true` 的**待完善草稿**
+ *     —— 不阻断进货单 / 结算生成，门店随后到「原料档案 → 待完善」补全信息并「确认转正」。
  *   · 无用依赖：不做 N 次 rebuildStock，也不会绕过 /api/actions 直写。
  *
  * @param {object} data 业务数据快照
@@ -928,12 +982,16 @@ function applyRecvVoid(data, payload, ctx) {
 function applyRecvImport(data, payload) {
   if (data.recv === undefined || data.recv === null) data.recv = [];
   if (!Array.isArray(data.recv)) throw new Error('data.recv 不是数组');
+  if (data.ings === undefined || data.ings === null) data.ings = [];
+  if (!Array.isArray(data.ings)) throw new Error('data.ings 不是数组');
+  const ings = data.ings;
   const recv = data.recv;
   const docs = Array.isArray(payload && payload.docs) ? payload.docs : [];
   if (!docs.length) throw new Error('recv.import 缺 docs（空批次已拒绝，未改动账面）');
   const markPaid = !!(payload && payload.markPaid);
   let newDoc = 0;
   let newLine = 0;
+  let newIng = 0;
   let total = 0;
 
   for (const d of docs) {
@@ -950,8 +1008,26 @@ function applyRecvImport(data, payload) {
       const price = toFloat(it.price || 0);
       if (!(qty > 0)) throw new Error('recv.import 明细数量需 > 0：' + name);
       if (!isFinite(price) || price < 0) throw new Error('recv.import 单价非法（需 ≥ 0 的数字）：' + name);
+      /* 原料匹配：① 档案 id 精确 → ② 名称精确（旧版 findIngByName 同口径）
+         → ③ 自动建档（待完善草稿）。同批次里同名新料在 ② 命中刚建的 pending 料，不会重复建。 */
+      const rawId = String(it.ingId || it.ing_id || it.ing || '').trim();
+      let gid = '';
+      if (rawId) {
+        for (const g of ings) {
+          if (String((g && g.id) || '') === rawId) { gid = rawId; break; }
+        }
+      }
+      if (!gid) {
+        for (const g of ings) {
+          if (String((g && g.name) || '').trim() === name) { gid = String(g.id); break; }
+        }
+      }
+      if (!gid) {
+        gid = createIngFromImport(ings, name, it.unit, it.cat).id;
+        newIng += 1;
+      }
       const line = {
-        ing: it.ingId || it.ing_id || it.ing,
+        ing: gid,
         name: name,
         qty: qty,
         price: price,
@@ -994,6 +1070,7 @@ function applyRecvImport(data, payload) {
   /* 批末统一重算一次台账（O(单据数 + 库存行数)，而非 O(N × 库存行数)） */
   const rb = rebuildStock(data);
   return 'recv.import 导入 ' + newDoc + ' 张进货单（' + newLine + ' 行，应付合计 ' + pf(total) + '）'
+    + (newIng ? '，自动新建原料 ' + newIng + ' 种（待完善草稿，请到「原料档案」补全）' : '')
     + (markPaid ? '，已按应付全额登记付款' : '，默认挂账（可后续补付）') + '；' + rb;
 }
 

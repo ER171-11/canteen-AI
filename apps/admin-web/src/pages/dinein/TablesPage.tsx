@@ -18,6 +18,7 @@ import {
 import { fetchSnapshot, submitAndConfirmAction } from '../../api'
 import type { PosTable } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
+import { allValueOf, fromAll, withAll } from '../../utils/filterAll'
 import { COLORS } from '../../theme'
 
 const STATUS_STYLE: Record<string, { bg: string; label: string; wire: string }> = {
@@ -200,16 +201,20 @@ export default function TablesPage() {
         title="桌台平面图 · 大厅 / 包间"
         extra={
           <Space>
+            {/* 首项固定「全部分区」：不筛选=看全部桌台，且随时一键退回全部 */}
             <Select
               allowClear
               placeholder="分区"
-              style={{ width: 100 }}
-              value={zoneFilter}
-              onChange={setZoneFilter}
-              options={[
-                { value: '大厅', label: `大厅 ${stats.大厅}` },
-                { value: '包间', label: `包间 ${stats.包间}` },
-              ]}
+              style={{ width: 120 }}
+              value={allValueOf(zoneFilter)}
+              onChange={(v) => setZoneFilter(fromAll<string>(v))}
+              options={withAll(
+                [
+                  { value: '大厅', label: `大厅 ${stats.大厅}` },
+                  { value: '包间', label: `包间 ${stats.包间}` },
+                ],
+                '全部分区',
+              )}
             />
             <Button type="primary" onClick={() => openEdit()}>
               新增桌台

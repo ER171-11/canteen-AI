@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { rk } from '../../utils/rowKey'
 import {
   Alert,
   Button,
@@ -15,7 +14,6 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tag,
   Timeline,
   Typography,
@@ -25,6 +23,7 @@ import { fetchAdminDishes, fetchKitchenRecipe, fetchKitchenRecipes, fetchSnapsho
 import type { CostCard, Dish, RecipeItem } from '../../api/types'
 import ColorBadge from './components/ColorBadge'
 import BomTable from './components/BomTable'
+import StandardRecipeCard from './components/StandardRecipeCard'
 import MockAlert from './components/MockAlert'
 import { colorMeta, colorOrderKey, FIVE_COLOR_ORDER } from './colorMeta'
 import { COLORS } from '../../theme'
@@ -335,15 +334,19 @@ export default function RecipesPage() {
                         <Descriptions.Item label="批成本">
                           {costCard.batch_cost != null ? `¥${Number(costCard.batch_cost).toFixed(2)}` : '-'}
                         </Descriptions.Item>
-                        <Descriptions.Item label="份成本">
+                        <Descriptions.Item label="每只成本">
                           {costCard.unit_cost != null ? `¥${Number(costCard.unit_cost).toFixed(2)}` : '-'}
                         </Descriptions.Item>
                         <Descriptions.Item label="售价">
                           {costCard.price != null ? `¥${Number(costCard.price).toFixed(2)}` : '-'}
                         </Descriptions.Item>
                         <Descriptions.Item label="毛利率">
+                          {/* BFF 下发百分比（88.9）；兼容历史小数形态（≤1 视为比例） */}
                           {costCard.gross_margin != null
-                            ? `${(Number(costCard.gross_margin) * 100).toFixed(1)}%`
+                            ? `${(Number(costCard.gross_margin) <= 1
+                                ? Number(costCard.gross_margin) * 100
+                                : Number(costCard.gross_margin)
+                              ).toFixed(1)}%`
                             : '-'}
                         </Descriptions.Item>
                       </Descriptions>
@@ -386,52 +389,26 @@ export default function RecipesPage() {
                   message={`${costCard.missing_ings!.length} 项原料未建档/无均价：${costCard.missing_ings!.join('、')}`}
                 />
               )}
-              {costCard && (costCard.bom_lines?.length ?? 0) > 0 && (
-                <Table
-                  size="small"
-                  rowKey={rk}
-                  dataSource={costCard.bom_lines}
-                  pagination={false}
-                  style={{ marginBottom: 16 }}
-                  columns={[
-                    { title: '原料', dataIndex: 'name' },
-                    { title: '用量', dataIndex: 'qty_text', width: 140, render: (v) => v ?? '-' },
-                    {
-                      title: '行成本',
-                      dataIndex: 'line_cost',
-                      width: 100,
-                      align: 'right',
-                      render: (v) => (v != null ? `¥${Number(v).toFixed(2)}` : '-'),
-                    },
-                    {
-                      title: '均价',
-                      dataIndex: 'matched',
-                      width: 110,
-                      render: (v: boolean | undefined) =>
-                        v ? (
-                          <Tag color={COLORS.green}>已匹配</Tag>
-                        ) : (
-                          <Tag color={COLORS.red}>未建档/无均价</Tag>
-                        ),
-                    },
-                  ]}
-                />
+              {costCard && (costCard.bom_lines?.length ?? 0) > 0 ? (
+                <StandardRecipeCard recipe={selected} card={costCard} />
+              ) : (
+                <>
+                  <Typography.Title level={5}>面皮（色源）face_main</Typography.Title>
+                  <BomTable data={selected.face_main} />
+                  <Typography.Title level={5} style={{ marginTop: 16 }}>
+                    主馅 main
+                  </Typography.Title>
+                  <BomTable data={selected.main} />
+                  <Typography.Title level={5} style={{ marginTop: 16 }}>
+                    辅料 aux
+                  </Typography.Title>
+                  <BomTable data={selected.aux} />
+                  <Typography.Title level={5} style={{ marginTop: 16 }}>
+                    调味 seasoning
+                  </Typography.Title>
+                  <BomTable data={selected.seasoning} />
+                </>
               )}
-
-              <Typography.Title level={5}>面皮（色源）face_main</Typography.Title>
-              <BomTable data={selected.face_main} />
-              <Typography.Title level={5} style={{ marginTop: 16 }}>
-                主馅 main
-              </Typography.Title>
-              <BomTable data={selected.main} />
-              <Typography.Title level={5} style={{ marginTop: 16 }}>
-                辅料 aux
-              </Typography.Title>
-              <BomTable data={selected.aux} />
-              <Typography.Title level={5} style={{ marginTop: 16 }}>
-                调味 seasoning
-              </Typography.Title>
-              <BomTable data={selected.seasoning} />
 
               <Typography.Title level={5} style={{ marginTop: 24 }}>
                 工艺参数
@@ -448,18 +425,22 @@ export default function RecipesPage() {
                 <span style={{ color: '#999' }}>未配置</span>
               )}
 
-              <Typography.Title level={5} style={{ marginTop: 24 }}>
-                制作步骤
-              </Typography.Title>
-              {selected.steps && selected.steps.length > 0 ? (
-                <Timeline
-                  items={selected.steps.map((s, i) => ({
-                    color: colorMeta(selected.color).hex,
-                    children: `${i + 1}. ${s}`,
-                  }))}
-                />
-              ) : (
-                <span style={{ color: '#999' }}>未配置</span>
+              {(!costCard || !(costCard.bom_lines && costCard.bom_lines.length)) && (
+                <>
+                  <Typography.Title level={5} style={{ marginTop: 24 }}>
+                    制作步骤
+                  </Typography.Title>
+                  {selected.steps && selected.steps.length > 0 ? (
+                    <Timeline
+                      items={selected.steps.map((s, i) => ({
+                        color: colorMeta(selected.color).hex,
+                        children: `${i + 1}. ${s}`,
+                      }))}
+                    />
+                  ) : (
+                    <span style={{ color: '#999' }}>未配置</span>
+                  )}
+                </>
               )}
             </Card>
           )}

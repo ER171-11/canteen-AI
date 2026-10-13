@@ -23,6 +23,8 @@
  */
 const { loadSnapshot } = require('./snapshot');
 const foodsafety = require('../lib/foodsafety');
+/* ADR-008：销售应收模型的**唯一口径源**（防御性取值 + 派生欠款），本文件只做行级组装 */
+const model = require('../lib/sales_model');
 
 const BOM = '\ufeff';
 const JSON_TYPE = 'application/json; charset=utf-8';
@@ -263,7 +265,24 @@ function saleDetail(s, data) {
   return parts.join('；');
 }
 
-/** FP-SET-14 销售应收实收 CSV（旧版 #btnCsvSale，HTML:5308-5316） */
+/** 单行食材成本（配方成本 × 份数；无明细时回落行级 dish/qty，与 salesRows/salesList 同口径） */
+function saleCostOf(s, map) {
+  let cost = 0;
+  const lines = Array.isArray(s.lines) ? s.lines : (Array.isArray(s.items) ? s.items : null);
+  if (lines && lines.length) {
+    for (const l of lines) {
+      const c = costOfDish(map, l && (l.dish != null ? l.dish : (l.sku != null ? l.sku : l.name)));
+      if (c != null) cost += c * num(l && l.qty, 1);
+    }
+  } else {
+    const c = costOfDish(map, s.dish);
+    if (c != null) cost += c * num(s.qty, 1);
+  }
+  return r2(cost);
+}
+
+/** FP-SET-14 销售应收实收 CSV（旧版 #btnCsvSale，HTML:5308-5316）
+ *  口径一律走 lib/sales_model（ADR-008）；折扣字段无值时导出空（不写 0，避免与「真 0 折扣」混淆）。 */
 function salesRows(snap) {
   const data = (snap && snap.data) || {};
   const map = dishCostMap(snap);
@@ -271,25 +290,12 @@ function salesRows(snap) {
   const list = arr(data.sales).slice().sort((a, b) => String((a && a.date) || '').localeCompare(String((b && b.date) || '')));
   for (const s of list) {
     if (!s) continue;
-    const sub = s.sub != null ? num(s.sub) : num(s.amount);
-    const discount = s.discount != null ? num(s.discount) : '';
-    const receivable = s.receivable != null ? num(s.receivable) : sub;
-    const received = Array.isArray(s.payments)
-      ? r2(s.payments.reduce((acc, p) => acc + num(p && p.amount), 0))
-      : receivable;
-    const debt = r2(receivable - received);
-    let cost = 0;
-    const lines = Array.isArray(s.lines) ? s.lines : (Array.isArray(s.items) ? s.items : null);
-    if (lines && lines.length) {
-      for (const l of lines) {
-        const c = costOfDish(map, l && (l.dish != null ? l.dish : (l.sku != null ? l.sku : l.name)));
-        if (c != null) cost += c * num(l && l.qty, 1);
-      }
-    } else {
-      const c = costOfDish(map, s.dish);
-      if (c != null) cost += c * num(s.qty, 1);
-    }
-    cost = r2(cost);
+    const sub = model.subOf(s);
+    const discount = s.discount != null ? model.discountOf(s) : '';
+    const receivable = model.receivableOf(s);
+    const received = model.paidOf(s);
+    const debt = model.debtOf(s);
+    const cost = saleCostOf(s, map);
     const gm = receivable ? ((receivable - cost) / receivable).toFixed(4) : '';
     rows.push([
       s.no || s.id, s.date, s.ch || s.channel, saleDetail(s, data),
@@ -297,6 +303,56 @@ function salesRows(snap) {
     ]);
   }
   return rows;
+}
+
+/**
+ * FP-SALE-07 销售单列表（只读 JSON 组装）。
+ *
+ * 应收/实收/欠款三数沿用 lib/sales_model（ADR-008 口径唯一源），本函数只做行级组装：
+ *   · 单号/日期/渠道/菜品明细/售价合计/折扣/应收/实收/欠款/食材成本/毛利率/状态
+ *   · 状态由 sales_model.statusOf 派生（已作废 / 有欠款 / 已结清），**不落库**
+ * 红线①：只读——不写快照、不入队、不碰业务库。
+ */
+function salesList(snap) {
+  const data = (snap && snap.data) || {};
+  const map = dishCostMap(snap);
+  const list = arr(data.sales)
+    .slice()
+    .sort((a, b) => String((b && b.date) || '').localeCompare(String((a && a.date) || '')));
+  const items = [];
+  for (const s of list) {
+    if (!s) continue;
+    const receivable = model.receivableOf(s);
+    const cost = saleCostOf(s, map);
+    items.push({
+      id: s.id != null ? String(s.id) : null,
+      no: s.no || (s.id != null ? String(s.id) : null),
+      date: model.saleDateOf(s),
+      channel: s.ch || s.channel || '',
+      method: s.method || '',
+      detail: saleDetail(s, data),
+      sub: model.subOf(s),
+      discount: model.discountOf(s),
+      receivable: receivable,
+      received: model.paidOf(s),
+      debt: model.debtOf(s),
+      payments_count: arr(s.payments).length,
+      cost: cost,
+      gm: receivable ? r2((receivable - cost) / receivable) : null,
+      status: model.statusOf(s),
+      void_operator: s.void_operator || null,
+      void_at: s.void_at || null,
+      void_reason: s.void_reason || null,
+      note: s.note || '',
+    });
+  }
+  return {
+    ok: true,
+    count: items.length,
+    items: items,
+    summary: model.summarize(arr(data.sales), {}),
+    rev: snap ? snap.rev : null,
+  };
 }
 
 /** FP-SET-11 全量数据备份 JSON：快照原样（可回灌 /api/snapshot/push） */
@@ -389,6 +445,7 @@ module.exports = {
   ingsRows,
   dishesRows,
   salesRows,
+  salesList,
   samplesRows,
   backupJSON,
   dishCostMap,

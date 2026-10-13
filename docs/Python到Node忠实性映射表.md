@@ -49,14 +49,29 @@ Python 原实现完整保留在 `old/store-inventory-legacy/`，未被删除。
 两处**有意偏离**已登记：① 超付由旧版的静默截断（`Math.min(paid,payable)`）改为**拒绝执行**（红线 ⑥ 不静默降级）；
 ② 实收量只登记 `line.recvQty`、不参与 `rebuildStock` 计价（旧版把实收数解析进 `qty`）。
 
-**补注（2026-09-29，阶段 3 / FP-RECV-09）：`rebuildStock` 的「跳过已作废单」是**未登记的偏离，待人工裁定**。**
+**补注（2026-10-12，红线①裁定收口）：`rebuildStock` 的「跳过已作废单」已裁定为【有意偏离】并纳入哈希基线。**
 T6-B（提交 `7367c1a`）在 `bff/lib/algorithms/stock.js::rebuildStock` 内加了一条
 「`status` 含 `作废`/`void` 则跳过该进货单」的分支（用于让「作废」动作回退库存），
 而 Python 原实现 `python-runtime/queue_consumer.py:220-224` 的重放循环只有「草稿/待」两个跳过条件。
 差异只在新版独有的「已作废」状态下才会出现（旧版作废是**物理删除**，该状态不进 Python 输入域），
 因此 `stock.test.js` 的 fixture 盖不到它，上表的 6/6 平价结论**不受影响，但也不能证明这段行为一致**。
-按红线①原文（`rebuildStock` 只可调用、不可改写）本项需人工裁定：或登记为「有意偏离」并把 `stock.js` 纳入哈希基线，
-或改回原实现另寻回退路径。阶段 5（T6 收尾）只做登记，未改代码。
+红线①原文（`rebuildStock` 只可调用、不可改写）经人工裁定采用**方案①（有意偏离 + 纳入哈希基线）**，理由：
+旧版作废是物理删除（`delRecv` HTML:1676），新版改为留痕（`status='已作废'`）+ 重放时跳过作废单，二者对库存台账效果等价，
+且新版保留审计、更安全；`stock.js` 已纳入 `ci/redline_baseline.sha256`（后续任何改动须重算哈希并写明理由）。
+批准人：`【待老板签字】`（2026-10-12 裁定）。
+
+**补注（2026-10-12，撤销偏离 / FP-RECV-02）：未匹配原料「自动建档」回归旧版 + 新增 `ings[].pending` 超集字段。**
+T6-C 曾把「旧版 `createIngFromImport`（HTML:2806）自动新建原料」判为【有意偏离】，改成「未匹配行剔除 + 不代建」。
+经当面裁定**撤销该偏离**（门店抱怨一次导入被拆成两步、且首屏只给「已剔除」的结果）：
+`lib/recv_import.js::buildPreview` 不再剔除未匹配行（计入 `groups` 并标 `lines[].isNew`、汇总 `newIngs`），
+`algorithms/inventory.js::applyRecvImport` 改为「档案 id 精确 → 名称精确（旧版 `findIngByName`）→ 自动建档」，
+建料口径照抄旧版（cat 兜底「其他」、unit 兜底「斤」、buy=unit、conv=1、stock/avg=0）。
+唯一新增：`ings[].pending = true`（**Node 超集**，Python 无此字段）—— 新料是「待完善草稿」，进货单/结算照常生成
+（不阻断记账），门店到「原料档案 → 待完善」补全信息并「确认转正」后清除该标记。
+`applyIngUpsert` 同步支持 `pending:true` 置位 / `confirm:true`|`pending:false` 清除，但**仅在 payload 显式传入时才写该键**，
+故上文 `apply_ing_upsert` 的平价 fixture（`ingCreate` / `ingCreateNulls` 等）仍逐字段一致，**6/6 结论不受影响**。
+`recv.import` 本身无 Python 分支（见 `recv_import.test.js` 头注），其行为由行为契约测试锁（该文件 10 例）。
+裁定人：`【待老板签字】`（2026-10-12）。
 
 > 迁移时每个算法文件头注释均标注来源，例如
 > `bff/lib/algorithms/stock.js`：「迁移自 queue_consumer.py rebuild_stock / resolve_ing_id」；

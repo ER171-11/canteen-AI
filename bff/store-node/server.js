@@ -211,6 +211,7 @@ function makeHandler(store, cfg, staticRoot) {
     const [merged, conflicts] = mergeMod.merge(base.data, data, cur.data);
     // 云端队列消费者已在 baseRev 上应用动作；冲突时业务集合以 QUEUE 侧为准，
     // 否则入库/重算库存会被对端旧 ings 盖回（orders/recv 也曾不参与合并）。
+    // 这是一致性保底（防旧数据盖回），不是「审批中心」的审批放行特权。
     if (String(machine).toUpperCase() === 'QUEUE') {
       for (const coll of ['ings', 'orders', 'recv', 'logs', 'pos', 'sales', 'quotes']) {
         if (Array.isArray(data[coll])) merged[coll] = data[coll];
@@ -417,6 +418,53 @@ function parseArgs(argv) {
   return args;
 }
 
+/** 只读探测某库的 rev（文件不存在/非本服务 schema → null，不抛） */
+function peekRev(file) {
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      const row = db.prepare('SELECT rev, updated_at FROM docs WHERE id=1').get();
+      return row ? { rev: Number(row.rev) || 0, updated_at: row.updated_at || null } : null;
+    } finally { db.close(); }
+  } catch (e) { return null; }
+}
+
+/**
+ * 空库守卫（防「审批通过后入库单/库存永远没数据」这类静默事故）。
+ *
+ * 背景：`--db` 指向的库若不存在，Store 会**照常新建一个空库**。此时：
+ *   店内服务照常起、消费器照常执行，审批通过的动作全落进这个空库，推送出去也是空数据 ——
+ *   管理端显示「已通过/已执行」，入库单、库存、欠款却永远不变。
+ * 触发条件很现实：手工启动时 `--db` 写错路径 / 指向已删除的旧库 / 中文路径被终端编码打坏
+ *   （看到的是「餐厅系统_演练.db」，实际落成另一个名字的空库文件）。
+ * 这里在「目标库为空 + 标准库里有数据」时直接拒绝启动，并给出正确命令；
+ * 确需以空库启动（如新门店初始化）请显式加 `--allow-empty`。
+ */
+function assertNotEmptyStart(cfg, args) {
+  if (args['allow-empty']) return;
+  const p = abspath(cfg.db_path);
+  const cur = peekRev(p);
+  if (cur && cur.rev > 0) return;          // 目标库有数据，放行
+  const others = [envGuard.MAIN_DB, envGuard.SANDBOX_DB]
+    .filter((f) => !envGuard.samePath(f, p))
+    .map((f) => ({ f: f, info: peekRev(f) }))
+    .filter((x) => x.info && x.info.rev > 0);
+  if (!others.length) return;              // 没有任何标准库可对照（全新环境）→ 放行
+  throw new Error([
+    '[store-node] 拒绝启动：目标库为空，但已存在含数据的标准库（db_path 多半写错）',
+    '  目标库  : ' + p + (cur ? '（空库 rev=' + cur.rev + '）' : '（文件不存在，启动即新建空库）'),
+  ].concat(
+    others.map((x) => '  已有数据: ' + x.f + '（rev=' + x.info.rev + '）'),
+    [
+      '  风险    : 审批中心会显示「已通过/已执行」，但动作全落进空库 —— 入库单 / 库存 / 欠款不会有变化。',
+      '  修正    : 用启动脚本（启动演练.cmd 演练库 / 启动测试.cmd 真实库），或显式指定库：',
+      '            node bff/store-node/server.js --db "' + envGuard.SANDBOX_DB + '"',
+      '  确需空库: 追加 --allow-empty（例如新门店初始化）。',
+    ],
+  ).join('\n'));
+}
+
 async function main() {
   const cfg = loadConfig();
   const args = parseArgs(process.argv.slice(2));
@@ -425,6 +473,7 @@ async function main() {
   if (args.db) cfg.db_path = args.db;
   if (args.machine) cfg.machine_id = args.machine;
   if (args['open-browser']) cfg.open_browser = true;
+  assertNotEmptyStart(cfg, args);
 
   const line = '='.repeat(62);
   console.log(line);
@@ -461,4 +510,6 @@ module.exports = {
   startServer,
   parseArgs,
   main,
+  peekRev,
+  assertNotEmptyStart,
 };

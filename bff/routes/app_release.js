@@ -60,6 +60,16 @@ function humanSize(n) {
   return mb >= 1 ? mb.toFixed(1) + ' MB' : (n / 1024).toFixed(0) + ' KB';
 }
 
+/** 排除虚拟网卡/链路本地地址（VirtualBox、Docker/WSL、169.254 等），避免二维码指向手机不可达的 IP */
+function isVirtualOrLocal(ip) {
+  return (
+    ip.startsWith('169.254.') || // 链路本地
+    ip.startsWith('192.168.56.') || // VirtualBox Host-Only 默认网段
+    ip.startsWith('198.18.') || // 基准测试保留段（部分虚拟网卡使用）
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) // Docker/WSL/Hyper-V 常用 172.16-31 段
+  );
+}
+
 function lanIPv4() {
   const out = [];
   const ifaces = os.networkInterfaces();
@@ -68,7 +78,8 @@ function lanIPv4() {
       if (info.family === 'IPv4' && !info.internal) out.push(info.address);
     }
   }
-  return out;
+  const real = out.filter((ip) => !isVirtualOrLocal(ip));
+  return real.length > 0 ? real : out;
 }
 
 function port() {

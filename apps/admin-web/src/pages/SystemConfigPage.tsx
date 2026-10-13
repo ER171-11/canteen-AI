@@ -16,13 +16,16 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { client } from '../api/client'
 import {
+  createSnapshotBackup,
   fetchExportBackupBlob,
   fetchExportCsvBlob,
   fetchSettleTemplate,
   fetchSnapshot,
+  fetchSnapshotBackups,
   postAction,
   saveSettleTemplate,
 } from '../api'
+import type { SnapshotBackupItem } from '../api'
 import type { SettleTemplate } from '../api/types'
 import { DEFAULT_SETTLE_TPL, normalizeSettleTpl } from './inventory/settle/template'
 import { downloadBlob } from './inventory/settle/download'
@@ -35,6 +38,17 @@ function todayStr(): string {
   const d = new Date()
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** FP-SET-07 备份体积展示（KB / MB） */
+function fmtSize(n: number): string {
+  if (!n) return '-'
+  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(2)} MB` : `${(n / 1024).toFixed(1)} KB`
+}
+
+/** FP-SET-07 备份时间展示（ISO → YYYY-MM-DD HH:mm:ss 本地近似） */
+function fmtBackupTime(iso: string | null): string {
+  return iso ? iso.replace('T', ' ').slice(0, 19) : '-'
 }
 
 /** FP-SET-01 通道一览行 */
@@ -235,6 +249,52 @@ export default function SystemConfigPage() {
       .then((s) => setSnap(s as unknown as Record<string, unknown>))
       .catch(() => setSnap(null))
   }, [])
+
+  /* ---- FP-SET-07 服务端快照备份（手动打快照 + 备份列表；形态见 ADR-009 §2.1）----
+   * 只写服务端 data/snapshots/ 的备份文件：**不写业务库、不入审批队列**。
+   * 回滚（FP-SET-10 的另一半）属高危写，须经运营管理员审批走队列，本页暂不提供入口。
+   */
+  const [backups, setBackups] = useState<SnapshotBackupItem[]>([])
+  const [backupsLoading, setBackupsLoading] = useState(false)
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupNote, setBackupNote] = useState('')
+  const [backupKeep, setBackupKeep] = useState(0)
+
+  const loadBackups = useCallback(() => {
+    setBackupsLoading(true)
+    fetchSnapshotBackups()
+      .then((r) => {
+        setBackups(r.items || [])
+        setBackupKeep(r.keep || 0)
+      })
+      .catch(() => {
+        setBackups([])
+        setBackupKeep(0)
+      })
+      .finally(() => setBackupsLoading(false))
+  }, [])
+
+  useEffect(() => {
+    loadBackups()
+  }, [loadBackups])
+
+  const doBackup = async () => {
+    setBackupBusy(true)
+    try {
+      const r = await createSnapshotBackup(backupNote.trim())
+      message.success(
+        `已打快照备份 ${r.item.id}（rev ${r.item.rev ?? '-'}）` +
+          (r.dropped ? `，已淘汰最旧 ${r.dropped} 份` : ''),
+      )
+      setBackupNote('')
+      loadBackups()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '打快照失败（仅老板/店长可操作）')
+    } finally {
+      setBackupBusy(false)
+    }
+  }
 
   return (
     <div>
@@ -494,6 +554,51 @@ export default function SystemConfigPage() {
     </Card>
 
     <Card
+      title="快照备份"
+      style={{ marginTop: 16 }}
+      extra={
+        <Space>
+          <Typography.Text type="secondary">
+            共 {backups.length} 份{backupKeep ? ` · 最多保留 ${backupKeep} 份` : ''}
+          </Typography.Text>
+          <Button size="small" loading={backupsLoading} onClick={loadBackups}>
+            刷新
+          </Button>
+        </Space>
+      }
+    >
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="服务端快照备份（ADR-009）：把当前快照手动存为一份历史备份（bff/data/snapshots/），只写备份文件，不写业务库、不入审批队列。回滚属高危写，须经运营管理员审批走审批中心，尚未开放入口。"
+      />
+      <Space style={{ marginBottom: 12 }} wrap>
+        <Input
+          value={backupNote}
+          disabled={!canWrite}
+          onChange={(e) => setBackupNote(e.target.value)}
+          style={{ width: 240 }}
+          placeholder="备份说明（可选）"
+        />
+        <Tooltip title={canWrite ? undefined : noWriteTip}>
+          <Button type="primary" loading={backupBusy} disabled={!canWrite} onClick={doBackup}>
+            立即打快照备份
+          </Button>
+        </Tooltip>
+      </Space>
+      <Table<SnapshotBackupItem>
+        rowKey="id"
+        size="small"
+        loading={backupsLoading}
+        pagination={false}
+        locale={{ emptyText: '暂无快照备份' }}
+        dataSource={backups}
+        columns={BACKUP_COLUMNS}
+      />
+    </Card>
+
+    <Card
       title="各模块数据输入通道一览"
       style={{ marginTop: 16 }}
       extra={
@@ -519,6 +624,20 @@ const CHANNEL_COLUMNS: ColumnsType<ChannelRow> = [
   { title: '数据来源', dataIndex: 'source', width: 200 },
   { title: '输入方式', dataIndex: 'input' },
   { title: '当前状态', dataIndex: 'status', width: 240 },
+]
+
+/** FP-SET-07 快照备份列表列（只读展示；回滚入口待 FP-SET-10 走审批队列后开放） */
+const BACKUP_COLUMNS: ColumnsType<SnapshotBackupItem> = [
+  { title: '备份时间', dataIndex: 'created_at', width: 180, render: (v: string) => fmtBackupTime(v) },
+  {
+    title: '快照 rev',
+    dataIndex: 'rev',
+    width: 100,
+    render: (v: number | null) => (v == null ? '-' : String(v)),
+  },
+  { title: '大小', dataIndex: 'size', width: 100, render: (v: number) => fmtSize(v) },
+  { title: '操作人', dataIndex: 'operator', width: 120, render: (v: string | null) => v || '-' },
+  { title: '说明', dataIndex: 'note', render: (v: string) => v || '-' },
 ]
 
 /**

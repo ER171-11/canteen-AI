@@ -538,6 +538,23 @@ object BossIa {
             actionTypes = listOf("sample.log", "fs.disinfect", "fs.cert.upsert", "fs.trace_scan")
         ),
         Module(
+            label = "拍照核验",
+            group = "人与合规",
+            route = "m/safety-check",
+            gridSub = "点位·拍照·初判",
+            oneLiner = "点位拍照上报 · AI 初判 · 人工复核",
+            pills = listOf("待检", "已上报", "待复核"),
+            leaves = mapOf(
+                "待检" to listOf("今日应检点位", "核验要点", "拍照上报"),
+                "已上报" to listOf("已上报，待确认", "AI 初判结果"),
+                "待复核" to listOf("不合格项", "AI 初判失败项")
+            ),
+            bossAsk = "今天该拍的点位拍齐了吗？有没有不合格？",
+            keywords = "食安 拍照 核验 上报 点位 冷藏 清洗 备餐 垃圾区 初判 复核",
+            iconBgArgb = 0xFFE2F0E2,
+            actionTypes = listOf("safety.check")
+        ),
+        Module(
             label = "设备",
             group = "人与合规",
             route = "m/equipment",
