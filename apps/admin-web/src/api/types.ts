@@ -146,6 +146,35 @@ export interface LowStockItem {
   safe?: number
 }
 
+/**
+ * FP-DASH-10 逐日应收 vs 实收序列（旧版 #chartDaily SVG，HTML:1258-1278）。
+ * 应收按单日期、实收按收款日期，作废单不计入；new_debt = 当日应收 − 当日实收。
+ */
+export interface DailySeriesPoint {
+  date: string
+  receivable: number
+  received: number
+  /** 当日新增欠款（可为负：当日回款多于当日开单） */
+  new_debt: number
+}
+
+/**
+ * FP-DASH-13 未收账款（客户挂账）清单行（旧版 #recvBox，HTML:1287-1293）。
+ * 三数由 BFF `lib/sales_model.js` 派生，前端只渲染不复算。
+ */
+export interface DebtSaleItem {
+  id?: string | null
+  no?: string | null
+  date?: string
+  channel?: string
+  note?: string
+  receivable?: number
+  received?: number
+  /** 欠款 = 应收 − 实收（派生值，不落库） */
+  debt?: number
+  status?: string
+}
+
 export interface ReportDaily {
   ok?: boolean
   mock?: boolean
@@ -162,6 +191,10 @@ export interface ReportDaily {
   kpis?: KpiItem[]
   kpi?: Array<{ label: string; value: string | number; delta?: string | null; sub?: string }>
   heat_mini?: Array<{ hour: number; orders: number } | number>
+  /** FP-DASH-10 近14天应收/实收逐日序列（空数组 = 无数据，不出图） */
+  daily_series?: DailySeriesPoint[]
+  /** FP-DASH-13 未收账款（客户挂账）清单（欠款 > 0.01，按单日期倒序） */
+  debt_sales?: DebtSaleItem[]
   todos?: TodoItem[]
   alerts?: AlertItem[]
   rev?: number | string | null

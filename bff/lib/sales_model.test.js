@@ -150,4 +150,66 @@ ok('作废单不计入应收/实收/欠款/折扣', () => {
   assert.strictEqual(kpiOf(r, '未收欠款'), 100);
 });
 
+/* ---------------- 3) FP-DASH-10 逐日序列 / FP-DASH-13 挂账清单 ---------------- */
+
+ok('dailySeries：逐日应收按单日期、实收按收款日期，new_debt = 当日应收 − 当日实收', () => {
+  const series = model.dailySeries([
+    { id: 'S1', date: '2026-10-12', amount: 100, receivable: 100, payments: [{ date: '2026-10-13', amount: 60 }] },
+    { id: 'S2', date: '2026-10-13', amount: 40, receivable: 40, payments: [] },
+  ], '2026-10-13', 3);
+  assert.deepStrictEqual(series.map((d) => d.date), ['2026-10-11', '2026-10-12', '2026-10-13']);
+  assert.deepStrictEqual(series[1], { date: '2026-10-12', receivable: 100, received: 0, new_debt: 100 });
+  assert.deepStrictEqual(series[2], { date: '2026-10-13', receivable: 40, received: 60, new_debt: -20 });
+});
+
+ok('dailySeries：14 天窗口含首尾，窗外日期不入列；作废单不计入', () => {
+  const series = model.dailySeries([
+    { id: 'S1', date: '2026-09-30', amount: 10, receivable: 10, payments: [] },
+    { id: 'S2', date: '2026-10-13', amount: 10, receivable: 10, payments: [], status: '已作废' },
+  ], '2026-10-13', 14);
+  assert.strictEqual(series.length, 14);
+  /* 窗口 = [10-13 − 13 天, 10-13] = [09-30, 10-13]（旧版 daysAgo(13) 起点，HTML:1259） */
+  assert.strictEqual(series[0].date, '2026-09-30');
+  assert.strictEqual(series[0].receivable, 10, '09-30 落在窗口首日');
+  assert.strictEqual(series[13].date, '2026-10-13');
+  assert.strictEqual(series[13].receivable, 0, '作废单不计入逐日序列');
+});
+
+ok('dailySeries：非法日期返回空序列（不编造数据）', () => {
+  assert.deepStrictEqual(model.dailySeries([], 'not-a-date', 14), []);
+});
+
+ok('unpaidSales：只列欠款 > 0.01 的单，按单日期倒序，作废单排除', () => {
+  const rows = model.unpaidSales([
+    { id: 'S1', no: 'XS001', date: '2026-10-11', amount: 100, receivable: 100, payments: [] },
+    { id: 'S2', no: 'XS002', date: '2026-10-13', amount: 50, receivable: 50, payments: [{ date: '2026-10-13', amount: 50 }] },
+    { id: 'S3', no: 'XS003', date: '2026-10-12', amount: 30, receivable: 30, payments: [{ date: '2026-10-12', amount: 10 }] },
+    { id: 'S4', no: 'XS004', date: '2026-10-14', amount: 80, receivable: 80, payments: [], status: '已作废' },
+    { id: 'S5', no: 'XS005', date: '2026-10-10', amount: 20, receivable: 20.005, payments: [{ date: '2026-10-10', amount: 20 }] },
+  ]);
+  assert.deepStrictEqual(rows.map((r) => r.no), ['XS003', 'XS001'], '已结清/作废/尾差 ≤0.01 不出列，按日期倒序');
+  assert.strictEqual(rows[0].debt, 20);
+  assert.strictEqual(rows[0].received, 10);
+  assert.strictEqual(rows[0].status, '有欠款');
+});
+
+/* ---------------- 4) 店级下发（routes/report.js） ---------------- */
+
+ok('report.daily 下发 daily_series(14) 与 debt_sales，且与四张卡同源', () => {
+  const r = deriveReport({
+    data: {
+      sales: [
+        { id: 'S1', date: '2026-10-12', amount: 100, receivable: 100, payments: [{ date: '2026-10-13', amount: 60 }] },
+      ],
+    },
+  }, '2026-10-13', '7');
+  assert.strictEqual(r.daily_series.length, 14);
+  assert.strictEqual(r.daily_series[13].date, '2026-10-13');
+  assert.strictEqual(r.daily_series[12].receivable, 100, '10-12 应收');
+  assert.strictEqual(r.daily_series[13].received, 60, '10-13 实收');
+  assert.strictEqual(r.debt_sales.length, 1);
+  assert.strictEqual(r.debt_sales[0].debt, 40);
+  assert.strictEqual(kpiOf(r, '未收欠款'), 40, '挂账清单与「未收欠款」卡同源');
+});
+
 console.log('[sales_model.test] PASS ' + pass + ' cases');

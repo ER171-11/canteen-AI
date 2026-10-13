@@ -20,7 +20,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { fetchSnapshot, postAction } from '../../api'
 import type { IngItem, InventoryDoc } from '../../api/types'
@@ -63,6 +63,8 @@ function describeLoadError(e: unknown): string {
 
 export default function PurchasePage() {
   const canWrite = useAuthStore((s) => s.canWrite)
+  const location = useLocation()
+  const navigate = useNavigate()
   const [docs, setDocs] = useState<InventoryDoc[]>([])
   const [ings, setIngs] = useState<IngItem[]>([])
   const [supplier, setSupplier] = useState<string>()
@@ -81,6 +83,9 @@ export default function PurchasePage() {
   const [orderOpen, setOrderOpen] = useState(false)
   const [editDoc, setEditDoc] = useState<InventoryDoc | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  /* FP-DASH-12：来自经营概览「去采购」的原料（路由 state.poIng），带进新建采购单草稿 */
+  const [prefillIng, setPrefillIng] = useState<string | null>(null)
+
   const loadDocs = useCallback(() => {
     setLoading(true)
     fetchSnapshot()
@@ -109,6 +114,18 @@ export default function PurchasePage() {
   useEffect(() => {
     loadDocs()
   }, [loadDocs])
+
+  /**
+   * FP-DASH-12 经营概览低库存行「去采购」→ 本页并自动打开新建采购单（旧版 `go('po');openOrder(null,ing)`，HTML:1312）。
+   * 用完即清 history state：否则关掉弹窗再刷新/回退会被重复弹起。
+   */
+  useEffect(() => {
+    const st = location.state as { poIng?: string } | null
+    if (!st || !st.poIng) return
+    setPrefillIng(String(st.poIng))
+    setOrderOpen(true)
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.state, location.pathname, navigate])
 
   /**
    * 提交一个采购单行操作 → `/api/actions` 审批队列（本地不直改，等审批执行后刷新快照）。
@@ -537,12 +554,17 @@ export default function PurchasePage() {
         )}
       </Modal>
 
-      {/* FP-PO-01 新建采购单（对齐旧版 openOrder，HTML:1670-1674）：入队后刷新列表 */}
+      {/* FP-PO-01 新建采购单（对齐旧版 openOrder，HTML:1670-1674）：入队后刷新列表
+          FP-DASH-12：带原料进入时（prefillIngId）预置明细首行 */}
       <OrderFormModal
         open={orderOpen}
+        prefillIngId={prefillIng}
         ings={ings}
         suppliers={suppliers}
-        onClose={() => setOrderOpen(false)}
+        onClose={() => {
+          setOrderOpen(false)
+          setPrefillIng(null)
+        }}
         onQueued={loadDocs}
       />
 

@@ -3,6 +3,75 @@
 > AI在修改任何模块前，必须查阅此文件，了解历史决策与废弃逻辑，避免引入过时方案。
 > 采用追加式记录，禁止覆盖历史条目。
 
+## [2026-10-13 22:00] 阶段 27 - W2 · 经营概览收官（FP-DASH-10/12/13/14）：经营概览页 15/15 全部移植
+
+- 背景: 经营概览页 15 项中仅余 4 项 ⬜（`FP-DASH-10` 14 天应收实收双柱图、`FP-DASH-12` 低库存「去采购」、
+  `FP-DASH-13` 未收账款挂账列表、`FP-DASH-14` 行内收款登记），即老板开屏页的「看图 + 清收」链路未闭环。
+  前置模型（ADR-008 销售应收模型，阶段 20）与收款执行器（`sale.pay`）均已就位，本次按 W2 顺序一次补齐。
+- 决策（落点）:
+  1. **口径仍只有一处出口**：新数据一律由 `bff/lib/sales_model.js` 派生，`report.js` 只做店级聚合与下发；
+     新增 `dailySeries(sales,to,days)`（FP-DASH-10 逐日应收/实收）与 `unpaidSales(sales)`（FP-DASH-13 挂账清单），
+     与既有 `summarize/receivedInRange/debtOf` 同源同名，前端不复算。
+  2. **双柱图窗口 = 以看板所选截止日回溯 14 天**（旧版固定以「今天」为末位，HTML:1259 `daysAgo(13)`）；
+     不随统计周期 chips 变化（旧版 `#chartDaily` 亦不随 `DASH_R` 变）。红点判据照抄旧版
+     「当日应收 − 当日实收 > 1 元」（HTML:1275），阈值留在展示层。
+  3. **FP-DASH-12 用路由 state 传料、不用全局草稿**：概览行内「去采购」→ `navigate('/inventory/purchase',{state:{poIng}})`，
+     `PurchasePage` 读一次后立即 `replace` 清掉 state（避免刷新/回退重复弹窗），再交给 `OrderFormModal.prefillIngId`
+     预置明细首行（`qty=conv||1`、`price=last||avg`，照抄旧版 presetIng HTML:1560）；提交仍是 `po.create` 审批队列。
+  4. **FP-DASH-14 不另写收款**：概览挂账行直接复用销售收银页的 `SalePayModal`（`sale.pay`），
+     概览只把挂账行映射成销售单形状（`debtRowToSale`），口径字段全部来自 BFF。
+- 变更（BFF）:
+  - `bff/lib/sales_model.js`: 新增并导出 `dailySeries` / `unpaidSales`（含 `isoOf` 本机时区日期助手）。
+  - `bff/routes/report.js`: 真实态下发 `daily_series`(14) 与 `debt_sales`；空态（mock）下发空数组，不编造序列。
+  - `bff/lib/sales_model.test.js`: 新增 5 组用例（逐日窗口/窗外不入列/作废不计入/挂账筛选与排序/report 下发同源），共 15 例。
+- 变更（admin-web）:
+  - `pages/DashboardPage.tsx`: 新增 `DailyBars`（手绘 SVG 双柱图，几何/配色/图例逐式照抄旧版 HTML:1258-1278、207-211；
+    14 天全零时照旧画轴并附一行说明，不把空图误读成加载失败）、「未收账款（客户挂账）」卡（含行内「收款」）、
+    低库存行「去采购」入口、`SalePayModal` 挂载与收款后重取读侧。
+  - `pages/inventory/PurchasePage.tsx`: 读 `location.state.poIng` 自动打开新建采购单并带入原料。
+  - `pages/inventory/OrderFormModal.tsx`: 新增 `prefillIngId`（带入原料时明细首行 = 该原料，
+    `qty=conv||1`、`price=last||avg`，照抄旧版 presetIng HTML:1560）。
+  - `api/types.ts`: 新增 `DailySeriesPoint` / `DebtSaleItem`，`ReportDaily` 挂 `daily_series` / `debt_sales`。
+- 顺带收口（初值修复已随阶段 26 提交，本阶段补真机回归）:
+  - 采购单「新建/编辑 CG 采购单」弹窗在真机上**明细行为空**（`Form.List` 拿不到挂载前的 `setFieldsValue`，
+    又被 `preserve={false}` 清值）：阶段 26 只做静态检查 + 算法单测，未点击核对，漏掉了这个必现问题。
+    初值改走 `initialValues` 并去掉 `preserve={false}` 已随阶段 26 提交；本阶段由 FP-DASH-12 的端到端冒烟
+    首次在真机上覆盖该弹窗（首行带料 + 数量预填，见验证段）。
+- 验证（实际跑过）:
+  - `node bff/lib/sales_model.test.js` → **PASS 15 cases**；`npm test`（bff 全量）→ **exit 0**。
+  - `apps/admin-web` `npx tsc --noEmit` → **exit 0**；`npm run build` → **exit 0**；`read_lints` → **0 错**。
+  - `scripts/smoke-dash-kpi.js`（真机：BFF + vite + 无头 Edge CDP）→ **70/70 通过**，退出码 0。新增断言含：
+    逐日序列 14 天窗口/逐日应收实收=快照独立重算、挂账清单合计=「未收欠款」卡、双柱 28 根+图例、
+    「去采购」端到端（跳转 `/inventory/purchase` → 弹窗自动打开 → 首行已带原料「鲁花芝麻油 350ml（瓶）」、
+    数量=1 → 取消关闭），全程 GET-only（`snapshot.json`/`actions_queue.json` 指纹未变、控制台 0 报错）。
+  - `powershell -File ci/redline_guard.ps1` → 全通过。
+  - `powershell -File scripts/gen-debt-table.ps1` → 151 项 **⬆️ 126 / ⬜ 21**（W1 0 / W2 4 / W3 14 / W4 3）；
+    `node scripts/gen-progress-board.js` → 漂移校验 ok、数字一致性 OK。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **FP-DASH-14 的「收款」提交未点**（属写类，冒烟刻意只点开弹窗）：演示快照 426 条销售均无
+     `receivable/payments` 字段（回退「全额即收」），故 `debt_sales` 为空、挂账行与「收款」按钮当前不出现；
+     冒烟里该分支按 `debt_sales.length > 0` 条件执行，真实挂账数据进来后自动生效。收款执行器与弹窗为阶段 20 既有实现。
+  2. **演示快照没有近 14 天销售**（数据止于 2026-09-26），双柱图 14 天全零（轴与图例已在页面核对，非渲染失败）；
+     双击柱高/红点的视觉核对需等有该区间数据的快照。
+  3. `daily_series` / `debt_sales` 为**新增只读字段**，无 Node↔Python 平价对照（旧版为浏览器内 JS）；仅 Node 单测 + 冒烟覆盖。
+  4. 采购单「编辑」路径（`po.edit`）本次只做类型/渲染口径回归（初值改动同时覆盖新建与编辑），未逐单点击核对。
+- 影响范围: `bff/lib/{sales_model.js,sales_model.test.js}`、`bff/routes/report.js`、
+  `apps/admin-web/src/{api/types.ts,pages/DashboardPage.tsx,pages/inventory/PurchasePage.tsx,pages/inventory/OrderFormModal.tsx}`、
+  `scripts/smoke-dash-kpi.js`、`docs/迁移基线/FP-经营概览.md`（15/15 全部 ⬆️）、`docs/迁移基线/欠账总表.md`、
+  `docs/迁移颗粒度规范.md`（附录 A）、`docs/进度看板.html`（⬆️ 122→126、欠账卡 25→21）、`scripts/gen-debt-table.ps1`、
+  `HANDOFF.md`、本文件。**未触碰**受保护哈希文件（`bff/store-node/{db,merge}.js`）与 `bff/lib/algorithms/stock.js`。
+- AI避坑提示:
+  - **`Form.List` 的初值必须走 `initialValues`**：仅 `setFieldsValue` 在列表挂载前写入会被丢掉/渲染成空行；
+    `preserve={false}` 会把新建列表行的值清掉。改这两个点前先跑 `scripts/smoke-dash-kpi.js` 的 FP-DASH-12 段。
+  - **双柱图窗口以所选截止日为准**，别改成「今天」或跟随 `range` —— 旧版 `#chartDaily` 是固定 14 天、不随 `DASH_R` 变。
+  - **欠款是派生值**：`debt_sales` 与「未收欠款」卡必须同源（`sales_model`）；不要在路由或前端二次算一遍。
+  - **路由 state 用完即清**：`poIng` 残留会让用户每次回退/刷新都被弹窗打断。
+- 回档方案: `git revert` 本提交即可——去掉 `dailySeries`/`unpaidSales` 与两个下发字段、概览页三块 UI 与
+  `prefillIngId` 通路（初值修复属阶段 26 提交，不在本提交内）。
+  回档后须重跑 `scripts/gen-debt-table.ps1` 与 `node scripts/gen-progress-board.js`，并把 `FP-经营概览.md` 的 4 行状态回退为 ⬜ 待补。
+- 后续: 全局欠账 **⬆️ 126 / ⬜ 21**（W1 0 / W2 4 / W3 14 / W4 3）。W2 余 PRICE 3 张 + SET 1 张；
+  W3 头部仍为 `FP-ING-05`（手工校准库存/均价）与 `FP-SALE-12`（编辑销售单）。
+
 ## [2026-10-13 20:00] 阶段 26 - W3 第一批 · 采购管理录入类补齐（FP-PO-01/02/17/19/20）：采购管理页 20/20 收官
 
 - 背景: 采购管理页 20 项功能中仅余 5 项 ⬜（`FP-PO-01/02` 新建/编辑采购单、`FP-PO-17` 补货参数、`FP-PO-19` 忽略建议行、`FP-PO-20` 行内改量记回主数据），

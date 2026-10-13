@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* 经营概览「统计周期 + 三个 KPI + 低库存明细」开箱冒烟（W1-01/02/03/05）——零依赖：
+/* 经营概览开箱冒烟（W1-01/02/03/05 + 阶段 27 FP-DASH-10/12/13/14）——零依赖：
  * Node 内置 http/WebSocket + 本机 Edge 的 CDP 端口，不装 puppeteer。
  *
  * 覆盖：
@@ -8,9 +8,12 @@
  *  2) 接口层 FP-DASH-06 采购应付（本期）：与快照独立重算一致，随周期变化；
  *  3) 接口层 FP-DASH-07 库存总值：与快照独立重算一致，且为时点值（不随周期变化）；
  *  4) 接口层 FP-DASH-11 低库存明细：total/items 与快照独立重算一致，含 name/cat/unit/qty/safe；
- *  5) 页面层：3 个周期 chips（默认近30天）+ 区间文字 + 10 张 KPI 卡 + 低库存明细卡；
+ *  5) 接口层 FP-DASH-10 逐日序列：14 天、末位=截止日、每日应收/实收与快照独立重算一致；
+ *  6) 接口层 FP-DASH-13 挂账清单：每行 debt>0.01 且与「未收欠款」卡合计一致、按单日期倒序；
+ *  7) 页面层：3 个周期 chips（默认近30天）+ 区间文字 + KPI 卡 + 低库存明细卡（含行内「去采购」）
+ *     + 「每日应收 vs 实收（近14天）」卡（14 根日期轴）+「未收账款（客户挂账）」卡；
  *     点「近7天」→ chips 选中态与区间文字跟随、营收 KPI 变化；点「全部」→ 文字「全部时间（截至 …）」；
- *  6) 只读：GET-only，snapshot.json / actions_queue.json 指纹全程未变 + 页面控制台 0 报错。
+ *  8) 只读：GET-only（不点收款/去采购），snapshot.json / actions_queue.json 指纹全程未变 + 页面控制台 0 报错。
  *
  * 前置：BFF 已在 8787、vite dev 已在 5173（用同目录 smoke-dash-kpi.ps1 一键起停）。
  * 用法：node scripts/smoke-dash-kpi.js     退出码 0=通过
@@ -98,9 +101,10 @@ const recDate = (r) => String((r && (r.date || r.ts || r.time)) || '').slice(0, 
 /** 库存总值（旧版口径 Σ 库存 × 均价） */
 const expStockValue = Math.round(SNAP_INGS.reduce((a, g) => a + num(g.stock) * num(g.avg), 0) * 100) / 100;
 /** 低库存：现存 < 安全线（在售） */
-const expLow = SNAP_INGS.filter(
+const expLowItems = SNAP_INGS.filter(
   (g) => g.on !== false && num(g.qty != null ? g.qty : g.stock) < num(g.safe != null ? g.safe : g.safety)
 );
+const expLow = expLowItems;
 /** 采购应付（本期） */
 function expPayable(range) {
   const to = todayStr();
@@ -118,6 +122,46 @@ function expRevenue(range) {
     SNAP_SALES.filter((r) => recDate(r) && (!from || recDate(r) >= from) && recDate(r) <= to)
       .reduce((a, r) => a + num(r.amount), 0) * 100
   ) / 100;
+}
+
+/* 应收模型（照抄 ADR-008 口径，独立于 BFF 实现重算） */
+const isVoid = (s) => /作废|void/i.test(String((s && s.status) || ''));
+const recvOf = (s) => (s && s.receivable != null ? num(s.receivable) : num(s && s.amount));
+const paysOf = (s) => {
+  if (s && Array.isArray(s.payments)) return s.payments;
+  const amt = num(s && s.amount);
+  return amt > 0 ? [{ date: recDate(s), amount: amt }] : [];
+};
+const paidOf = (s) => Math.round(paysOf(s).reduce((a, p) => a + num(p && p.amount), 0) * 100) / 100;
+const debtOf = (s) => Math.round(Math.max(0, recvOf(s) - paidOf(s)) * 100) / 100;
+
+/** FP-DASH-10 逐日应收/实收（旧版 recvMap/gotMap，HTML:1258-1263） */
+function expDailySeries(to, days) {
+  const rows = [];
+  for (let i = days - 1; i >= 0; i--) rows.push({ date: minusDays(to, i), receivable: 0, received: 0 });
+  const at = {};
+  for (const r of rows) at[r.date] = r;
+  for (const s of SNAP_SALES) {
+    if (isVoid(s)) continue;
+    const on = at[recDate(s)];
+    if (on) on.receivable += recvOf(s);
+    for (const p of paysOf(s)) {
+      const hit = at[String((p && p.date) || '').slice(0, 10)];
+      if (hit) hit.received += num(p && p.amount);
+    }
+  }
+  return rows.map((r) => {
+    const receivable = Math.round(r.receivable * 100) / 100;
+    const received = Math.round(r.received * 100) / 100;
+    return { date: r.date, receivable, received, new_debt: Math.round((receivable - received) * 100) / 100 };
+  });
+}
+
+/** FP-DASH-13 挂账清单（debt>0.01，按单日期倒序） */
+function expDebtSales() {
+  return SNAP_SALES.filter((s) => !isVoid(s) && debtOf(s) > 0.01)
+    .map((s) => ({ no: s.no != null ? String(s.no) : null, date: recDate(s), debt: debtOf(s) }))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
 /* ------------------------------------------------------------ CDP 极简客户端 */
@@ -201,6 +245,18 @@ const HELPERS = [
   '  lowRows: () => { const c = __q.lowCard(); if (!c) return [];',
   '    return [...c.querySelectorAll(".ant-list-item")]; },',
   '  lowTexts: () => __q.lowRows().map((r) => r.innerText.replace(/\\s+/g, " ").trim()),',
+  '  lowPoLinks: () => __q.lowRows().filter((r) => r.innerText.indexOf("去采购") >= 0).length,',
+  '  chartCard: () => __q.card("每日应收 vs 实收（近14天）"),',
+  '  chartLabels: () => { const c = __q.chartCard(); if (!c) return [];',
+  '    return [...c.querySelectorAll("svg text[text-anchor=middle]")].map((t) => t.textContent.trim()); },',
+  '  chartBars: () => { const c = __q.chartCard(); if (!c) return 0;',
+  '    return c.querySelectorAll("svg rect").length; },',
+  '  chartDots: () => { const c = __q.chartCard(); if (!c) return 0;',
+  '    return c.querySelectorAll("svg circle").length; },',
+  '  debtCard: () => __q.card("未收账款（客户挂账）"),',
+  '  debtRows: () => { const c = __q.debtCard(); if (!c) return [];',
+  '    return [...c.querySelectorAll(".ant-table-tbody tr.ant-table-row")]; },',
+  '  debtTexts: () => __q.debtRows().map((r) => r.innerText.replace(/\\s+/g, " ").trim()),',
   '};',
 ].join('\n');
 
@@ -275,8 +331,13 @@ async function main() {
   ok(sv30 === expStockValue, 'FP-DASH-07 库存总值 = Σ 库存×均价（旧版 stockValue()，HTML:1244/1251）',
     { api: sv30, expect: expStockValue });
   ok(sv30 === sv7, 'FP-DASH-07 库存总值为时点值，不随周期变化', { 近7天: sv7, 近30天: sv30 });
-  ok((r30.body.kpi || []).length === 10, 'KPI 10 项（原 8 项 + 采购应付 + 库存总值）',
-    (r30.body.kpi || []).map((k) => k.label));
+  const kpiLabels = (r30.body.kpi || []).map((k) => k.label);
+  ok(
+    ['营收', '订单数', '客单价', '销售毛利率', '应收合计', '实收合计', '未收欠款', '折扣/抹零',
+      '采购应付（本期）', '库存总值', '菜品SKU', '原料SKU', '会员数', '快照rev', '销售记录总数']
+      .every((l) => kpiLabels.indexOf(l) >= 0),
+    'KPI 含经营概览全部必要卡（含 FP-DASH-02/03/04/05/06/07/08）', kpiLabels
+  );
 
   /* ---------- 3. FP-DASH-11 低库存明细 ---------- */
   const ls = r30.body.low_stock || {};
@@ -291,6 +352,39 @@ async function main() {
   ok(
     (ls.items || []).every((it) => it.qty < it.safe),
     'FP-DASH-11 每行确实「现存 < 安全线」'
+  );
+
+  /* ---------- 3b. FP-DASH-10 逐日序列 / FP-DASH-13 挂账清单（接口层） ---------- */
+  const expSeries = expDailySeries(to, 14);
+  const apiSeries = r30.body.daily_series || [];
+  ok(Array.isArray(apiSeries) && apiSeries.length === 14, 'FP-DASH-10 daily_series = 14 天',
+    apiSeries.length);
+  ok(apiSeries.length === 14 && apiSeries[13].date === to && apiSeries[0].date === minusDays(to, 13),
+    'FP-DASH-10 序列窗 = [to-13, to]（旧版 daysAgo(13) 起，HTML:1259）',
+    apiSeries.length ? { from: apiSeries[0].date, to: apiSeries[13].date } : null);
+  ok(
+    JSON.stringify(apiSeries.map((d) => [d.date, d.receivable, d.received])) ===
+      JSON.stringify(expSeries.map((d) => [d.date, d.receivable, d.received])),
+    'FP-DASH-10 逐日应收/实收 = 快照独立重算（应收按单日期、实收按收款日期）',
+    { api: apiSeries.slice(-2), expect: expSeries.slice(-2) }
+  );
+  ok(apiSeries.every((d) => Math.abs((d.receivable - d.received) - d.new_debt) < 0.02),
+    'FP-DASH-10 new_debt = 当日应收 − 当日实收（旧版红点口径，HTML:1275）');
+
+  const expDebt = expDebtSales();
+  const apiDebt = r30.body.debt_sales || [];
+  ok(Array.isArray(apiDebt) && apiDebt.length === expDebt.length,
+    'FP-DASH-13 debt_sales 行数 = 快照独立重算（欠款 > 0.01）', { api: apiDebt.length, expect: expDebt.length });
+  ok(apiDebt.every((r) => r.debt > 0.01 && r.date && (r.no || r.id)),
+    'FP-DASH-13 每行含 单号/日期/欠款，且欠款 > 0.01');
+  ok(
+    Math.abs(apiDebt.reduce((a, r) => a + num(r.debt), 0) - kpiOf(r30.body, '未收欠款')) < 0.02,
+    'FP-DASH-13 挂账清单合计 = 「未收欠款」卡（同源 lib/sales_model.js）',
+    { list: apiDebt.reduce((a, r) => a + num(r.debt), 0), kpi: kpiOf(r30.body, '未收欠款') }
+  );
+  ok(
+    apiDebt.every((r, i) => i === 0 || String(apiDebt[i - 1].date) >= String(r.date)),
+    'FP-DASH-13 按单日期倒序（旧版 HTML:1287）'
   );
 
   /* ---------- 4. CDP 连接 + 注入登录态 ---------- */
@@ -372,6 +466,52 @@ async function main() {
     'FP-DASH-11 每行「现存 X 单位」+「安全 Y 单位」（旧版 HTML:1282）', lowTexts);
   ok(expLow.length <= 12 || (await evalJs('__q.has("等 ' + expLow.length + ' 种，详见「原料库存」")')),
     'FP-DASH-11 超 12 条才出现「等 N 种」截断提示（旧版 HTML:1284；当前 ' + expLow.length + ' 种不应显示）');
+  const poLinks = await evalJs('__q.lowPoLinks()');
+  ok(expLow.length === 0 || poLinks === Math.min(expLow.length, 12),
+    'FP-DASH-12 低库存每行都有「去采购」（旧版 data-poing，HTML:1283）', poLinks);
+
+  /* ---------- 5b. FP-DASH-10/13 两张卡上屏 ---------- */
+  ok(await evalJs('!!__q.chartCard()'), 'FP-DASH-10 「每日应收 vs 实收（近14天）」卡存在');
+  const chartLabels = await evalJs('__q.chartLabels()');
+  ok(JSON.stringify(chartLabels) === JSON.stringify(expSeries.map((d) => d.date.slice(5))),
+    'FP-DASH-10 横轴 = 14 天 MM-DD（旧版 HTML:1276）', chartLabels);
+  ok((await evalJs('__q.chartBars()')) === 28, 'FP-DASH-10 双柱 = 14 天 × 2 根（旧版 HTML:1273-1274）',
+    await evalJs('__q.chartBars()'));
+  const expDots = expSeries.filter((d) => d.receivable - d.received > 1).length;
+  ok((await evalJs('__q.chartDots()')) === expDots,
+    'FP-DASH-10 当日新增欠款红点数 = 独立重算（旧版 >1 元才画，HTML:1275）',
+    { ui: await evalJs('__q.chartDots()'), expect: expDots });
+  ok(await evalJs('__q.has("应收（挂账前）") && __q.has("当日新增欠款")'),
+    'FP-DASH-10 图例含 应收（挂账前）/实收/当日新增欠款（旧版 HTML:207-211）');
+
+  ok(await evalJs('!!__q.debtCard()'), 'FP-DASH-13 「未收账款（客户挂账）」卡存在');
+  const debtTexts = await evalJs('__q.debtTexts()');
+  ok(debtTexts.length === expDebt.length, 'FP-DASH-13 挂账行数 = 接口行数',
+    { ui: debtTexts.length, api: expDebt.length });
+  ok(debtTexts.every((t) => t.indexOf('应收') >= 0 && t.indexOf('欠款') >= 0 && t.indexOf('收款') >= 0),
+    'FP-DASH-13/14 每行「应收 … 欠款 … 收款」（旧版 HTML:1290-1292）', debtTexts.slice(0, 3));
+  if (expDebt.length === 0) {
+    ok(await evalJs('__q.has("暂无挂账欠款")'), 'FP-DASH-13 无挂账时给空态文案（旧版 HTML:1293）');
+  } else {
+    /* FP-DASH-14 行内「收款」：只点开弹窗、不提交（写类动作不点，保持只读） */
+    const opened = await evalJs(
+      '(()=>{ const r=__q.debtRows()[0]; if(!r) return false;' +
+      ' const a=[...r.querySelectorAll("a,.ant-typography")].find((x)=>x.innerText.replace(/\\s/g,"")==="收款");' +
+      ' if(!a) return false; a.click(); return true; })()'
+    );
+    ok(opened, 'FP-DASH-14 点挂账行「收款」（旧版 data-get，HTML:1292/1313）');
+    await sleep(600);
+    const payTitle = await evalJs('(()=>{const m=document.querySelector(".ant-modal-title");return m?m.innerText.trim():""})()');
+    ok(payTitle.indexOf('登记收款') >= 0, 'FP-DASH-14 打开登记收款弹窗（复用销售收银页 SalePayModal）', payTitle);
+    await evalJs(
+      '(()=>{ const m=document.querySelector(".ant-modal-wrap");' +
+      ' const b=[...(m?m.querySelectorAll("button"):[])].find((x)=>x.innerText.replace(/\\s/g,"")==="取消");' +
+      ' if (b) b.click(); return true; })()'
+    );
+    await sleep(400);
+    ok(!(await evalJs('!!document.querySelector(".ant-modal-title")')),
+      'FP-DASH-14 关闭弹窗，未提交任何动作（只读冒烟）');
+  }
 
   /* ---------- 6. 切换周期 ---------- */
   const uiRev30 = await evalJs('__q.kpiNum("营收")');
@@ -396,6 +536,47 @@ async function main() {
   ok(await evalJs('__q.clickChip("近30天")'), 'FP-DASH-01 切回「近30天」');
   await sleep(900);
   ok(Math.abs((await evalJs('__q.kpiNum("营收")') || 0) - rev30) < 0.02, 'FP-DASH-01 切回近30天 → 营收复原 ' + rev30);
+
+  /* ---------- 6b. FP-DASH-12 去采购 → 采购页带原料草稿（只点开、不提交，零写库） ---------- */
+  if (expLowItems.length && expLowItems[0].id) {
+    const firstLow = expLowItems[0];
+    const clicked = await evalJs(
+      '(()=>{ const r = __q.lowRows().find((x) => x.innerText.indexOf("去采购") >= 0);' +
+      ' if (!r) return false; const a = r.querySelector("[data-poing]"); if (!a) return false; a.click(); return true; })()'
+    );
+    ok(clicked, 'FP-DASH-12 点低库存行「去采购」（旧版 data-poing，HTML:1312）');
+    await sleep(900);
+    ok(await evalJs('location.pathname === "/inventory/purchase"'),
+      'FP-DASH-12 跳转到 /inventory/purchase（旧版 go(\'po\')）', await evalJs('location.pathname'));
+    const modalTitle = await evalJs(
+      '(()=>{ const m=document.querySelector(".ant-modal-title"); return m?m.innerText.trim():"" })()'
+    );
+    ok(modalTitle.indexOf('新建 CG 采购单') >= 0, 'FP-DASH-12 自动打开新建采购单弹窗', modalTitle);
+    const picked = await evalJs(
+      '(()=>{ const s=document.querySelector(".ant-modal .ant-select-selection-item");' +
+      ' return s?s.innerHTML.trim():"" })()'
+    );
+    ok(picked.indexOf(String(firstLow.name)) >= 0,
+      'FP-DASH-12 草稿首行已带该原料（旧版 presetIng，HTML:1560）',
+      { ui: picked, expect: firstLow.name });
+    const filledQty = await evalJs(
+      '(()=>{ const i=document.querySelectorAll(".ant-modal .ant-input-number-input");' +
+      ' return i.length ? String(i[0].value) : "" })()'
+    );
+    ok(Math.abs(num(filledQty) - (num(firstLow.conv) || 1)) < 1e-6,
+      'FP-DASH-12 数量预填 = 该原料 conv（旧版 presetIng.qty=conv||1）',
+      { ui: filledQty, expect: num(firstLow.conv) || 1 });
+    /* 关掉弹窗（取消，不提交）——写类动作不点，保持只读 */
+    await evalJs(
+      '(()=>{ const m=document.querySelector(".ant-modal-wrap");' +
+      ' const b=[...(m?m.querySelectorAll("button"):[])]' +
+      '   .find((x)=>x.innerText.replace(/\\s/g,"")==="取消");' +
+      ' if (b) b.click(); return true; })()'
+    );
+    await sleep(500);
+    ok(!(await evalJs('!!document.querySelector(".ant-modal-title")')),
+      'FP-DASH-12 关闭弹窗，未提交任何动作（只读冒烟）');
+  }
 
   /* ---------- 7. 只读 + 控制台 ---------- */
   const digest1 = dataDigest();

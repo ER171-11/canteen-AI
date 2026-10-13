@@ -8,8 +8,10 @@
  *       - heat_mini：真实分时聚合
  *       - todos：经营三类（断货补货 / 建议备料 / 渠道备餐），带 kind+route 深链
  *       - alerts：真实推导（健康证<30天 ext.fs_certs、留样临近48h ext.fs_samples、库存告急、快照超龄）
+ *       - daily_series：FP-DASH-10 近14天应收/实收逐日序列（旧版 #chartDaily）
+ *       - debt_sales：FP-DASH-13 未收账款（客户挂账）清单（旧版 #recvBox）
  *       - 有 ext 时附 kitchen 工单摘要
- *     无快照 / 快照无数据：结构完整的 mock（banner/kpi[8]/heat_mini/todos/alerts）并标 mock:true
+ *     无快照 / 快照无数据：结构完整的 mock（banner/kpi[]/heat_mini/daily_series/debt_sales/todos/alerts）并标 mock:true
  *     UI 时延标注：响应始终带 rev 与 generated_at（mock 时为 null）
  */
 const { loadSnapshot } = require('./snapshot');
@@ -67,6 +69,9 @@ function mockReport(date, rangeRaw) {
     kpi: [],
     heat_mini: [],
     low_stock: { total: 0, items: [] },
+    // FP-DASH-10/13：空态给空数组（前端不出图/不出表），不编造序列
+    daily_series: [],
+    debt_sales: [],
     todos: [
       { kind: 'restock', route: 'inventory/restock', text: '推送店内快照后可生成断货补货待办', done: false },
       { kind: 'prep', route: 'kitchen', text: '有快照后将汇总今日建议备料工单', done: false }
@@ -534,6 +539,12 @@ function deriveReport(snap, date, rangeRaw) {
     alerts,
     // FP-DASH-11 低库存预警明细（旧版 #lowStockBox，HTML:1280-1285；前端按 12 条截断）
     low_stock: { total: lowStock.length, items: lowStock },
+    /* FP-DASH-10 近14天应收 vs 实收双柱图（旧版 #chartDaily，HTML:1258-1278）：
+     * 以所选「截止日(date)」回溯 14 天（旧版固定以今天为末位）；不随统计周期 chips 变化。
+     * 逐日口径与上方四张卡同源（lib/sales_model.js），本文件不另算。 */
+    daily_series: saleModel.dailySeries(sales, date, 14),
+    // FP-DASH-13 未收账款（客户挂账）清单（旧版 #recvBox，HTML:1287-1293；debt>0.01 按单日期倒序）
+    debt_sales: saleModel.unpaidSales(sales),
     // FP-DASH-15 菜品毛利排行（近30天 Top12：份数/营收/毛利/毛利率）
     top_dishes,
     breakeven,

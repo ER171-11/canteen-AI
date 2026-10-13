@@ -14,7 +14,7 @@
  *    `routes/export.js` 行级），前端只渲染不复算（ADR-007 / ADR-008 §4）。
  *
  * 消费方：
- *   bff/routes/report.js        —— 店级聚合（FP-DASH-02/03/04/08）
+ *   bff/routes/report.js        —— 店级聚合（FP-DASH-02/03/04/08）+ 逐日序列与挂账清单（FP-DASH-10/13）
  *   bff/routes/export.js        —— 行级导出与销售单列表（FP-SALE-07 / FP-SET-14）
  *   bff/lib/algorithms/sale.js  —— 写侧执行器（sale.create/void/pay）共用同一取值口径
  */
@@ -25,6 +25,12 @@ function num(v, d) {
 }
 function arr(x) { return Array.isArray(x) ? x : []; }
 function r2(x) { return Math.round((Number(x) + Number.EPSILON) * 100) / 100; }
+
+/** 本机时区的 YYYY-MM-DD（不用 toISOString，避免 UTC 偏移串日） */
+function isoOf(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
 
 /** 单日期（YYYY-MM-DD）：容错 date/ts/time/created_at/datetime/day */
 function saleDateOf(s) {
@@ -138,6 +144,80 @@ function summarize(sales, opt) {
   };
 }
 
+/**
+ * FP-DASH-10 逐日应收 / 实收序列（旧版 14 天双柱图 `#chartDaily`，HTML:1258-1278）。
+ *
+ * 与店级 `summarize` **同源**：应收按单日期、实收按收款日期，作废单不计入。
+ * 逐日口径（旧版 recvMap/gotMap，HTML:1260-1263）：
+ *   receivable = Σ 该日销售单 receivable；received = Σ 收款日落在该日的 payments.amount
+ *   new_debt   = receivable − received（当日新增欠款；红点画不画由展示层按阈值决定，见前端）
+ *
+ * @param {Array} sales 快照 data.sales
+ * @param {string} to 截止日（YYYY-MM-DD，含；旧版为「今天」，此处随看板所选日期）
+ * @param {number} [days=14] 天数（旧版固定 14）
+ * @returns {Array<{date:string,receivable:number,received:number,new_debt:number}>} 按日期升序
+ */
+function dailySeries(sales, to, days) {
+  const n = Math.max(1, parseInt(days, 10) || 14);
+  const end = new Date(String(to) + 'T00:00:00');
+  if (isNaN(end.getTime())) return [];
+  const rows = new Map();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(end.getTime());
+    d.setDate(d.getDate() - i);
+    const key = isoOf(d);
+    rows.set(key, { date: key, receivable: 0, received: 0 });
+  }
+  for (const s of arr(sales)) {
+    if (!s || typeof s !== 'object') continue;
+    if (isVoided(s)) continue;
+    const on = rows.get(saleDateOf(s));
+    if (on) on.receivable += receivableOf(s);
+    for (const p of arr(paymentsOf(s))) {
+      const pd = String((p && p.date) || '').slice(0, 10);
+      const hit = pd ? rows.get(pd) : null;
+      if (hit) hit.received += num(p && p.amount);
+    }
+  }
+  const out = [];
+  for (const r of rows.values()) {
+    const receivable = r2(r.receivable);
+    const received = r2(r.received);
+    out.push({ date: r.date, receivable, received, new_debt: r2(receivable - received) });
+  }
+  return out;
+}
+
+/**
+ * FP-DASH-13 未收账款（客户挂账）清单（旧版 `#recvBox`，HTML:1287-1293）。
+ *
+ * 口径：`debtOf(s) > 0.01`（旧版 `saleDebt(s)>0.01`），按单日期**倒序**（旧版 `a.date<b.date?1:-1`）；
+ * 作废单不计入（与 `summarize` 同口径：作废后不再计入应收/实收/欠款）。
+ * 字段为「展示所需最小集」，三数均由本文件派生，前端只渲染不复算。
+ */
+function unpaidSales(sales) {
+  const out = [];
+  for (const s of arr(sales)) {
+    if (!s || typeof s !== 'object') continue;
+    if (isVoided(s)) continue;
+    const debt = debtOf(s);
+    if (!(debt > 0.01)) continue;
+    out.push({
+      id: s.id != null ? String(s.id) : null,
+      no: s.no != null ? String(s.no) : null,
+      date: saleDateOf(s),
+      channel: String(s.channel || ''),
+      note: String(s.note || ''),
+      receivable: receivableOf(s),
+      received: paidOf(s),
+      debt,
+      status: statusOf(s),
+    });
+  }
+  out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return out;
+}
+
 module.exports = {
   num,
   r2,
@@ -152,4 +232,6 @@ module.exports = {
   statusOf,
   receivedInRange,
   summarize,
+  dailySeries,
+  unpaidSales,
 };

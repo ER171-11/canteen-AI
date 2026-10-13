@@ -57,6 +57,11 @@ export interface OrderFormModalProps {
   open: boolean
   /** 非空 = 编辑模式（预填该单并提交 po.edit）；空 = 新建（提交 po.create） */
   editDoc?: InventoryDoc | null
+  /**
+   * FP-DASH-12 新建时预置原料（旧版 `openOrder(null, presetIng)` → `openDocForm` 的 presetIng 分支，
+   * HTML:1560）：明细首行 = `{ing, qty: conv||1, price: last||avg}`。仅新建模式生效。
+   */
+  prefillIngId?: string | null
   ings: IngItem[]
   suppliers: string[]
   onClose: () => void
@@ -66,6 +71,7 @@ export interface OrderFormModalProps {
 export default function OrderFormModal({
   open,
   editDoc,
+  prefillIngId,
   ings,
   suppliers,
   onClose,
@@ -88,11 +94,12 @@ export default function OrderFormModal({
   /**
    * 表单初值（旧版 openOrder/openDocForm 预填口径）：
    *   编辑模式 → 原单（HTML:1642-1643 同字段）；新建 → 日期=今天、付款方式=首项、
-   *   明细首行 = 第一个原料（旧版 HTML:1626）。
+   *   明细首行 = 带入原料（FP-DASH-12，旧版 presetIng：qty=conv||1、price=last||avg，HTML:1560）
+   *   或第一个原料（旧版 HTML:1626）。
    *
    * ⚠️ 必须走 `initialValues` 而**不能只** `form.setFieldsValue`：Form.List 在挂载前
    *    拿不到 setFieldsValue 写入的行，会渲染成「0 行明细」（阶段 26 只做静态检查，
-   *    漏掉了这个真机上必现的缺陷）。
+   *    漏掉了这个真机上必现的缺陷；带原料进入的 FP-DASH-12 首行也依赖它）。
    */
   const initialVals = useMemo<FormVals>(() => {
     if (isEdit && editDoc) {
@@ -110,7 +117,8 @@ export default function OrderFormModal({
         })),
       }
     }
-    const first = ings[0]
+    const preset = prefillIngId ? ingById.get(String(prefillIngId)) : null
+    const first = preset || ings[0]
     return {
       date: dayjs(),
       supplier: '',
@@ -120,13 +128,13 @@ export default function OrderFormModal({
         ? [
             {
               ing_id: String(first.id),
-              qty: 1,
+              qty: preset ? Number(first.conv) || 1 : 1,
               price: Number(first.last ?? first.avg) || 0,
             },
           ]
         : [{ qty: 1 }],
     }
-  }, [isEdit, editDoc, ings, ingById])
+  }, [isEdit, editDoc, prefillIngId, ings, ingById])
 
   /* 每次打开都回到初值（弹窗 destroyOnHidden，初值随 ings/带入原料/编辑单变化而重算）。
      延后一帧再写：Form.List 必须在其行字段挂载**之后**才能接到写入的行值（否则渲染成空行）。 */

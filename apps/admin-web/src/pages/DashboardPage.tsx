@@ -11,14 +11,24 @@ import {
   Statistic,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import dayjs, { type Dayjs } from 'dayjs'
 import { fetchAnalysis, fetchReportDaily } from '../api'
-import type { AlertItem, AnalysisResp, ReportDaily, TodoItem } from '../api/types'
+import type {
+  AlertItem,
+  AnalysisResp,
+  DailySeriesPoint,
+  DebtSaleItem,
+  ReportDaily,
+  SaleListItem,
+  TodoItem,
+} from '../api/types'
 import { resolveDeepLink } from '../config/menu'
 import { COLORS } from '../theme'
+import SalePayModal from './dinein/SalePayModal'
 
 const LEVEL_TAG: Record<string, { color: string; text: string }> = {
   critical: { color: COLORS.red, text: '紧急' },
@@ -43,6 +53,96 @@ const LOW_STOCK_SHOWN = 12
 function fmtNum(n?: number | null): string {
   if (n == null || !isFinite(Number(n))) return '-'
   return Number(n).toLocaleString('zh-CN', { maximumFractionDigits: 1 })
+}
+
+/* ---------------- FP-DASH-10 每日应收 vs 实收（近14天） ---------------- */
+
+/** 旧版柱图几何（HTML:1258 `const W=620,H=210,PL=44,PB=38,PT=16`） */
+const CHART = { W: 620, H: 210, PL: 44, PB: 38, PT: 16 }
+/** 旧版柱图配色（HTML:1273-1275）：应收 #3D7EA6 / 实收 #1E8E5A / 当日新增欠款红点 #D93025 */
+const CHART_COLORS = { receivable: '#3D7EA6', received: '#1E8E5A', debtDot: '#D93025' }
+/** 旧版红点判据：当日「应收 − 实收 > 1 元」才画红点（HTML:1275 `recvMap[d]-gotMap[d]>1`） */
+const NEW_DEBT_DOT_MIN = 1
+
+/**
+ * FP-DASH-10 14 天应收/实收双柱图（旧版 `#chartDaily` SVG，HTML:1258-1278 逐式对照）。
+ * 数据由 BFF 下发（`daily_series`，口径唯一出口在 lib/sales_model.js），本组件只画图不重算。
+ */
+function DailyBars({ series }: { series: DailySeriesPoint[] }) {
+  if (!series.length) return null
+  const { W, H, PL, PB, PT } = CHART
+  const maxV =
+    Math.max(1, ...series.map((d) => Math.max(d.receivable ?? 0, d.received ?? 0))) * 1.15
+  const bw = (W - PL - 14) / series.length
+  /** 值 → y 坐标（旧版 Y(v)，HTML:1266） */
+  const Y = (v: number) => H - PB - (v / maxV) * (H - PB - PT)
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
+      {/* 4 等分网格线 + 千元刻度（旧版 HTML:1268-1270） */}
+      {[0, 1, 2, 3, 4].map((i) => {
+        const v = (maxV * i) / 4
+        const y = Y(v)
+        return (
+          <g key={i}>
+            <line x1={PL} y1={y} x2={W - 10} y2={y} stroke="#eef1f5" />
+            <text x={PL - 6} y={y + 3.5} fontSize={9.5} fill="#9ca3af" textAnchor="end">
+              {(v / 1000).toFixed(1)}k
+            </text>
+          </g>
+        )
+      })}
+      {series.map((d, i) => {
+        const x = PL + i * bw + bw * 0.1
+        const recv = d.receivable ?? 0
+        const got = d.received ?? 0
+        return (
+          <g key={d.date}>
+            <rect
+              x={x}
+              y={Y(recv)}
+              width={bw * 0.36}
+              height={Math.max(0, H - PB - Y(recv))}
+              fill={CHART_COLORS.receivable}
+              rx={1}
+            >
+              <title>{`${d.date} 应收 ¥${recv.toFixed(2)}`}</title>
+            </rect>
+            <rect
+              x={x + bw * 0.4}
+              y={Y(got)}
+              width={bw * 0.36}
+              height={Math.max(0, H - PB - Y(got))}
+              fill={CHART_COLORS.received}
+              rx={1}
+            >
+              <title>{`${d.date} 实收 ¥${got.toFixed(2)}`}</title>
+            </rect>
+            {/* 当日新增欠款红点（旧版 HTML:1275） */}
+            {recv - got > NEW_DEBT_DOT_MIN && (
+              <circle
+                cx={x + bw * 0.38}
+                cy={Y(recv) - 3}
+                r={2.4}
+                fill={CHART_COLORS.debtDot}
+              >
+                <title>{`${d.date} 当日新增欠款 ¥${(recv - got).toFixed(2)}`}</title>
+              </circle>
+            )}
+            <text
+              x={x + bw * 0.38}
+              y={H - PB + 14}
+              fontSize={9}
+              fill="#6b7280"
+              textAnchor="middle"
+            >
+              {d.date.slice(5)}
+            </text>
+          </g>
+        )
+      })}
+    </svg>
+  )
 }
 
 /** 归一 kpi：BFF 的 kpi[] → 前端 kpis[] */
@@ -105,6 +205,10 @@ export default function DashboardPage() {
   const [date, setDate] = useState<Dayjs>(dayjs())
   /** FP-DASH-01 统计周期（'7' | '30' | 'all'） */
   const [range, setRange] = useState<string>(DEFAULT_RANGE)
+  /** FP-DASH-14：行内「收款」登记的销售单（走 sale.pay 审批队列，无写权限则由 BFF 挡） */
+  const [payTarget, setPayTarget] = useState<SaleListItem | null>(null)
+  /** 收款入队后重取快照 + 报表（等审批执行后账面才变，此处只刷新读侧） */
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -124,7 +228,7 @@ export default function DashboardPage() {
     return () => {
       alive = false
     }
-  }, [date, range])
+  }, [date, range, reloadKey])
 
   useEffect(() => {
     fetchAnalysis()
@@ -176,6 +280,33 @@ export default function DashboardPage() {
   const lowStockItems = report?.low_stock?.items ?? []
   const lowStockTotal = Number(report?.low_stock?.total ?? lowStockItems.length)
   const lowStockShown = lowStockItems.slice(0, LOW_STOCK_SHOWN)
+
+  /** FP-DASH-10 近14天应收/实收逐日序列（BFF `daily_series`；空数组不出图，不编造） */
+  const dailySeries = report?.daily_series ?? []
+  /** 14 天全零：照旧画轴（旧版行为），另加一行说明，避免「空白图」被误读成加载失败 */
+  const seriesAllZero =
+    dailySeries.length > 0 && dailySeries.every((d) => !d.receivable && !d.received)
+  /** FP-DASH-13 未收账款（客户挂账）清单（BFF `debt_sales`，欠款 > 0.01，按单日期倒序） */
+  const debtSales = report?.debt_sales ?? []
+  const debtTotal = debtSales.reduce((a, r) => a + (Number(r.debt) || 0), 0)
+
+  /** FP-DASH-12 低库存行「去采购」：跳「采购管理」并把该原料带进采购单草稿（旧版 HTML:1312 `go('po')+openOrder(null,ing)`） */
+  const goPurchase = (ingId?: string | null) => {
+    if (!ingId) return
+    navigate('/inventory/purchase', { state: { poIng: String(ingId) } })
+  }
+
+  /** FP-DASH-14 行内「收款」：把挂账行按销售单形状交给 SalePayModal（口径字段来自 BFF） */
+  const debtRowToSale = (r: DebtSaleItem): SaleListItem => ({
+    id: r.id ?? null,
+    no: r.no ?? null,
+    date: r.date,
+    channel: r.channel,
+    receivable: r.receivable,
+    received: r.received,
+    debt: r.debt,
+    status: r.status,
+  })
 
   return (
     <div>
@@ -354,6 +485,134 @@ export default function DashboardPage() {
         ))}
       </Row>
 
+      {/* FP-DASH-10 每日应收 vs 实收（近14天）+ FP-DASH-13 未收账款（客户挂账）
+          （旧版 #tab-dash 两两并排的 grid2 布局：HTML:203-227） */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} lg={14}>
+          <Card title="每日应收 vs 实收（近14天）" size="small">
+            {dailySeries.length === 0 ? (
+              <div style={{ color: COLORS.gray, fontSize: 12 }}>
+                近 14 天暂无销售/收款记录（序列由服务端口径下发，无数据不出图）
+              </div>
+            ) : (
+              <>
+                <DailyBars series={dailySeries} />
+                <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 12 }}>
+                  <span>
+                    <i
+                      style={{
+                        display: 'inline-block',
+                        width: 10,
+                        height: 10,
+                        background: CHART_COLORS.receivable,
+                        marginRight: 4,
+                      }}
+                    />
+                    应收（挂账前）
+                  </span>
+                  <span>
+                    <i
+                      style={{
+                        display: 'inline-block',
+                        width: 10,
+                        height: 10,
+                        background: CHART_COLORS.received,
+                        marginRight: 4,
+                      }}
+                    />
+                    实收
+                  </span>
+                  <span>
+                    <i
+                      style={{
+                        display: 'inline-block',
+                        width: 10,
+                        height: 10,
+                        borderRadius: '50%',
+                        background: CHART_COLORS.debtDot,
+                        marginRight: 4,
+                      }}
+                    />
+                    当日新增欠款
+                  </span>
+                </div>
+                {seriesAllZero && (
+                  <div style={{ color: COLORS.gray, fontSize: 12, marginTop: 2 }}>
+                    近 14 天应收与实收均为 0（快照内该区间无销售/收款记录），轴照常保留
+                  </div>
+                )}
+              </>
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} lg={10}>
+          <Card
+            title="未收账款（客户挂账）"
+            size="small"
+            extra={
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {debtSales.length} 单 · 欠款合计 ¥{fmtNum(debtTotal)}
+              </Typography.Text>
+            }
+          >
+            {debtSales.length === 0 ? (
+              <div style={{ color: COLORS.green }}>暂无挂账欠款 ✅</div>
+            ) : (
+              <Table<DebtSaleItem>
+                size="small"
+                rowKey={(r) => String(r.id ?? r.no ?? '')}
+                dataSource={debtSales}
+                pagination={false}
+                scroll={{ y: 240 }}
+                columns={[
+                  {
+                    title: '单据',
+                    dataIndex: 'no',
+                    render: (_, r) => (
+                      <div>
+                        <span>
+                          {String(r.no ?? r.id ?? '-').slice(-8)} · {r.date}
+                        </span>
+                        <div>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {r.note || r.channel || ''}
+                          </Typography.Text>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: '应收',
+                    dataIndex: 'receivable',
+                    align: 'right',
+                    width: 90,
+                    render: (v) => '¥' + fmtNum(v),
+                  },
+                  {
+                    title: '欠款',
+                    dataIndex: 'debt',
+                    align: 'right',
+                    width: 90,
+                    render: (v) => (
+                      <span style={{ color: COLORS.red }}>¥{fmtNum(v)}</span>
+                    ),
+                  },
+                  {
+                    title: '操作',
+                    width: 70,
+                    render: (_, r) => (
+                      <Typography.Link onClick={() => setPayTarget(debtRowToSale(r))}>
+                        收款
+                      </Typography.Link>
+                    ),
+                  },
+                ]}
+              />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
       {/* FP-DASH-15 菜品毛利排行（近30天 Top12：份数/营收/毛利/毛利率） */}
       {(report.top_dishes ?? []).length > 0 && (
         <Card title="菜品毛利排行（近30天 Top12）" size="small" style={{ marginTop: 16 }}>
@@ -444,6 +703,16 @@ export default function DashboardPage() {
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                       安全 {fmtNum(it.safe)} {it.unit || ''}
                     </Typography.Text>
+                    {/* FP-DASH-12 行内「去采购」（旧版 data-poing，HTML:1283/1312）：带该原料进采购单草稿 */}
+                    <Tooltip title={it.id ? '跳「采购管理」并把该原料带进采购单草稿' : '该原料无主数据 id，无法带入采购单'}>
+                      <Typography.Link
+                        disabled={!it.id}
+                        onClick={() => goPurchase(it.id)}
+                        data-poing={it.id ?? undefined}
+                      >
+                        去采购
+                      </Typography.Link>
+                    </Tooltip>
                   </Space>
                 </List.Item>
               )}
@@ -544,6 +813,15 @@ export default function DashboardPage() {
           </Card>
         </Col>
       </Row>
+
+      {/* FP-DASH-14 未收账款行内「收款」登记（旧版 data-get→openGet('S',…)，HTML:1313）：
+          与「销售收银」页复用同一 SalePayModal（sale.pay 审批队列），不另写收款逻辑 */}
+      <SalePayModal
+        open={!!payTarget}
+        sale={payTarget}
+        onClose={() => setPayTarget(null)}
+        onQueued={() => setReloadKey((k) => k + 1)}
+      />
     </div>
   )
 }
