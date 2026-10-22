@@ -52,7 +52,7 @@ function procurement(ext, data, date) {
     const recipe = bySku[sku];
     if (!recipe) continue;
     const portions = demandPortions[sku];
-    const card = buildCostCard(recipe, data || {});
+    const card = buildCostCard(recipe, data || {}, recipes);
     if (!card) continue;
     const batchPieces = num(card.batch_pieces) || 67;
     const portionPieces = num(card.portion_pieces) || 15;

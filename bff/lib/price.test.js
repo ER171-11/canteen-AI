@@ -68,6 +68,33 @@ const p4 = plan.items.find((x) => x.ingId === 'i4');
 ok('pricePlan i1 已比价 / 关键词=五花肉', p1.status === '已比价' && p1.keyword === '五花肉', p1);
 ok('pricePlan i4 待比价', p4.status === '待比价', p4.status);
 
+/* ---- FP-PRICE-06/08 报价明细 + 归属按名回退（历史「按名录入」脏数据） ---- */
+const LEGACY = {
+  data: {
+    ings: [{ id: 'I1', name: '东古一品鲜500ml', cat: '调料', buy: '瓶', conv: 1, unit: '瓶', avg: 0, on: true }],
+    /* 旧数据以原料名当 ing 存；同原料多家报价，日期乱序投放以验「来源与时间」取最近两条 */
+    quotes: [
+      { id: 'Q200', ing: '东古一品鲜500ml', name: '东古一品鲜500ml', src: '老商', price: 1.2, per: 'buy', date: '2026-10-01', note: '' },
+      { id: 'Q201', ing: 'I1', name: '东古一品鲜500ml', src: '新商', price: 1, per: 'buy', date: '2026-10-12', note: '含运' },
+      { id: 'Q202', ing: 'I1', src: '中商', price: 9, per: 'buy', convIgnored: true, date: '2026-10-06', note: '' },
+    ],
+  },
+};
+const lrep = price.priceReport(LEGACY);
+const lrow = lrep.rows[0];
+ok('按名回退：名称与 id 两种报价并入同一原料', lrow.quotes.length === 3, lrow.quotes.map((q) => q.id));
+ok('按名回退：最低折价 = ¥1（新商）', lrow.best.src === '新商' && lrow.best.unit === 1, lrow.best);
+ok('报价明细按日期倒序（最近在前）', lrow.quotes.map((q) => q.date).join(',') === '2026-10-12,2026-10-06,2026-10-01', lrow.quotes.map((q) => q.date));
+ok('来源与时间取最近两条（新商 / 中商）', lrow.recent.map((q) => q.src).join(',') === '新商,中商', lrow.recent);
+ok('报价明细含折库存单位价与对比本店', lrow.quotes[0].perStock === 1 && lrow.quotes[0].diff === 1, lrow.quotes[0]);
+ok('报价明细保留备注', lrow.quotes[0].note === '含运', lrow.quotes[0].note);
+ok('统计：在售 1 / 尚无 0 / 已有 1', lrep.tip.onSale === 1 && lrep.tip.noQuote === 0 && lrep.tip.hasQuote === 1, lrep.tip);
+ok('quoteMatches：id 与名称均可命中，无关值不命中',
+  price.quoteMatches(LEGACY.data.ings[0], { ing: 'I1' }) === true
+  && price.quoteMatches(LEGACY.data.ings[0], { ing: '东古一品鲜500ml' }) === true
+  && price.quoteMatches(LEGACY.data.ings[0], { ing: '别的原料' }) === false
+  && price.quoteMatches(LEGACY.data.ings[0], {}) === false, 'quoteMatches');
+
 /* ---- 空快照安全回退 ---- */
 const empty = price.priceReport(null);
 ok('priceReport 空快照 → 空 rows / 0 统计', empty.rows.length === 0 && empty.tip.onSale === 0, empty.tip);

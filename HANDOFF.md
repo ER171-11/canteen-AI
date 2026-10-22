@@ -52,7 +52,7 @@ AI Agent / KMP 共享层 / Android + iOS 双端 / admin-web 应用发布页）�
 ```
 store-inventory/docs/CHANGELOG.md        # 每个阶段做了什么、留了什么坑
 docs/迁移基线/欠账总表.md                 # 113 张任务卡，⛔/⚠ 分级
-docs/进度看板.html                        # 进度可视化（scripts/gen-progress-board.js 生成）
+docs/进度看板/进度看板.html               # 进度可视化（scripts/gen-progress-board.js 生成）
 docs/                                    # PRD / 开发计划 / 决策记录(ADR-*) / 运行保障层
 ```
 
@@ -135,7 +135,7 @@ node scripts/gen-progress-board.js                    # 刷新进度看板
 
 ## 6. 下一步从哪开始
 
-读 `docs/迁移基线/欠账总表.md` 与 `docs/进度看板.html`，按优先级挑。已知收口点：
+读 `docs/迁移基线/欠账总表.md` 与 `docs/进度看板/进度看板.html`，按优先级挑。已知收口点：
 
 - ✅ 结构测算模块 **20/20 已闭合**（阶段 12 补齐 `FP-CALC-14` 五类角色卡片，与四象限并列、
   **未替换**；口径 = 保本价盘，随页面分界切换到本店在售菜品）

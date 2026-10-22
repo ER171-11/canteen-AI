@@ -52,17 +52,18 @@ function clockMinutes(ts) {
   return hhmmAt(s);
 }
 
-/** 取某员工某日排班的开始时间；找不到返回 null */
+/** 取某员工某日排班的开始时间；找不到（或当日已转休）返回 null */
 function shiftStartOf(shifts, staffId, date) {
   const list = Array.isArray(shifts) ? shifts : [];
   const sid = trim(staffId);
   const day = trim(date);
   if (!sid) return null;
-  const hit = list.find(
+  const dayRows = list.filter(
     (x) => trim(x && x.staff_id) === sid && trim(x && x.date) === day
   );
-  if (!hit) return null;
-  return hit.start_time || hit.start || null;
+  if (!dayRows.length) return null;
+  if (dayRows.some(isRest)) return null; // 同日存在休行（如换班转休）→ 视为无排班
+  return dayRows[0].start_time || dayRows[0].start || null;
 }
 
 /** 判定打卡状态：{status, late_min} | null（无法判定） */
@@ -104,9 +105,22 @@ function nameOf(shift) {
  * @returns {expected, clocked, on_time, late, absent, makeup, rows:[...]}
  */
 function summarize(shifts, clocks, date, config) {
-  const list = (Array.isArray(shifts) ? shifts : []).filter(
-    (s) => trim(s && s.date) === trim(date) && !isRest(s)
+  const dayAll = (Array.isArray(shifts) ? shifts : []).filter(
+    (s) => trim(s && s.date) === trim(date)
   );
+  // 同日存在 休/休息/请假 行（如换班转休）的员工：整日按休计，残留班次行忽略
+  const restKeys = new Set();
+  for (const s of dayAll) {
+    if (isRest(s)) {
+      const k = trim(s && s.staff_id) || nameOf(s);
+      if (k) restKeys.add(k);
+    }
+  }
+  const list = dayAll.filter((s) => {
+    if (isRest(s)) return false;
+    const k = trim(s && s.staff_id) || nameOf(s);
+    return !restKeys.has(k);
+  });
   const dayClocks = (Array.isArray(clocks) ? clocks : []).filter((c) => {
     const k = trim(c && c.kind);
     const ts = String((c && (c.ts || c.time)) || '');

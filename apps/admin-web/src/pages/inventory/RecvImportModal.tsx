@@ -7,6 +7,7 @@ import {
   Empty,
   Input,
   Modal,
+  Select,
   Space,
   Table,
   Tag,
@@ -18,7 +19,13 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import { postAction } from '../../api'
 import { previewRecvImport } from '../../api/recvImport'
-import type { RecvImportGroup, RecvImportLine, RecvImportPreview } from '../../api/recvImport'
+import type {
+  RecvImportGroup,
+  RecvImportHead,
+  RecvImportLine,
+  RecvImportOverride,
+  RecvImportPreview,
+} from '../../api/recvImport'
 import { useAuthStore } from '../../store/auth'
 import { downloadRecvTemplate } from './recvTemplate'
 import { fmt } from './settle/data'
@@ -40,7 +47,8 @@ import { fmt } from './settle/data'
  *      但不像旧版那样把不确定的单位/分类静默写进主数据 —— 新料建成「待完善草稿」（pending:true），
  *      导入不阻断，由门店到「原料档案 → 待完善」补全信息并「确认转正」。
  *   ② 旧版二进制 .xls（BIFF8）**不支持**，见界面提示（先另存为 .xlsx / CSV）。
- *   ③ 旧版「手动指定列」(:3465) 未移植：表头靠别名自动识别，识别不了会明确报错并要求改列名。
+ *   ③ 「手动指定列」已移植：列名古怪 / 识别不到时点「列识别不对？手动指定」，指定表头行与
+ *      「品名/数量/单价」对应列（对齐旧版 openColMap :3465，BFF 无状态重解析）。
  *   ④ 导入产生的是「 orders 之外的新 JH 单」，不会回写采购单收货进度（同采购管理页欠账）。
  */
 
@@ -109,42 +117,83 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
   const role = useAuthStore((s) => s.role)
   const [busy, setBusy] = useState(false)
   const [fileName, setFileName] = useState('')
+  /** 原文件 base64：手动指定列重解析时复用（服务端无状态，每次带全文重算） */
+  const [fileB64, setFileB64] = useState('')
   const [preview, setPreview] = useState<RecvImportPreview | null>(null)
+  const [head, setHead] = useState<RecvImportHead | null>(null)
   /* 单张时可改抬头（对应旧版预览弹窗里的 metaForm :3624-3628） */
   const [supplier, setSupplier] = useState('')
   const [date, setDate] = useState<Dayjs>(dayjs())
   const [note, setNote] = useState('')
   const [markPaid, setMarkPaid] = useState(false)
+  /* 手动指定列面板 */
+  const [mapOpen, setMapOpen] = useState(false)
+  const [headerRow, setHeaderRow] = useState(0)
+  const [colMap, setColMap] = useState<Record<string, number>>({})
 
   const groups = useMemo<RecvImportGroup[]>(() => preview?.groups ?? [], [preview])
 
   const reset = () => {
     setFileName('')
+    setFileB64('')
     setPreview(null)
+    setHead(null)
     setBusy(false)
     setMarkPaid(false)
     setSupplier('')
     setNote('')
     setDate(dayjs())
+    setMapOpen(false)
+    setHeaderRow(0)
+    setColMap({})
+  }
+
+  const applyPreview = (pv: RecvImportPreview) => {
+    setPreview(pv)
+    if (pv.head) {
+      setHead(pv.head)
+      setHeaderRow(pv.head.headerRowIndex >= 0 ? pv.head.headerRowIndex : 0)
+      setColMap(pv.head.colMap ?? {})
+    }
+    setSupplier(pv.groups[0]?.supplier ?? '')
+    setDate(pv.groups[0]?.date ? dayjs(pv.groups[0].date) : dayjs())
+    setNote(pv.groups[0]?.note ?? '')
+    message.success(`已预览：${pv.groups.length} 张单据 / ${pv.totalLines} 行`)
+  }
+
+  const runPreview = async (b64: string, name: string, override?: RecvImportOverride) => {
+    setBusy(true)
+    try {
+      const pv = await previewRecvImport({ fileName: name, contentBase64: b64, override })
+      applyPreview(pv)
+      setMapOpen(false)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string; head?: RecvImportHead } } }
+      const data = err.response?.data
+      setPreview(null)
+      /* 列名识别不了时后端会把原始网格回传：直接展开「手动指定列」面板指路，不留死路 */
+      if (data?.head) {
+        setHead(data.head)
+        setHeaderRow(data.head.headerRowIndex >= 0 ? data.head.headerRowIndex : 0)
+        setColMap(data.head.colMap ?? {})
+        setMapOpen(true)
+      }
+      message.error(data?.error || '预览失败（文件无法识别）')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const handleFile = async (file: File) => {
-    setBusy(true)
     setPreview(null)
     try {
-      const contentBase64 = await readAsBase64(file)
-      const pv = await previewRecvImport({ fileName: file.name, contentBase64 })
+      const b64 = await readAsBase64(file)
       setFileName(file.name)
-      setPreview(pv)
-      setSupplier(pv.groups[0]?.supplier ?? '')
-      setDate(pv.groups[0]?.date ? dayjs(pv.groups[0].date) : dayjs())
-      setNote(pv.groups[0]?.note ?? '')
-      message.success(`已预览：${pv.groups.length} 张单据 / ${pv.totalLines} 行`)
+      setFileB64(b64)
+      await runPreview(b64, file.name)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } }
-      message.error(err.response?.data?.error || '预览失败（文件无法识别）')
-    } finally {
-      setBusy(false)
+      message.error(err.response?.data?.error || '读取文件失败')
     }
   }
 
@@ -188,6 +237,17 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
     }
   }
 
+  /* ---- 手动指定列：表头行候选 + 列选项（用该行单元格文字做标签） ---- */
+  const headRows = head?.rows ?? []
+  const colOptions = useMemo(() => {
+    const row = headRows[headerRow] || []
+    const n = Math.max(row.length, headRows.reduce((m, r) => Math.max(m, r.length), 0))
+    return Array.from({ length: n }, (_, i) => {
+      const txt = String(row[i] ?? '').trim()
+      return { value: i, label: txt ? `${txt}（第${i + 1}列）` : `第${i + 1}列` }
+    })
+  }, [headRows, headerRow])
+
   return (
     <Modal
       title="批量导入进货单"
@@ -218,6 +278,11 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
             </Button>
           </Upload>
           <Button onClick={downloadRecvTemplate}>下载导入模板</Button>
+          {preview && fileB64 ? (
+            <Button onClick={() => setMapOpen((v) => !v)} disabled={!head}>
+              列识别不对？手动指定
+            </Button>
+          ) : null}
           {fileName ? <Typography.Text type="secondary">{fileName}</Typography.Text> : null}
         </Space>
 
@@ -231,7 +296,10 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
           }
           description={
             <div style={{ fontSize: 12 }}>
-              <div>{REQUIRED_COLS}（同义词自动识别，如「商品名称」「实收数」「采购单价」）</div>
+              <div>
+                {REQUIRED_COLS}（同义词自动识别，如「商品名称」「实收数」「采购单价」）；
+                列名古怪识别不到时，点上方「列识别不对？手动指定」自行对应
+              </div>
               <div style={{ color: '#cf1322' }}>{UNSUPPORTED}</div>
               <div>
                 表内若有「供应商/日期」列，会按「供应商+日期」自动拆成多张 JH 单；没有则全部并成 1 张。
@@ -240,7 +308,87 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
           }
         />
 
-        {!preview && !busy ? (
+        {mapOpen && head ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="手动指定列：先点一行作为「表头行」，再把字段对到具体列"
+            description={
+              <Space direction="vertical" style={{ width: '100%' }} size="small">
+                <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #f0f0f0' }}>
+                  <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
+                    <tbody>
+                      {headRows.map((r, ri) => (
+                        <tr
+                          key={ri}
+                          onClick={() => setHeaderRow(ri)}
+                          style={{
+                            cursor: 'pointer',
+                            background: ri === headerRow ? '#fffbe6' : undefined,
+                          }}
+                        >
+                          <td style={{ padding: '2px 6px', color: '#999', whiteSpace: 'nowrap' }}>
+                            {ri + 1}
+                          </td>
+                          {r.map((c, ci) => (
+                            <td
+                              key={ci}
+                              style={{
+                                padding: '2px 8px',
+                                borderLeft: '1px solid #f5f5f5',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {String(c ?? '')}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Space wrap size="middle">
+                  {head.fields.map((f) => (
+                    <span key={f}>
+                      <Typography.Text strong>{head.labels[f] ?? f}</Typography.Text>
+                      <Select
+                        size="small"
+                        style={{ width: 170, marginLeft: 6 }}
+                        allowClear
+                        placeholder="不指定"
+                        value={colMap[f]}
+                        options={colOptions}
+                        onChange={(v) =>
+                          setColMap((prev) => {
+                            const next = { ...prev }
+                            if (v === undefined) delete next[f]
+                            else next[f] = v as number
+                            return next
+                          })
+                        }
+                      />
+                    </span>
+                  ))}
+                </Space>
+                <Space>
+                  <Button
+                    type="primary"
+                    size="small"
+                    loading={busy}
+                    onClick={() => void runPreview(fileB64, fileName, { rowIndex: headerRow, map: colMap })}
+                  >
+                    按此重新解析
+                  </Button>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    必填：品名/原料名称 · 数量(实收数/下单数) · 单价
+                  </Typography.Text>
+                </Space>
+              </Space>
+            }
+          />
+        ) : null}
+
+        {!preview && !busy && !mapOpen ? (
           <Empty description="先选一个文件：会先出预览，确认后才会入队（预览不改动任何数据）" />
         ) : null}
 
@@ -338,7 +486,7 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   已知差异：① 未匹配原料自动建档为「待完善」草稿（与旧版一致，导入不阻断）；
                   ② 旧版二进制 .xls 不支持；
-                  ③ 无「手动指定列」，表头靠别名自动识别；④ 不回写采购单收货进度。
+                  ③ 手动指定列已支持（列名识别不到时点上方「列识别不对？手动指定」）；④ 不回写采购单收货进度。
                 </Typography.Text>
               }
             />

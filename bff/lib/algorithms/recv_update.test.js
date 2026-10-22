@@ -116,4 +116,41 @@ ok('找不到进货单被拒', () => {
   );
 });
 
+/* 8) 整单优惠：仅改 discount 不改明细 → 应付重算，行级 amount/unitCost 不动 */
+ok('编辑只改优惠：discount=20 → 应付 280，明细 amount/unitCost 不变', () => {
+  const data = mkData();
+  inv.applyRecvUpdate(data, Object.assign({}, BASE, { discount: 20 }));
+  const d = data.recv[0];
+  assert.strictEqual(d.discount, 20);
+  assert.strictEqual(d.gross, 300);
+  assert.strictEqual(d.payable, 280);
+  assert.strictEqual(d.lines[0].amount, 300, '行级 amount 不动');
+  assert.strictEqual(d.lines[0].unitCost, 30, '行级 unitCost 不动（让利不摊入成本）');
+});
+
+/* 9) 整单优惠超过明细合计：拒绝 */
+ok('编辑优惠超过明细合计被拒', () => {
+  const data = mkData();
+  assert.throws(
+    () => inv.applyRecvUpdate(data, Object.assign({}, BASE, { discount: 301 })),
+    /整单优惠/
+  );
+});
+
+/* 10) 编辑时新增原料（无 ing_id，仅 name）：按名自动建档并入库 */
+ok('编辑新增原料自动建档：name 行无 ing_id → 档案 +1、库存入账', () => {
+  const data = mkData();
+  inv.applyRecvUpdate(data, Object.assign({}, BASE, {
+    items: [{ name: '娃娃菜', unit: '斤', cat: '蔬菜', qty: 4, price: 2.5 }]
+  }));
+  const d = data.recv[0];
+  assert.strictEqual(data.ings.length, 3, '自动建档后档案数 3');
+  const ni = data.ings.find((g) => g.name === '娃娃菜');
+  assert.ok(ni, '新原料应存在于档案');
+  assert.strictEqual(ni.pending, true, '新原料应为待完善草稿');
+  assert.strictEqual(d.lines[0].ing, ni.id);
+  assert.strictEqual(ni.stock, 4, '库存按 rebuildStock 入账');
+  assert.strictEqual(d.payable, 10);
+});
+
 console.log('[recv_update.test] PASS ' + pass + ' cases');

@@ -125,6 +125,24 @@ const CASES = [
     mine: { ings: [{ id: 'A', qty: 1 }], seq: 1 },
     theirs: {},
   },
+  {
+    name: 'ing_terms-本机新增词条',
+    base: { ing_terms: [{ id: 'T001', name: '面粉', status: 'active', _u: 't1' }] },
+    mine: { ing_terms: [{ id: 'T001', name: '面粉', status: 'active', _u: 't1' }, { id: 'T016', name: '云南', status: 'pending', _u: 't2' }] },
+    theirs: { ing_terms: [{ id: 'T001', name: '面粉', status: 'active', _u: 't1' }] },
+  },
+  {
+    name: 'ing_terms-本机改状态对端未改',
+    base: { ing_terms: [{ id: 'T016', name: '云南', status: 'pending', _u: 't1' }] },
+    mine: { ing_terms: [{ id: 'T016', name: '云南', status: 'active', _u: 't2' }] },
+    theirs: { ing_terms: [{ id: 'T016', name: '云南', status: 'pending', _u: 't1' }] },
+  },
+  {
+    name: 'ing_terms-两端各自新增',
+    base: { ing_terms: [{ id: 'T001', name: '面粉', status: 'active', _u: 't1' }] },
+    mine: { ing_terms: [{ id: 'T001', name: '面粉', status: 'active', _u: 't1' }, { id: 'T016', name: '云南', status: 'pending', _u: 't2' }] },
+    theirs: { ing_terms: [{ id: 'T001', name: '面粉', status: 'active', _u: 't1' }, { id: 'T017', name: '北京', status: 'pending', _u: 't3' }] },
+  },
 ];
 
 // ---------- Python 参考实现 ----------

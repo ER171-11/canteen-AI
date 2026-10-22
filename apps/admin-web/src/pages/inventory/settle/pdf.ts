@@ -184,7 +184,7 @@ export function settlePageModel(
   const topH = 40 + (meta ? 16 : 8) + 7 + headRows.length * H + 7 + H
   const contH = 22 + H
   /** 合计框 + 签字栏 + 页脚 */
-  const TAIL = 6 + 60 + 18 + 30 + 14 + 20
+  const TAIL = 6 + 73 + 18 + 30 + 14 + 20
 
   const cap1 = Math.max(1, Math.floor((PDF_H - PDF_MY * 2 - topH) / H))
   const capN = Math.max(1, Math.floor((PDF_H - PDF_MY * 2 - contH) / H))
@@ -254,7 +254,7 @@ export function settlePageModel(
     })
     if (pi === pages.length - 1) {
       y += 6
-      ops.push({ t: 'rect', x: 0, y, w: PDF_CW, h: 60, stroke: PDF_LINE, sw: 0.7 })
+      ops.push({ t: 'rect', x: 0, y, w: PDF_CW, h: 73, stroke: PDF_LINE, sw: 0.7 })
       let sy = y + 17
       ops.push({ t: 'text', s: '小写合计：', x: 8, y: sy, font: pdfFont(true, 9.5) })
       ops.push({ t: 'text', s: '¥' + fmt(d.payable), x: 66, y: sy, font: pdfFont(true, 11) })
@@ -270,6 +270,16 @@ export function settlePageModel(
       sy += 13
       ops.push({
         t: 'text',
+        s: `明细合计 ¥${fmt(d.gross)}\u3000|\u3000整单优惠 −¥${fmt(d.discount)}`,
+        x: 8,
+        y: sy,
+        font: pdfFont(false, 8.5),
+        color: PDF_SUB,
+        maxW: PDF_CW - 16,
+      })
+      sy += 13
+      ops.push({
+        t: 'text',
         s:
           `明细 ${d.count} 项 · 合计数量 ${fmt(d.totalQty, 3)}\u3000|\u3000应付全额 ¥${fmt(d.payable)}\u3000已付 ¥${fmt(
             d.paid,
@@ -280,7 +290,7 @@ export function settlePageModel(
         color: PDF_SUB,
         maxW: PDF_CW - 16,
       })
-      y += 60 + 18
+      y += 73 + 18
       const slot = PDF_CW / Math.max(1, signList.length)
       signList.forEach((s, i) => ops.push({ t: 'text', s, x: i * slot, y: y + 12, font: pdfFont(false, 9.5) }))
       y += 30 + 14

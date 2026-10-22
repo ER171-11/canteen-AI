@@ -3,6 +3,56 @@
 > AI在修改任何模块前，必须查阅此文件，了解历史决策与废弃逻辑，避免引入过时方案。
 > 采用追加式记录，禁止覆盖历史条目。
 
+## [2026-10-13 23:30] 阶段 28 - W3 · 菜品配方收官（FP-DISH-06/16/17/18）：菜品配方页 18/18 全部移植
+
+- 背景: 菜品配方页 18 项中仅余 4 项 ⬜（`FP-DISH-06` 删除菜品、`FP-DISH-16` 食谱卡批量导入、
+  `FP-DISH-17` 下载导入模板、`FP-DISH-18` 导入时未匹配原料/菜品自动建档），即「唯一批量录入通道 + 菜品退场」
+  未闭环。前三项同源（导入全家桶），故按 W3 顺序一次补齐；另在本阶段完成基线/欠账/看板的文档同步。
+- 决策（落点）:
+  1. **导入只加一条写路径**：预览为**只读端点** `POST /api/kitchen/recipes/import/preview`（纯计算、零写、8MB 上限、
+     失败 400 带文案，`routes/kitchen.js` 中唯一的非 GET 例外）；提交是**整批一个** `recipe.import` 动作进
+     `/api/actions` 审批队列。逐道菜复用唯一写入口 `upsertRecipe`（`ensure_ings` 缺料建档 + `sync_dish` 同步菜品壳），
+     `FP-DISH-18` 因此与手工「新增菜谱」同口径，不另起分支。
+  2. **格式层整体复用**：`lib/recipe_import.js` 直接 `require('./recv_import')`，复用 `sniffFormat/parseXlsxBytes/
+     parseHtmlTables/parseCsvText/findHeaderRow`，故 xlsx / 伪 xls(html) / csv / json 与「表头自动定位 + 手动指定列」
+     与进货单导入完全同源，不复制第二套解析器。
+  3. **删除是本域既定口径**：`dish.delete` 物理移除菜品体 + 解除 `data.rec[id/sku_id]` 配方绑定（金丰配方主数据保留），
+     **有销售记录禁删**（`dishReferencedBySales` 比对 id/菜名/sku_id；`admin.js` 下发 `sold` 供前端禁用按钮，
+     执行器二次拦截兜底）；本函数不触碰库存。
+  4. **模板列口径与 BFF 同义词表对齐**：`recipeTemplate.ts` 的 `REC_TEMPLATE_COLS` 抄旧版 `downloadRecTemplate`，
+     与 `IMP_REC_DEFS` 一致，老门店已有 CSV 不改格式即可导入；纯前端生成，零请求。
+- 变更:
+  - BFF: `bff/lib/recipe_import.js`（新增，格式层复用 `recv_import`）、`bff/routes/kitchen.js`（新增只读预览端点）、
+    `bff/lib/algorithms/dish.js`（`applyDishDelete`、`dishReferencedBySales`、`applyRecipeImport`、`importRowOf`/`bomNameOf`）、
+    `bff/lib/algorithms/registry.js`（注册 `dish.delete` / `recipe.import`）、`bff/routes/admin.js`（`dishes` 附 `sold`）。
+  - admin-web: `pages/kitchen/components/RecipeImportModal.tsx`（新增，含手动指定列面板）、
+    `pages/kitchen/recipeTemplate.ts`（新增）、`api/recipeImport.ts`（新增契约）、`pages/kitchen/{DishesPage,RecipesPage}.tsx`
+    （删除入口 + 批量导入/下载模板入口）。
+- 验证（本次实际跑过）:
+  - `node --test bff/lib/algorithms/dish_import_delete.test.js bff/lib/recipe_import.test.js bff/routes/kitchen_import.test.js` → **全绿**
+    （含删除引用校验、列名古怪→400 且给出「手动指定列」出路、二进制 .xls→400、上传超限→413、
+    以及**预览零写**：数据目录仍只有 `snapshot.json` 且字节未变）。
+  - `npm test`（bff 全量）→ **exit 0**；`apps/admin-web` `npx tsc --noEmit` → **exit 0**。
+  - `powershell -File scripts/gen-debt-table.ps1` → 151 项 **⬆️ 131 / ⬜ 16**（W1 0 / W2 4 / W3 9 / W4 3）；
+    `node scripts/gen-progress-board.js` → 漂移校验 **ok**、数字一致性 **OK**；附录 A 的 DISH 行改为「18/18 已移植」。
+- ⚠️ 未验证项 / 已知缺口:
+  1. **未做真机开箱点击**：删除菜品与食谱卡导入的页面路径只做了 node 层测试与类型检查，未在演示环境逐步点选
+     （写类动作入队后还需到审批中心 `confirm` 才落库，未做 UI 端到端确认）。
+  2. **多 sheet / 合并单元格 xlsx 未逐一验证**：预览取「表头自动定位」命中的首个可用表；异常表结构需用「手动指定列」。
+  3. `recipe.import` 的 `mode` 语义（默认 `replace` 覆盖辅料/调味旧行、`merge` 按原料合并）仅由单测覆盖，
+     未在真实门店数据上做回归比对。
+- 影响范围: `bff/lib/{recipe_import.js,algorithms/dish.js,algorithms/registry.js,routes/kitchen.js,routes/admin.js}`、
+  `apps/admin-web/src/{api/recipeImport.ts,pages/kitchen/recipeTemplate.ts,pages/kitchen/components/RecipeImportModal.tsx,
+  pages/kitchen/{DishesPage,RecipesPage}.tsx}`、`docs/迁移基线/FP-菜品配方.md`（18/18 全部 ⬆️）、
+  `docs/迁移基线/欠账总表.md`、`docs/迁移颗粒度规范.md`（附录 A）、`docs/进度看板.html`、
+  `docs/下一步任务清单_2026-09-28.md`、`scripts/gen-debt-table.ps1`（DISH 状态文案与 W3 卡注释）、本文件。
+  **未触碰**受保护哈希文件（`bff/store-node/{db,merge}.js`）。
+- 回档方案: `git revert` 本提交即可——去掉 `dish.delete`/`recipe.import` 两个动作与预览端点、导入弹窗与模板下载入口；
+  回档后须重跑 `scripts/gen-debt-table.ps1` 与 `node scripts/gen-progress-board.js`，
+  并把 `FP-菜品配方.md` 的 4 行状态回退为 ⬜ 待补。
+- 后续: 全局欠账 **⬆️ 131 / ⬜ 16**（W1 0 / W2 4 / W3 9 / W4 3）。W3 余 ING 4 张（`FP-ING-05/06/11/13`）
+  与 SALE 5 张（`FP-SALE-03/04/05/06/13`）；W2 余 PRICE 3 张 + SET 1 张。
+
 ## [2026-10-13 22:00] 阶段 27 - W2 · 经营概览收官（FP-DASH-10/12/13/14）：经营概览页 15/15 全部移植
 
 - 背景: 经营概览页 15 项中仅余 4 项 ⬜（`FP-DASH-10` 14 天应收实收双柱图、`FP-DASH-12` 低库存「去采购」、

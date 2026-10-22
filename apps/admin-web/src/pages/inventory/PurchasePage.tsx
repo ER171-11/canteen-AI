@@ -257,6 +257,13 @@ export default function PurchasePage() {
       render: (v) => (v == null ? '-' : `¥${v}`),
     },
     {
+      title: '优惠',
+      dataIndex: 'discount',
+      width: 90,
+      align: 'right',
+      render: (v) => (Number(v) > 0 ? <span style={{ color: COLORS.gray }}>-¥{v}</span> : '—'),
+    },
+    {
       title: '已付',
       key: 'paid',
       width: 100,

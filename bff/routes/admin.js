@@ -16,6 +16,8 @@ const { loadSnapshot } = require('./snapshot');
 const { enqueue } = require('./actions');
 const { dishSalesAgg, salesList } = require('./export');
 const { priceReport, pricePlan } = require('../lib/price');
+/* 与执行器 dish.delete 同一条引用校验规则（避免前后端两套「有销售记录」口径） */
+const { dishReferencedBySales } = require('../lib/algorithms/dish');
 
 const READONLY_KEYS = ['dishes', 'recipes', 'staff', 'members', 'tables', 'vendors'];
 
@@ -157,7 +159,12 @@ async function handle(req, res, ctx, pathname) {
         const h = (d.id != null ? agg.byId[String(d.id)] : null)
           || (d.name != null ? agg.byName[String(d.name)] : null)
           || { q30: 0, gp30: 0 };
-        return Object.assign({}, d, { q30: h.q30, gp30: h.gp30 });
+        /* FP-DISH-06：sold=true 表示有销售记录 → 前端直接禁用「删除」（执行器同规则再兜一层） */
+        return Object.assign({}, d, {
+          q30: h.q30,
+          gp30: h.gp30,
+          sold: dishReferencedBySales((snap && snap.data) || {}, d)
+        });
       });
     }
     ctx.sendJSON(res, 200, { ok: true, key, count: items.length, items, rev: snap ? snap.rev : null });

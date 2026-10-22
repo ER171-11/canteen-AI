@@ -41,6 +41,50 @@ const { today, nowIso, num, arr } = require('./util');
 const { findPosTable, deductBomForWorkorder } = require('./pos');
 const { rebuildStock } = require('./stock');
 
+/* ---------- 员工禁岗（健康证）判定 ---------- */
+// 与 routes/staff.js 的 certAlerts 同口径：健康证 expire_days 或 expire_at 距离今天 < CERT_RED_DAYS（默认 7）即禁岗。
+const CERT_RED_DAYS = 7;
+const CERT_WARN_DAYS = 30;
+const CERT_TYPE_RE = /健康证/;
+
+function certDaysLeft(cert, todayStr) {
+  const c = cert || {};
+  let days = c.expire_days != null ? Number(c.expire_days) : null;
+  const exp = String(c.expire_at || c.expire || '');
+  if (days == null && /^\d{4}-\d{2}-\d{2}$/.test(exp)) {
+    const base = new Date(todayStr + 'T00:00:00Z').getTime();
+    days = Math.floor((new Date(exp + 'T00:00:00Z').getTime() - base) / 86400000);
+  }
+  return days;
+}
+
+/**
+ * 取禁岗员工键集合（staff_id ∪ staff_name），用于排班拦截。
+ * @param ctx  算法 ctx（ctx.store.ext.fs_certs 提供健康证；缺则视为无禁岗）
+ * @param data 快照 data（data.config 可覆盖阈值；可选）
+ * @param todayStr 'YYYY-MM-DD'
+ */
+function blockedStaffSet(ctx, data, todayStr) {
+  const set = new Set();
+  const ext = (ctx && ctx.store && ctx.store.ext) || {};
+  const certs = arr(ext.fs_certs);
+  if (!certs.length) return set;
+  const cfg = (data && data.config) || {};
+  const red = num((cfg && cfg.cert && cfg.cert.red_days), CERT_RED_DAYS);
+  const t = todayStr || (ctx && ctx.now ? String(ctx.now).slice(0, 10) : today());
+  for (const c of certs) {
+    if (!CERT_TYPE_RE.test(String((c && (c.type || c.cert_type)) || ''))) continue;
+    const days = certDaysLeft(c, t);
+    const level = days == null ? 'unknown' : (days < red ? 'red' : (days < CERT_WARN_DAYS ? 'warn' : 'ok'));
+    if (level !== 'red') continue;
+    const nm = String(c.name || c.holder || '').trim();
+    const id = String(c.staff_id || c.holder_id || '').trim();
+    if (nm) set.add(nm);
+    if (id) set.add(id);
+  }
+  return set;
+}
+
 /* ---------- 公共辅助 ---------- */
 
 /** Python json.dumps 等价（默认分隔符 ", " / ": "，ensure_ascii=False） */
@@ -845,6 +889,8 @@ function insertStaffClock(ctx, data, payload) {
 
 /**
  * staff.shift_upsert → staff_shifts。
+ * 去重键 = (staff_id, date)：一人一天一条班次记录。
+ * 换班「转休」/改班时覆盖当天旧记录，避免旧班次行残留导致工时不减。
  */
 function upsertStaffShift(ctx, data, payload) {
   const row = {
@@ -856,9 +902,48 @@ function upsertStaffShift(ctx, data, payload) {
     end_time: payload.end_time || '',
     role: payload.role || ''
   };
-  let rid = storeUpsert(ctx, 'staff_shifts', row, ['staff_id', 'date', 'shift']);
+  // 禁岗拦截：健康证临期/过期的员工，禁止排「工作班」（转休/请假放行）。
+  const isRest = /休息|请假|休班|^休$/.test(String(row.shift).trim());
+  if (!isRest) {
+    const idKey = String(row.staff_id || '').trim();
+    const nmKey = String(row.staff_name || '').trim();
+    const blocked = blockedStaffSet(ctx, data, row.date);
+    const hit = (idKey && blocked.has(idKey)) || (nmKey && blocked.has(nmKey));
+    if (hit) {
+      const who = nmKey || idKey;
+      throw new Error('员工「' + who + '」健康证临期/过期被禁岗，禁止排班（staff.shift_upsert 已拒绝）');
+    }
+  }
+  let rid = storeUpsert(ctx, 'staff_shifts', row, ['staff_id', 'date']);
   if (rid === null && !(ctx && ctx.store)) rid = fallback(ctx, data, 'staff_shifts', row);
   return 'staff_shifts rowid=' + (rid === null ? '-' : rid);
+}
+
+/* ---------- staff.upsert ---------- */
+
+/**
+ * staff.upsert → staff（员工花名册主数据）。
+ * 去重键 = staff_id（工号唯一）；未给工号时自动生成 ST 前缀唯一号。
+ * 离职/在岗状态留痕，不物理删除（改状态走同一条 upsert 覆盖）。
+ */
+function upsertStaff(ctx, data, payload) {
+  const name = String(payload.staff_name || '').trim();
+  if (!name) throw new Error('员工姓名不能为空（staff.upsert）');
+  let staffId = String(payload.staff_id || '').trim();
+  if (!staffId) staffId = 'ST' + crypto.randomBytes(4).toString('hex').toUpperCase();
+  const row = {
+    staff_id: staffId,
+    staff_name: name,
+    role: String(payload.role || '').trim(),
+    phone: String(payload.phone || '').trim(),
+    hire_date: String(payload.hire_date || '').trim(),
+    status: String(payload.status || '在岗').trim() || '在岗',
+    remark: String(payload.remark || '').trim(),
+    source: String(payload.source || 'queue').trim()
+  };
+  let rid = storeUpsert(ctx, 'staff', row, ['staff_id']);
+  if (rid === null && !(ctx && ctx.store)) rid = fallback(ctx, data, 'staff', row);
+  return 'staff rowid=' + (rid === null ? '-' : rid);
 }
 
 /* ---------- uniform.log ---------- */
@@ -1347,6 +1432,7 @@ module.exports = {
   insertQueueJoin,
   insertStaffClock,
   upsertStaffShift,
+  upsertStaff,
   insertUniformLog,
   insertDisinfect,
   insertFsTrace,

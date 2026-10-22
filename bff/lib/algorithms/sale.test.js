@@ -1,6 +1,6 @@
 'use strict';
 /*
- * sale.create / sale.pay / sale.void（销售收银写侧执行器）行为契约测试。
+ * sale.create / sale.pay / sale.void / sale.update（销售收银写侧执行器）行为契约测试。
  *
  * 为什么不做「平价测试」：
  *   旧系统在浏览器 JS 里直接改 DB.sales（旧 HTML renderSale/openGet），
@@ -252,6 +252,82 @@ ok('作废单不计入应收/实收/欠款聚合（口径走 sales_model.summari
 ok('缺 id / 找不到单 被拒', () => {
   assert.throws(() => sale.applySaleVoid({ sales: [mkSale()] }, {}), /缺 id/);
   assert.throws(() => sale.applySaleVoid({ sales: [mkSale()] }, { id: 'NOPE' }), /未找到销售单/);
+});
+
+/* ---------------- sale.update（编辑销售单 FP-SALE-12） ---------------- */
+
+ok('编辑明细重算售价/应收，保留单号与收款记录，并留编辑痕迹', () => {
+  const data = { sales: [mkSale({ payments: [{ date: '2026-10-12', amount: 30 }] })] };
+  const msg = sale.applySaleUpdate(data, {
+    sale_id: 'S1',
+    date: '2026-10-13',
+    channel: '外卖',
+    lines: [
+      { name: '五福饺子', qty: 2, price: 30 },
+      { name: '御膳汤', qty: 1, price: 40, amount: 40 },
+    ],
+    discount: 0,
+  }, { rev: 7, traceId: 'T-2', now: '2026-10-13T11:00:00.000Z' });
+  const s = data.sales[0];
+  assert.strictEqual(s.no, 'XS20261013001', '单号不得变');
+  assert.strictEqual(s.amount, 100);
+  assert.strictEqual(s.receivable, 100);
+  assert.strictEqual(s.lines.length, 2);
+  assert.strictEqual(s.payments.length, 1, '收款记录保留');
+  assert.strictEqual(s.channel, '外卖');
+  assert.strictEqual(s.update_operator, 'QUEUE');
+  assert.strictEqual(s.update_at, '2026-10-13T11:00:00.000Z');
+  assert.strictEqual(s.update_rev, 7);
+  assert.strictEqual(s.update_trace, 'T-2');
+  assert.ok(/售价合计 100/.test(msg), msg);
+});
+
+ok('编辑折扣：应收 = 售价合计 − 折扣，未传明细时金额保持原值', () => {
+  const data = { sales: [mkSale()] };
+  sale.applySaleUpdate(data, { sale_id: 'S1', discount: 20 });
+  const s = data.sales[0];
+  assert.strictEqual(s.amount, 100, '未传明细不改售价合计');
+  assert.strictEqual(s.discount, 20);
+  assert.strictEqual(s.receivable, 80);
+});
+
+ok('只改标量字段（日期/渠道/备注）不动金额', () => {
+  const data = { sales: [mkSale()] };
+  sale.applySaleUpdate(data, { sale_id: 'S1', date: '2026-10-14', channel: '外卖', note: '改备注' });
+  const s = data.sales[0];
+  assert.strictEqual(s.date, '2026-10-14');
+  assert.strictEqual(s.channel, '外卖');
+  assert.strictEqual(s.note, '改备注');
+  assert.strictEqual(s.amount, 100);
+  assert.strictEqual(s.receivable, 100);
+});
+
+ok('关键约束：应收不得小于累计实收，被拒后不留下半改快照', () => {
+  const data = { sales: [mkSale({ payments: [{ date: '2026-10-12', amount: 80 }] })] };
+  const before = data.sales[0];
+  assert.throws(
+    () => sale.applySaleUpdate(data, { sale_id: 'S1', lines: [{ name: '饺子', qty: 2, price: 30 }], discount: 0 }),
+    /小于已收款 80/
+  );
+  assert.strictEqual(before.lines, undefined, '明细不得被半改');
+  assert.strictEqual(before.amount, 100, '金额不得被半改');
+  assert.strictEqual(before.receivable, 100, '应收不得被半改');
+  assert.throws(
+    () => sale.applySaleUpdate(data, { sale_id: 'S1', discount: 50 }),
+    /小于已收款 80/
+  );
+  assert.strictEqual(before.amount, 100);
+  assert.strictEqual(before.receivable, 100);
+});
+
+ok('已作废单不可编辑', () => {
+  const data = { sales: [mkSale({ status: '已作废' })] };
+  assert.throws(() => sale.applySaleUpdate(data, { sale_id: 'S1', discount: 10 }), /已作废销售单不可编辑/);
+});
+
+ok('缺 id/找不到单 被拒', () => {
+  assert.throws(() => sale.applySaleUpdate({ sales: [mkSale()] }, {}), /缺 id/);
+  assert.throws(() => sale.applySaleUpdate({ sales: [mkSale()] }, { sale_id: 'NOPE' }), /未找到销售单/);
 });
 
 console.log('[sale.test] PASS ' + pass + ' cases');

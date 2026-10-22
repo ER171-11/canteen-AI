@@ -108,7 +108,7 @@ function dishCostMap(snap) {
     let price = d.price != null ? num(d.price) : null;
     if (recipe && costLib) {
       try {
-        const card = costLib.buildCostCard(recipe, data);
+        const card = costLib.buildCostCard(recipe, data, arr(extOf(snap).recipes));
         if (card && card.portion_cost != null) {
           cost = num(card.portion_cost, cost);
           costType = '配方';
@@ -324,6 +324,17 @@ function salesList(snap) {
     if (!s) continue;
     const receivable = model.receivableOf(s);
     const cost = saleCostOf(s, map);
+    /* FP-SALE-12 编辑销售单：把明细行（lines/items）投影为 {name,qty,price,amount} 下发，供前端编辑表单初始化 */
+    const srcLines = Array.isArray(s.lines) && s.lines.length ? s.lines
+      : (Array.isArray(s.items) && s.items.length ? s.items : null);
+    const lines = srcLines
+      ? srcLines.map((l) => ({
+          name: String((l && (l.name || l.dish_name)) || ''),
+          qty: num(l && l.qty, 0),
+          price: num(l && (l.price != null ? l.price : l.unit_price), 0),
+          amount: l && l.amount != null ? num(l.amount) : null,
+        }))
+      : null;
     items.push({
       id: s.id != null ? String(s.id) : null,
       no: s.no || (s.id != null ? String(s.id) : null),
@@ -344,6 +355,7 @@ function salesList(snap) {
       void_at: s.void_at || null,
       void_reason: s.void_reason || null,
       note: s.note || '',
+      lines,
     });
   }
   return {

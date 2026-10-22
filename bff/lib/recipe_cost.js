@@ -25,88 +25,69 @@
  * 面皮组取 params.面主料（含面粉/色源/食盐），缺省回落到 face_main。
  */
 
-// 与 seed_recipe_links.py 对齐：规格不明的按市售常见规格假定
-const ASSUMED_SPEC_G = {
-  '雪天精制盐': 500.0,
-  '食用墨鱼汁': 90.0,
-  '紫薯粉': 100.0,
-  '东北酸菜(切丝)': 500.0
-};
+const { isConsumable } = require('./ing_type'); // W4：耗材不进菜品成本口径
+const {
+  parseBomLine,
+  gramsPerUnit,
+  resolveIngName,
+  PORTION_PIECES,
+  SKIP_NAMES
+} = require('../../shared/recipe-cost/index.cjs');
 
-const SKIP_NAMES = { 清水: 1, 料水: 1 };
-const PORTION_PIECES = 15;
+/* ---------------- W6：中间材料（半成品） ---------------- */
 
-const UNIT_TO_G = {
-  g: 1, 克: 1, kg: 1000, 斤: 500, 两: 50,
-  ml: 1, l: 1000, L: 1000, 升: 1000, '': 1
-};
-
-const QTY_RE = /^(.+?)\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z一-鿿%]*)$/;
-const PAREN_RE = /[（(][^）)]*[）)]/g;
-const SPEC_RE = /(\d+(?:\.\d+)?)\s*(kg|g|ml|l|L|升)/;
-
-function stripParens(s) {
-  return String(s || '').replace(PAREN_RE, '').trim();
+/** 判定 recipe 行是否为中间材料（半成品）：type/kind === 'semi' */
+function isSemi(r) {
+  return !!(r && (r.type === 'semi' || r.kind === 'semi'));
 }
 
-function parseQtyText(s) {
-  const m = QTY_RE.exec(String(s || '').trim());
-  if (!m) return { name: String(s || '').trim(), qty: 0, unit: 'g' };
-  const qty = parseFloat(m[2]);
-  return {
-    name: m[1].trim(),
-    qty: isNaN(qty) ? 0 : qty,
-    unit: (m[3] || 'g').trim() || 'g'
-  };
+/**
+ * 从 recipe 数组（ext.recipes 全量）建「中间材料名 → recipe」索引。
+ * 只收 type='semi' 的行；同名后写覆盖先写（与 ext 数组顺序一致）。
+ */
+function collectSemiIndex(recipeLib) {
+  const idx = {};
+  const lib = Array.isArray(recipeLib) ? recipeLib : [];
+  for (const r of lib) {
+    if (!isSemi(r)) continue;
+    const name = String((r && r.name) || '').trim();
+    if (name) idx[name] = r;
+  }
+  return idx;
 }
 
-/** 一条 BOM 字符串 → [{name, qty_g, raw}]（料水复合行/顿号并列会展开多条） */
-function parseBomLine(line) {
-  const out = [];
-  const s = String(line || '').trim();
-  if (!s) return out;
-  const inner = /[（(]([^）)]*[0-9][^）)]*)[）)]/.exec(s);
-  const head = stripParens(s);
-  if (inner && inner[1].indexOf('、') >= 0) {
-    for (const seg of inner[1].split('、')) {
-      const p = parseQtyText(seg);
-      if (p.name && p.qty > 0) {
-        out.push({ name: p.name, qty_g: p.qty * (UNIT_TO_G[p.unit] != null ? UNIT_TO_G[p.unit] : 1), raw: s });
-      }
+/** 中间材料四个配料列（与 buildCostCard 同口径：面主料优先 params['面主料']） */
+function semiCols(rec) {
+  const rp = (rec && rec.params && typeof rec.params === 'object') ? rec.params : {};
+  const faceRaw = (Array.isArray(rp['面主料']) && rp['面主料'].length)
+    ? rp['面主料']
+    : (rec ? rec.face_main : null);
+  return [
+    [faceRaw, '面主料'],
+    [rec ? rec.main : null, '主料'],
+    [rec ? rec.aux : null, '辅料'],
+    [rec ? rec.seasoning : null, '调料']
+  ];
+}
+
+/**
+ * 中间材料「一批」基准克重（决定引用量的缩放因子）：
+ *   ① 优先 params['一批出成_g']（如料水一批熬煮出成 200g，BOM 香料 23g）；
+ *   ② 退化：BOM 条目克重合计（此时「引用量 = BOM 合计」等价 scale=1，逐克对应）。
+ * 返回 null 表示该中间材料无有效克重（展开将按 scale=1 兜底）。
+ */
+function semiBaseGrams(rec) {
+  const rp = (rec && rec.params && typeof rec.params === 'object') ? rec.params : {};
+  const batchG = parseFloat(rp['一批出成_g']);
+  if (batchG > 0) return batchG;
+  let sum = 0;
+  for (const [v] of semiCols(rec)) {
+    const lines = Array.isArray(v) ? v : (v ? [v] : []);
+    for (const line of lines) {
+      for (const e of parseBomLine(line)) sum += e.qty_g;
     }
-    return out;
   }
-  if (head.indexOf('、') >= 0) {
-    const segs = head.split('、').map(parseQtyText);
-    if (segs.every((p) => p.qty > 0)) {
-      for (const p of segs) {
-        out.push({ name: p.name, qty_g: p.qty * (UNIT_TO_G[p.unit] != null ? UNIT_TO_G[p.unit] : 1), raw: s });
-      }
-      return out;
-    }
-  }
-  const p = parseQtyText(head);
-  if (p.name && p.qty > 0) {
-    out.push({ name: p.name, qty_g: p.qty * (UNIT_TO_G[p.unit] != null ? UNIT_TO_G[p.unit] : 1), raw: s });
-  }
-  return out;
-}
-
-/** 1 个 ing.unit = 多少克（avg 是 per-unit 价） */
-function gramsPerUnit(ing) {
-  const unit = String((ing && ing.unit) || '').trim();
-  const name = String((ing && ing.name) || '');
-  if (unit === '斤') return 500;
-  if (unit === 'kg' || unit === '公斤') return 1000;
-  if (unit === 'g' || unit === '克') return 1;
-  const m = SPEC_RE.exec(name);
-  if (m) {
-    const v = parseFloat(m[1]);
-    const u = m[2];
-    return v * ((u === 'kg' || u === 'L' || u === 'l' || u === '升') ? 1000 : 1);
-  }
-  if (ASSUMED_SPEC_G[name] != null) return ASSUMED_SPEC_G[name];
-  return null;
+  return sum > 0 ? sum : null;
 }
 
 function r4(n) { return Math.round((Number(n) || 0) * 10000) / 10000; }
@@ -114,10 +95,16 @@ function r2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
 /**
  * 生成单个配方（快照 ext.recipes 行）的成本卡。
- * @param recipe  ext.recipes 行（main/aux/seasoning 已是数组，params 是对象）
- * @param data    快照 data（用 ings / config.ing_alias）
+ * @param recipe   ext.recipes 行（main/aux/seasoning 已是数组，params 是对象）
+ * @param data     快照 data（用 ings / config.ing_alias）
+ * @param semiLib  中间材料库（ext.recipes 全量，type='semi' 行会被索引）；缺省时回退 data.semi_recipes
+ *
+ * W6：BOM 由「配方 → 原料」升级为「配方 →（中间材料 →）原料」递归展开：
+ *   - 命中中间材料库（type='semi'）的同名条目 → 按「引用量 / 中间材料一批基准克重」缩放后递归展开；
+ *   - 防环：用祖先链（recipe name/sku_id）去重，命中即跳过，不报 missing；
+ *   - SKIP_NAMES（料水/清水）仅在「未定义中间材料」时跳过（可选中间材料语义）。
  */
-function buildCostCard(recipe, data) {
+function buildCostCard(recipe, data, semiLib) {
   const ings = Array.isArray(data && data.ings) ? data.ings : [];
   const alias = (data && data.config && typeof data.config === 'object' && data.config.ing_alias) || {};
   const byName = {};
@@ -125,61 +112,77 @@ function buildCostCard(recipe, data) {
     if (g && g.name) byName[String(g.name).trim()] = g;
   }
   const resolve = (bomName) => {
-    const real = alias[bomName] || alias[stripParens(bomName)] || bomName;
-    return { real, ing: byName[String(real).trim()] || null };
+    // 别名回退统一走共享核心 resolveIngName：aliasMap[名] → 去括号名 → ING_ALIAS_FALLBACK → byName 精确名
+    return { ing: resolveIngName(bomName, alias, byName) || null };
   };
 
+  const semiIndex = collectSemiIndex(semiLib != null ? semiLib : (data && data.semi_recipes));
   const params = (recipe && recipe.params && typeof recipe.params === 'object') ? recipe.params : {};
 
   const bomLines = [];
   const missing = [];
   let batchCost = 0;
-  // 面皮组优先用 params.面主料（含面粉/色源/食盐完整 BOM），缺省回落到 face_main
-  const faceRaw = (Array.isArray(params['面主料']) && params['面主料'].length)
-    ? params['面主料']
-    : (recipe ? recipe.face_main : null);
-  const cols = [
-    [faceRaw, '面主料'],
-    [recipe ? recipe.main : null, '主料'],
-    [recipe ? recipe.aux : null, '辅料'],
-    [recipe ? recipe.seasoning : null, '调料']
-  ];
-  for (const [v, part] of cols) {
-    const lines = Array.isArray(v) ? v : (v ? [v] : []);
-    for (const line of lines) {
-      for (const e of parseBomLine(line)) {
-        if (SKIP_NAMES[e.name]) continue;
-        const { real, ing } = resolve(e.name);
-        const gpu = ing ? gramsPerUnit(ing) : null;
-        const avg = ing ? (parseFloat(ing.avg) || 0) : 0;
-        const last = ing ? (parseFloat(ing.last) || 0) : 0;
-        const perUnit = avg > 0 ? avg : last; // 均价优先，最近采购价兜底
-        const unitPrice = gpu ? perUnit / gpu : null; // 元/克
-        // 出成率还原：净料用量 / 出成率 = 毛料消耗（对齐旧版 dishRecipeCost 的 qty/yld）
-        const yld = ing && parseFloat(ing.yld) > 0 ? parseFloat(ing.yld) : 1;
-        const lineCost = unitPrice != null ? r4((e.qty_g * unitPrice) / yld) : null;
-        const matched = !!(ing && unitPrice != null && perUnit > 0);
-        if (matched) batchCost += lineCost;
-        else if (missing.indexOf(e.name) < 0) missing.push(e.name);
-        bomLines.push({
-          name: e.name,
-          part,
-          qty_text: e.raw,
-          qty_g: r4(e.qty_g),                       // 配料净重（每批 g）
-          gross_g: r4(e.qty_g / yld),               // 配料毛重 = 净重 ÷ 出成率
-          unit: ing && ing.unit ? String(ing.unit) : 'g',
-          yld,                                      // 出成率
-          waste_pct: r2((1 - yld) * 100),           // 损耗率 %
-          price_per_unit: perUnit > 0 ? perUnit : null, // 原料价格（元/库存单位）
-          ing: ing ? String(ing.id) : null,
-          ing_name: ing ? String(ing.name) : (alias[e.name] || null),
-          unit_price: unitPrice != null ? r4(unitPrice * 1000) / 1000 : null, // 元/克，3 位
-          line_cost: lineCost,
-          matched
-        });
+
+  /** 递归展开一个 recipe（或中间材料）的 BOM，把原料行累计进 bomLines/batchCost */
+  function expand(rec, scale, stack) {
+    const key = rec ? String(rec.name || rec.sku_id || '').trim() : '';
+    if (key && stack.has(key)) return;   // 防环：该配方已在祖先链上
+    if (key) stack.add(key);
+
+    for (const [v, part] of semiCols(rec)) {
+      const lines = Array.isArray(v) ? v : (v ? [v] : []);
+      for (const line of lines) {
+        for (const e of parseBomLine(line)) {
+          const qtyScaled = e.qty_g * scale;
+          // ① 中间材料引用：优先于 SKIP_NAMES 展开（料水/清水 → 可选中间材料）
+          const semi = semiIndex[e.name];
+          if (semi) {
+            const base = semiBaseGrams(semi);
+            const childScale = base > 0 ? qtyScaled / base : 1;
+            expand(semi, childScale, stack);
+            continue;
+          }
+          // ② 无中间材料定义 → 沿用旧口径跳过料水/清水
+          if (SKIP_NAMES[e.name]) continue;
+          const { ing } = resolve(e.name);
+          // W4：耗材（type='consumable'）不进菜品成本——误配进 BOM 也不计价、不报 missing
+          if (ing && isConsumable(ing)) continue;
+          const gpu = ing ? gramsPerUnit(ing) : null;
+          const avg = ing ? (parseFloat(ing.avg) || 0) : 0;
+          const last = ing ? (parseFloat(ing.last) || 0) : 0;
+          const perUnit = avg > 0 ? avg : last; // 均价优先，最近采购价兜底
+          const unitPrice = gpu ? perUnit / gpu : null; // 元/克
+          // 出成率还原：净料用量 / 出成率 = 毛料消耗（对齐旧版 dishRecipeCost 的 qty/yld）
+          const yld = ing && parseFloat(ing.yld) > 0 ? parseFloat(ing.yld) : 1;
+          const lineCost = unitPrice != null ? r4((qtyScaled * unitPrice) / yld) : null;
+          const matched = !!(ing && unitPrice != null && perUnit > 0);
+          if (matched) batchCost += lineCost;
+          else if (missing.indexOf(e.name) < 0) missing.push(e.name);
+          bomLines.push({
+            name: e.name,
+            part,
+            qty_text: e.raw,
+            qty_g: r4(qtyScaled),                  // 配料净重（每批 g，中间材料已按引用量缩放）
+            gross_g: r4(qtyScaled / yld),          // 配料毛重 = 净重 ÷ 出成率
+            unit: ing && ing.unit ? String(ing.unit) : 'g',
+            yld,                                   // 出成率
+            waste_pct: r2((1 - yld) * 100),        // 损耗率 %
+            price_per_unit: perUnit > 0 ? perUnit : null, // 原料价格（元/库存单位）
+            ing: ing ? String(ing.id) : null,
+            ing_name: ing ? String(ing.name) : (alias[e.name] || null),
+            unit_price: unitPrice != null ? r4(unitPrice * 1000) / 1000 : null, // 元/克，3 位
+            line_cost: lineCost,
+            matched
+          });
+        }
       }
     }
+
+    if (key) stack.delete(key);
   }
+
+  expand(recipe, 1, new Set());
+
   let batchPieces = parseInt(params['一批出成_个'], 10);
   if (!(batchPieces > 0)) batchPieces = 67;
   const unitCost = r4(batchCost / batchPieces);           // 每只
@@ -220,4 +223,12 @@ function buildCostCard(recipe, data) {
   };
 }
 
-module.exports = { buildCostCard, parseBomLine, gramsPerUnit, PORTION_PIECES };
+module.exports = {
+  buildCostCard,
+  parseBomLine,
+  gramsPerUnit,
+  isSemi,
+  collectSemiIndex,
+  semiBaseGrams,
+  PORTION_PIECES
+};

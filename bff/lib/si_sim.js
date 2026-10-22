@@ -40,7 +40,7 @@ function simulate(input, snap) {
     return { ok: false, error: '未找到该菜品/配方', available: (snap && snap.ext && snap.ext.recipes || []).length };
   }
   const data = (snap && snap.data) || {};
-  const card = buildCostCard(recipe, data);
+  const card = buildCostCard(recipe, data, (snap && snap.ext && snap.ext.recipes) || []);
   if (!card) return { ok: false, error: '成本卡不可用（配方或采购价未齐）' };
 
   const batchPieces = num(card.batch_pieces, 67) || 67;

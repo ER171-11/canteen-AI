@@ -189,4 +189,63 @@ ok('多行明细：ing_id 原样落库并按行汇总应付', () => {
   assert.strictEqual(data.ings[1].stock, 20);
 });
 
+/* 12) 整单优惠/抹零：让利不摊入成本 —— 应付=明细−优惠，行级 amount/unitCost、库存、均价均不受影响 */
+ok('整单优惠 5：应付=295，明细 amount/unitCost、库存 10、均价 30 均不变', () => {
+  const data = mkData();
+  inv.applyRecvInbound(data, Object.assign({}, BASE, {
+    discount: 5,
+    items: [{ ing_id: 'i1', qty: 10, price: 30 }]
+  }));
+  const d = data.recv[0];
+  assert.strictEqual(d.gross, 300, '明细合计 = Σ qty×price 不变');
+  assert.strictEqual(d.discount, 5, '整单优惠落库');
+  assert.strictEqual(d.payable, 295, '应付 = 明细合计 − 优惠');
+  assert.strictEqual(d.lines[0].amount, 300, '行级 amount 不动');
+  assert.strictEqual(d.lines[0].unitCost, 30, '行级 unitCost 不动（让利不摊入成本）');
+  assert.strictEqual(data.ings[0].stock, 10, '库存按订购量入库，不受优惠影响');
+  assert.strictEqual(data.ings[0].avg, 30, '移动加权均价不变');
+});
+
+/* 13) 整单优惠超过明细合计：拒绝（让利不得高于应付，红线⑥ 不静默降级） */
+ok('优惠超过明细合计被拒', () => {
+  const data = mkData();
+  assert.throws(
+    () => inv.applyRecvInbound(data, Object.assign({}, BASE, {
+      discount: 300.5,
+      items: [{ ing_id: 'i1', qty: 10, price: 30 }]
+    })),
+    /整单优惠/
+  );
+  assert.strictEqual(data.recv.length, 0, '被拒时不得 push 半张单据');
+});
+
+/* 14) 新增原料（无 ing_id，仅 name）：按名自动建档 + 正常入库 + rebuildStock 生成库存/均价 */
+ok('新增原料自动建档：name 行无 ing_id → 档案 +1、库存入账、均价生成、pending 草稿', () => {
+  const data = mkData();
+  inv.applyRecvInbound(data, Object.assign({}, BASE, {
+    items: [{ name: '娃娃菜', unit: '斤', cat: '蔬菜', qty: 5, price: 3 }]
+  }));
+  const d = data.recv[0];
+  assert.strictEqual(data.ings.length, 3, '自动建档后档案数 3');
+  const ni = data.ings.find((g) => g.name === '娃娃菜');
+  assert.ok(ni, '新原料应存在于档案');
+  assert.strictEqual(ni.pending, true, '新原料应为待完善草稿');
+  assert.strictEqual(ni.cat, '蔬菜');
+  assert.strictEqual(d.lines[0].ing, ni.id, '行原料引用应指向新档案 id');
+  assert.strictEqual(ni.stock, 5, '库存按 rebuildStock 入账');
+  assert.strictEqual(ni.avg, 3, '移动加权均价生成');
+  assert.strictEqual(d.payable, 15);
+});
+
+/* 15) 名称命中已有档案（无 ing_id）：按名精确匹配，不重复建档 */
+ok('无 ing_id 但名称命中已有档案 → 不重复建档，直接引用', () => {
+  const data = mkData();
+  inv.applyRecvInbound(data, Object.assign({}, BASE, {
+    items: [{ name: '五花肉', qty: 2, price: 30 }]
+  }));
+  assert.strictEqual(data.ings.length, 2, '不得重复建档');
+  assert.strictEqual(data.recv[0].lines[0].ing, 'i1');
+  assert.strictEqual(data.ings[0].stock, 2);
+});
+
 console.log('[recv_inbound.test] PASS ' + pass + ' cases');

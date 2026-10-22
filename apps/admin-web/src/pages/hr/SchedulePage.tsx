@@ -26,6 +26,7 @@ import {
   fetchStaffSwaps,
   fetchStaffTrain,
   requestShiftSwap,
+  submitAndConfirmAction,
 } from '../../api'
 import type {
   StaffScheduleResp,
@@ -41,6 +42,13 @@ const SHIFT_COLOR: Record<string, string> = {
   B: COLORS.purple,
   C: COLORS.orange,
   休: COLORS.gray,
+}
+
+const SHIFT_TIME: Record<string, [string | null, string | null]> = {
+  早班: ['09:00', '17:00'],
+  中班: ['11:00', '21:00'],
+  晚班: ['14:00', '23:00'],
+  休息: [null, null],
 }
 
 const STATUS_META: Record<SwapStatus, { text: string; color: string }> = {
@@ -63,6 +71,8 @@ function FallbackAlert() {
 
 export default function SchedulePage() {
   const canWrite = useAuthStore((s) => s.canWrite)
+  const account = useAuthStore((s) => s.account)
+  const role = useAuthStore((s) => s.role)
   const [week, setWeek] = useState(dayjs())
   const [sched, setSched] = useState<StaffScheduleResp | null>(null)
   const [swaps, setSwaps] = useState<SwapItem[]>([])
@@ -72,6 +82,9 @@ export default function SchedulePage() {
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const [form] = Form.useForm()
+  const [openUpsert, setOpenUpsert] = useState(false)
+  const [upsertBusy, setUpsertBusy] = useState(false)
+  const [uf] = Form.useForm()
 
   const load = useCallback(() => {
     setLoading(true)
@@ -277,6 +290,44 @@ export default function SchedulePage() {
     }
   }
 
+  const doUpsert = async () => {
+    const v = await uf.validateFields()
+    setUpsertBusy(true)
+    try {
+      const sel =
+        (sched?.staff ?? []).find((s) => (s.staff_id ?? s.staff_name) === v.staff) ?? null
+      const isRest = v.shift === '休息'
+      if (!isRest && blocked.has(v.staff)) {
+        message.error(`「${v.staff}」健康证临期/过期已被禁岗，禁止排班`)
+        return
+      }
+      const t = SHIFT_TIME[v.shift] ?? [null, null]
+      const res = await submitAndConfirmAction({
+        type: 'staff.shift_upsert',
+        operator: account || role || 'admin',
+        payload: {
+          staff_id: sel?.staff_id ?? v.staff,
+          staff_name: sel?.staff_name ?? v.staff,
+          role: sel?.role ?? undefined,
+          date: v.date.format('YYYY-MM-DD'),
+          shift: isRest ? '休' : v.shift,
+          start_time: t[0],
+          end_time: t[1],
+        },
+      })
+      if (res?.ok) {
+        message.success('已入队并确认，等待店内落库后刷新即可见（可在审批中心查看执行）')
+        setOpenUpsert(false)
+        load()
+      } else message.error((res && res.error) || '登记失败')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '登记失败')
+    } finally {
+      setUpsertBusy(false)
+    }
+  }
+
   return (
     <div>
       {isMock && <FallbackAlert />}
@@ -290,6 +341,18 @@ export default function SchedulePage() {
               allowClear={false}
               onChange={(v) => v && setWeek(v)}
             />
+            <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
+              <Button
+                disabled={!canWrite}
+                onClick={() => {
+                  uf.resetFields()
+                  uf.setFieldsValue({ date: week, shift: '早班' })
+                  setOpenUpsert(true)
+                }}
+              >
+                登记班次
+              </Button>
+            </Tooltip>
             <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
               <Button
                 type="primary"
@@ -417,6 +480,34 @@ export default function SchedulePage() {
           </Form.Item>
           <Form.Item name="reason" label="事由">
             <Input.TextArea rows={2} placeholder="如：家中有事" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="登记班次"
+        open={openUpsert}
+        onCancel={() => setOpenUpsert(false)}
+        confirmLoading={upsertBusy}
+        destroyOnHidden
+        okText="入队确认"
+        onOk={doUpsert}
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="提交后经审批中心确认 → 店内落库，刷新本页即可见（页面提示成功≠已落库）。"
+        />
+        <Form form={uf} layout="vertical" preserve={false}>
+          <Form.Item name="staff" label="员工" rules={[{ required: true, message: '请选择员工' }]}>
+            <Select options={staffOpts} showSearch placeholder="选择员工" />
+          </Form.Item>
+          <Form.Item name="date" label="日期" rules={[{ required: true, message: '请选择日期' }]}>
+            <DatePicker style={{ width: '100%' }} allowClear={false} />
+          </Form.Item>
+          <Form.Item name="shift" label="班次" rules={[{ required: true, message: '请选择班次' }]}>
+            <Select options={['早班', '中班', '晚班', '休息'].map((s) => ({ value: s, label: s }))} />
           </Form.Item>
         </Form>
       </Modal>

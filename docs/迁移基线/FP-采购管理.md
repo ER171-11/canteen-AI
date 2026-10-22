@@ -4,7 +4,7 @@
 > 源页面：`#tab-po`「采购管理」（HTML 第 260–294 行区域）
 > 目标系统：`apps/admin-web/src/pages/inventory/PurchasePage.tsx` + `RestockPage.tsx` + `OrderFormModal.tsx` + `VendorsPage.tsx` + `bff/lib/algorithms/inventory.js` + `bff/routes/inventory.js`
 > 模式：**替代**（全部 ⬜ 视为回归缺陷，需排期补齐）
-> 建立日期：2026-09-28　状态：🟡 **待人工复核**（AI 抽取，未经人工签字）　规范依据：`docs/迁移颗粒度规范.md`
+> 建立日期：2026-09-28　状态：🟡 **待人工复核**（AI 抽取，未经人工签字）　规范依据：`docs/规范/迁移颗粒度规范.md`
 > **行号复核**：2026-10-13 W3 录入类补齐（阶段 26）后，按 `PurchasePage.tsx`（559 行）/ `OrderFormModal.tsx`（约 380 行）/ `RestockPage.tsx`（约 620 行）/ `inventory.js` 复核新版行号。
 
 ---
@@ -68,6 +68,10 @@ W3 补齐 5 项录入与建议单：新建 / 编辑采购单、补货参数配�
 
 ## 备注
 
-- 本清单由 AI 从源码抽取，**未经人工复核**，按 `docs/迁移颗粒度规范.md` §2.2 复核后才可转为正式基线。
+- 本清单由 AI 从源码抽取，**未经人工复核**，按 `docs/规范/迁移颗粒度规范.md` §2.2 复核后才可转为正式基线。
 - 平价测试（算法/数据层）全绿属**另一条门禁**，不能替代本页面级清单。
 - 新建/编辑采购单为**新增动作类型**（旧版为浏览器内 JS `openDocForm`），无 Node↔Python 平价对照，仅 Node 单测覆盖。
+- **整单优惠/抹零（让利不摊入成本，2026-10-16）**：采购单 `applyOrderCreate` / `applyOrderEdit` 新增超集字段
+  `gross`（明细合计）与 `discount`（整单优惠，≥0），口径 `payable = gross − discount`；行级 `amount/unitCost`
+  不动（采购单本就不进库存/均价），`discount ≤ gross` 否则拒绝；仅 `discount > 0` 才落库（默认 0 与旧版逐字段一致）。
+  详见 `FP-进货入库.md` 备注同条。

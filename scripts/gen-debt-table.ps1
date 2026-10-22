@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $dir  = Join-Path $root 'docs/迁移基线'
 $out  = Join-Path $dir '欠账总表.md'
-$spec = Join-Path $root 'docs/迁移颗粒度规范.md'   # 附录 A 表格也由本脚本重写
+$spec = Join-Path $root 'docs/规范/迁移颗粒度规范.md'   # 附录 A 表格也由本脚本重写
 
 # ---------------------------------------------------------------- 波次定义
 $waves = [ordered]@{
@@ -50,8 +50,8 @@ $numOverride = @{ 'FP-SET-01' = 99 }   # 模块状态总览属锦上添花，排
 # 附录 A 的页面顺序与状态列文案
 $pageOrder  = @('RECV','PO','ING','DISH','SALE','CALC','PRICE','DASH','SET')
 $pageStatus = @{
-  RECV='🟡 进行中（替代模式）'; PO='🟡 待人工复核（20/20 已移植）'; ING='🟡 待人工复核'; DISH='🟡 待人工复核 · ⚠️ 食谱卡导入与编辑态实时成本待补'
-  SALE='🟡 待人工复核 · ⚠️ 平台导入链路与编辑/删除待补（销售收银页已于阶段 20 落地）'; CALC='🟡 待人工复核 · ⚠️ 五类角色缺失'; PRICE='🟡 待人工复核 · ⚠️ 写类与一键比价链路待补'
+  RECV='🟡 进行中（替代模式）'; PO='🟡 待人工复核（20/20 已移植）'; ING='🟡 待人工复核'; DISH='🟡 待人工复核（18/18 已移植）'
+  SALE='🟡 待人工复核（14/14 已移植）'; CALC='🟡 待人工复核 · ⚠️ 五类角色缺失'; PRICE='🟡 待人工复核 · ⚠️ 写类与一键比价链路待补'
   DASH='🟡 待人工复核（15/15 已移植，阶段 27 收官）'; SET='🟡 待人工复核 · ⚠️ 写类与高危待补'
 }
 
@@ -105,7 +105,7 @@ M 'FP-DASH-05' 'W2' 'BFF+前端' '同时清掉前端 MOCK 假数据'
 #   FP-DASH-12 低库存「去采购」带原料进采购单草稿、FP-DASH-13 未收账款挂账列表、FP-DASH-14 行内收款登记
 #   —— 至此经营概览页 15/15 全部 ⬆️
 M 'FP-DASH-15' 'W2' 'BFF+前端' '近30天单菜排行'
-M 'FP-PRICE-07' 'W2' 'BFF(动作)+前端' '另需补 consumer.js 的 quote 执行器'
+M 'FP-PRICE-07' 'W2' 'BFF(动作)+前端' '写类：quote.delete 走审批队列（quote.upsert 执行器已登记，不再是阻塞项）'
 M 'FP-PRICE-11' 'W2' 'BFF+前端' '只读导出，不写库'
 M 'FP-PRICE-12' 'W2' 'BFF(动作)+前端' '批量建议动作入队'
 M 'FP-SET-02'  'W2' 'BFF(动作)+前端' 'data.rest 为顶层字段，config.update 只改 data.config，须先定落点（新增 rest.update 动作，或改存 config.restaurant_name）'
@@ -128,16 +128,13 @@ M 'FP-ING-06'  'W3' 'BFF(动作)+前端' ''
 M 'FP-ING-11'  'W3' 'BFF(动作)+前端' '须带引用校验'
 M 'FP-ING-12'  'W3' 'BFF(动作)+前端' ''
 M 'FP-ING-13'  'W3' 'BFF(动作)+前端' '行内入口 + 外部平台外链'
-M 'FP-SALE-03' 'W3' 'BFF(动作)+前端' '需先定：平台数据谁导入'
-M 'FP-SALE-04' 'W3' 'BFF(动作)+前端' '撤回须留痕'
-M 'FP-SALE-05' 'W3' 'BFF(动作)+前端' 'A–E 五种金额口径'
-M 'FP-SALE-06' 'W3' 'BFF(动作)+前端' '映射表独立于 DB，建议配置化'
-M 'FP-SALE-12' 'W3' 'BFF(动作)+前端' '执行器 sale.create/sale.pay 已注册，缺 admin-web 录单/编辑表单'
-M 'FP-SALE-13' 'W3' 'BFF(动作)+前端' '作废留痕已可用（sale.void）；余「回补库存、重算台账」须与移动端 POS BOM 扣料对齐'
-M 'FP-DISH-06' 'W3' 'BFF(动作)+前端' '须带引用校验；可先用停售替代'
-M 'FP-DISH-16' 'W3' 'BFF(动作)+前端' '唯一批量录入通道'
-M 'FP-DISH-17' 'W3' 'BFF+前端'      '随 FP-DISH-16'
-M 'FP-DISH-18' 'W3' 'BFF(动作)+前端' '随 FP-DISH-16 打通'
+# 已完成（W3，2026-10-13 阶段 21，已从本表消失，勿再登记）：FP-SALE-12 编辑销售单（sale.update + SaleEditModal）
+# 已完成（W3，2026-10-14 阶段 22，已从本表消失，勿再登记）：FP-SALE-03/04/05/06 平台导入链路后端骨架
+#   （sale.import/sale.batch_void/sale.amt_recalc/sale.alias_set/sale.alias_delete + 预览/批次/菜名映射，美团适配器占位）
+#   FP-SALE-13 作废留痕 + 决策「作废不回补库存」（回补功能废弃）
+# 已完成（W3，2026-10-13，已从本表消失，勿再登记）：FP-DISH-06 删除菜品（dish.delete 走审批队列 + 引用校验）、
+#   FP-DISH-16/17/18 食谱卡批量导入全家桶（只读预览端点 + recipe.import 整批入队 + 模板下载 + 未匹配原料/菜品自动建档）
+#   —— 至此菜品配方页 18/18 全部 ⬆️
 M 'FP-CALC-11' 'W3' '前端'          '模拟态是只读推演层，禁写库'
 M 'FP-CALC-12' 'W3' '前端'          '模拟态与真实下架动作分开'
 M 'FP-CALC-13' 'W3' 'BFF(动作)+前端' '批量走建议动作入队'
@@ -232,7 +229,7 @@ Add '# 欠账总表（替代模式 · 回归缺陷清单）'
 Add ''
 Add '> **本文件由脚本生成，不要手工编辑**：`powershell -File scripts/gen-debt-table.ps1`'
 Add '> 数据源：`docs/迁移基线/FP-*.md`（9 页基线）。汇总数是**派生数据**，必须以行为准。'
-Add '> 生成日期：2026-09-28　依据：`docs/迁移颗粒度规范.md`　任务来源：`docs/下一步任务清单_2026-09-28.md` §2 T3'
+Add '> 生成日期：2026-09-28　依据：`docs/规范/迁移颗粒度规范.md`　任务来源：`docs/计划与排期/下一步任务清单_2026-09-28.md` §2 T3'
 Add '> 排序原则：业务闭环 > 只读展示；老板每日必用 > 偶尔使用；只读（无红线障碍）> 写操作（需走审批队列）'
 Add ''
 Add '## 汇总'
@@ -275,10 +272,13 @@ Add '| 前置决策 | 阻塞的卡 | 结论存放处 |'
 Add '|---|---|---|'
 Add '| 进货单「在店内录还是云端录」的职责边界 | ~~W3 的 RECV 5 张~~ **已解除**：`FP-RECV-01/02/03/08/09` 已全部 ⬆️ | `docs/decisions/ADR-004-进货单录入边界.md` |'
 Add '| 采购单/销售单的同名职责边界 | ~~W3 的 PO/SALE~~ **已解除**：销售端录销售单、采购端录采购单，统一走标准队列，与进货单状态机一致（批准人 William） | `docs/decisions/ADR-009-服务端快照形态与录入职责边界.md` |'
+Add '| 平台销售数据「谁导入」 | ~~W3 的 `FP-SALE-03/04/05/06`~~ **已解除**（阶段 22）：以店内 POS/收银端为主导入端，admin-web 提供管理端辅助入口（导入预览/批次/菜名映射）；预留美团收银系统导入接口（数据格式待定，做成 `SALE_SRC` 可扩展适配器） | `docs/迁移基线/FP-销售收银.md` 备注 |'
+Add '| 作废销售单是否回补库存 | ~~W3 的 `FP-SALE-13`~~ **已解除**（阶段 22）：作废不回补库存（菜品视为已消费，作废仅留痕），回补功能废弃 | `docs/迁移基线/FP-销售收银.md` 备注 |'
 Add '| 应收/实收按「单日期」还是「收款日期」统计 | ~~`FP-DASH-02/03`、`FP-SALE-08`~~ **已解除**：应收按单日期、实收按收款日期（批准人 William） | `docs/decisions/ADR-008-销售应收模型按单日期.md` |'
 Add '| 「服务端快照」形态（替代旧 localStorage 备份） | ~~`FP-SET-07/10`~~ **已解除**：服务端主存 + 客户端 localStorage 热备份，回滚须运营管理员审批（批准人 William） | `docs/decisions/ADR-009-服务端快照形态与录入职责边界.md` |'
 Add '| 双机同步四件套是否废弃 | ~~`FP-SET-05/06/08/09`~~ **已签署废弃**（批准人 William，2026-10-12） | `docs/decisions/ADR-009-服务端快照形态与录入职责边界.md` |'
 Add '| 结构测算「模拟层」设计（只读推演、禁写库） | ~~`FP-CALC-11/12/13`~~ **已解除**：三项已全部 ⬆️ | `docs/decisions/ADR-007-结构测算模拟层只读推演.md` |'
+Add '| 数据终点迁移：本地 SQLite 退场、云端为单一主存（ADR-009 已定案方向，代码未落地，属有意偏离） | 全部写类执行器底层（consumer.js / store-node 写店内库链路） | `docs/decisions/ADR-010-本地SQLite退场与云端单一主存.md`（草案） |'
 Add ''
 Add '## 备注'
 Add ''

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   AutoComplete,
@@ -35,8 +35,9 @@ import { fmt, r2, today } from './settle/data'
  *   2. 旧版超付会静默截断到应付；本版超付直接拒绝，避免吞掉多付金额。
  *   3. 关联采购单在旧版由 syncAllOrderRecv() 回写采购单收货进度，Node 侧尚未实现（采购管理页欠账），
  *      本版只登记单向关联。
- *   4. 原料档案未存换算系数 conv，故不显示旧版的「折库存单位」列；本版也不代建新原料
- *      （旧版 openNewIngForPo 属原料档案页）。
+ *   4. 原料档案未存换算系数 conv，故不显示旧版的「折库存单位」列；但已恢复旧版「＋新增原料」：
+ *      下拉列表底部可选「＋ 新增原料（列表中没有）…」，弹窗填名/单位/分类/单价后，本单提交时
+ *      由执行器按名称自动建档（待完善草稿，同 recv.import 口径）。
  *   5. 编辑时「实付」仅覆盖**初始**付款，历史补付（recv.pay）记录保留（Node 超集保护，旧版无补付概念）。
  */
 
@@ -45,9 +46,24 @@ export const RECV_METHODS = ['现金/转账', '微信', '支付宝', '银行转�
 
 interface LineRow {
   ing_id?: string
+  /** 新增原料：无 ing_id，直接用名称（提交时执行器按名自动建档） */
+  name?: string
+  /** 新增原料采购单位 */
+  unit?: string
+  /** 新增原料分类 */
+  cat?: string
   qty?: number
   recvQty?: number
   price?: number
+}
+
+/** 本单会话内新建的原料草稿（提交时按 name/unit/cat 下发，由执行器自动建档） */
+interface NewIngDraft {
+  key: string
+  name: string
+  unit: string
+  cat: string
+  price: number
 }
 
 interface FormVals {
@@ -57,6 +73,8 @@ interface FormVals {
   note?: string
   method: string
   paid?: number
+  /** 整单优惠/抹零（让利不摊入成本，应付 = 明细合计 − 优惠） */
+  discount?: number
   items?: LineRow[]
 }
 
@@ -84,9 +102,16 @@ export default function RecvFormModal({
   const account = useAuthStore((s) => s.account)
   const role = useAuthStore((s) => s.role)
   const [form] = Form.useForm<FormVals>()
+  /* 新增原料弹窗 + 本单会话内的草稿（旧版 openNewIngForPo 回归） */
+  const [newIngForm] = Form.useForm<{ name: string; unit?: string; cat?: string; price?: number }>()
+  const [newIngs, setNewIngs] = useState<NewIngDraft[]>([])
+  const newIngSeq = useRef(0)
+  const [newIngOpen, setNewIngOpen] = useState(false)
+  const [newIngRow, setNewIngRow] = useState<number | null>(null)
   const watchedRows = Form.useWatch('items', form) as LineRow[] | undefined
   const rows = useMemo(() => watchedRows ?? [], [watchedRows])
   const paidWatch = Form.useWatch('paid', form) as number | undefined
+  const discountWatch = Form.useWatch('discount', form) as number | undefined
 
   const ingById = useMemo(() => {
     const m = new Map<string, IngItem>()
@@ -94,13 +119,15 @@ export default function RecvFormModal({
     return m
   }, [ings])
 
-  /* 旧版 openRecv 打开时：日期=今天、付款方式=首项、明细首行=第一个原料（HTML:1563/1583/1626）；
-     编辑模式预填原单（HTML:1642-1654 同字段） */
-  useEffect(() => {
-    if (!open) return
-    form.resetFields()
+  /* 表单初值（旧版 openRecv 预填口径）：
+     编辑模式 → 原单（HTML:1642-1654 同字段）；新建 → 日期=今天、付款方式=首项、
+     明细首行 = 第一个原料（HTML:1563/1583/1626）。
+     ⚠️ 必须走 `initialValues` 而**不能只** `form.setFieldsValue`：Form.List 在挂载前
+     拿不到 setFieldsValue 写入的行，会渲染成「0 行明细」（同 OrderFormModal 已修的
+     真机必现缺陷）。 */
+  const initialVals = useMemo<FormVals>(() => {
     if (isEdit && editDoc) {
-      form.setFieldsValue({
+      return {
         date: editDoc.date ? dayjs(String(editDoc.date)) : dayjs(),
         supplier: editDoc.supplier || '',
         po: editDoc.po || undefined,
@@ -116,33 +143,52 @@ export default function RecvFormModal({
             )
             .reduce((a, p) => a + (Number(p?.amount) || 0), 0) * 100,
         ) / 100,
+        discount: Number(editDoc.discount) || 0,
         items: (editDoc.lines ?? []).map((l) => ({
           ing_id: String(l.ing ?? ''),
           qty: Number(l.qty) || 0,
           recvQty: l.recvQty == null ? undefined : Number(l.recvQty),
           price: Number(l.price) || 0,
         })),
-      })
-      return
+      }
     }
     const first = ings[0]
-    form.setFieldsValue({
+    return {
       date: dayjs(),
+      supplier: '',
       method: RECV_METHODS[0],
       paid: 0,
+      discount: 0,
       items: first
         ? [{ ing_id: String(first.id), qty: 1, price: Number(first.avg) || 0 }]
         : [{ qty: 1 }],
-    })
-  }, [open, ings, form, isEdit, editDoc])
+    }
+  }, [isEdit, editDoc, ings])
 
-  const payable = useMemo(
+  /* 每次打开都回到初值（弹窗 destroyOnHidden，初值随 ings/编辑单变化而重算）。
+     延后一帧再写：Form.List 必须在其行字段挂载**之后**才能接到写入的行值（否则渲染成空行）。 */
+  useEffect(() => {
+    if (!open) return
+    setNewIngs([])
+    newIngSeq.current = 0
+    setNewIngOpen(false)
+    setNewIngRow(null)
+    const t = setTimeout(() => {
+      form.resetFields()
+      form.setFieldsValue(initialVals)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [open, initialVals, form])
+
+  const gross = useMemo(
     () =>
       r2(
         rows.reduce((a, r) => a + (Number(r?.qty) || 0) * (Number(r?.price) || 0), 0),
       ),
     [rows],
   )
+  const discount = r2(Number(discountWatch) || 0)
+  const payable = r2(Math.max(0, gross - discount))
   const paid = r2(Number(paidWatch) || 0)
   const debt = r2(Math.max(0, payable - paid))
 
@@ -159,19 +205,30 @@ export default function RecvFormModal({
   )
 
   const ingOptions = useMemo(
-    () =>
-      ings.map((g) => ({
+    () => [
+      ...ings.map((g) => ({
         value: String(g.id),
         label: `${g.name}${g.buy || g.unit ? `（${g.buy || g.unit}）` : ''}`,
       })),
-    [ings],
+      ...newIngs.map((n) => ({
+        value: n.key,
+        label: `${n.name}（${n.unit || '斤'}）·新`,
+      })),
+      { value: '__new__', label: '＋ 新增原料（列表中没有）…' },
+    ],
+    [ings, newIngs],
   )
 
-  const invalid = !(payable > 0) || paid > payable + 0.01
+  const invalid = !(gross > 0) || discount > gross + 0.01 || paid > payable + 0.01
 
   const submit = async () => {
     const v = await form.validateFields()
-    const list = (v.items ?? []).filter((r) => r && r.ing_id)
+    const list = (v.items ?? []).filter((r) => {
+      if (!r) return false
+      const g = r.ing_id ? ingById.get(String(r.ing_id)) : undefined
+      if (g) return true
+      return !!(r.name && String(r.name).trim())
+    })
     if (!list.length) {
       message.warning('请至少填写一行明细（原料 + 订购量）')
       return
@@ -180,11 +237,21 @@ export default function RecvFormModal({
       list.reduce((a, r) => a + (Number(r.qty) || 0) * (Number(r.price) || 0), 0),
     )
     if (!(sum > 0)) {
-      message.warning('应付合计需大于 0，请检查订购量/单价')
+      message.warning('明细合计需大于 0，请检查订购量/单价')
+      return
+    }
+    const disc = r2(Number(v.discount) || 0)
+    if (disc > sum + 0.01) {
+      message.warning('整单优惠不得超过明细合计（让利不得高于应付）')
+      return
+    }
+    const net = r2(sum - disc)
+    if (!(net > 0)) {
+      message.warning('应付合计需大于 0，请调整优惠金额')
       return
     }
     const pay = r2(Number(v.paid) || 0)
-    if (pay > sum + 0.01) {
+    if (pay > net + 0.01) {
       message.warning('实付不得超过应付合计（超付会被执行器拒绝）')
       return
     }
@@ -200,15 +267,30 @@ export default function RecvFormModal({
           note: v.note?.trim() || undefined,
           method: v.method,
           paid: pay,
+          discount: disc,
           /* 只登记单向关联：不要用 po_id —— 执行器把 po_id 当「自采购单建单」入口（别名 order_id） */
           po: v.po || undefined,
-          items: list.map((r) => ({
-            ing_id: r.ing_id,
-            name: ingById.get(String(r.ing_id))?.name,
-            qty: Number(r.qty) || 0,
-            price: Number(r.price) || 0,
-            ...(r.recvQty == null ? {} : { recvQty: Number(r.recvQty) }),
-          })),
+          items: list.map((r) => {
+            const g = r.ing_id ? ingById.get(String(r.ing_id)) : undefined
+            if (g) {
+              return {
+                ing_id: String(g.id),
+                name: g.name,
+                qty: Number(r.qty) || 0,
+                price: Number(r.price) || 0,
+                ...(r.recvQty == null ? {} : { recvQty: Number(r.recvQty) }),
+              }
+            }
+            /* 新增原料：不带 ing_id，靠 name 让执行器 resolveIngRef 自动建档 */
+            return {
+              name: String(r.name ?? '').trim(),
+              ...(r.unit ? { unit: String(r.unit).trim() } : {}),
+              ...(r.cat ? { cat: String(r.cat).trim() } : {}),
+              qty: Number(r.qty) || 0,
+              price: Number(r.price) || 0,
+              ...(r.recvQty == null ? {} : { recvQty: Number(r.recvQty) }),
+            }
+          }),
           source: 'admin-web/inventory/inbound',
         },
       })
@@ -230,8 +312,9 @@ export default function RecvFormModal({
   )
 
   return (
-    <Modal
-      title={isEdit ? `编辑 JH 进货单 · ${editDoc?.no ?? editDoc?.id ?? ''}` : '新建 JH 进货单'}
+    <>
+      <Modal
+        title={isEdit ? `编辑 JH 进货单 · ${editDoc?.no ?? editDoc?.id ?? ''}` : '新建 JH 进货单'}
       open={open}
       width={900}
       onCancel={onClose}
@@ -241,7 +324,7 @@ export default function RecvFormModal({
       onOk={submit}
       destroyOnHidden
     >
-      <Form form={form} layout="vertical" preserve={false}>
+      <Form form={form} layout="vertical" initialValues={initialVals}>
         <Space size="middle" wrap style={{ display: 'flex' }}>
           <Form.Item label="日期" name="date" rules={[{ required: true, message: '请选日期' }]}>
             <DatePicker allowClear={false} style={{ width: 150 }} />
@@ -311,12 +394,21 @@ export default function RecvFormModal({
                       options={ingOptions}
                       optionFilterProp="label"
                       onChange={(id: string) => {
+                        if (id === '__new__') {
+                          setNewIngRow(field.name)
+                          setNewIngOpen(true)
+                          return
+                        }
                         const g = ingById.get(String(id))
+                        const n = newIngs.find((x) => x.key === String(id))
                         const list = [...(form.getFieldValue('items') ?? [])]
                         list[field.name] = {
                           ...list[field.name],
                           ing_id: id,
-                          price: Number(g?.avg) || 0,
+                          name: g ? undefined : n?.name,
+                          unit: g ? undefined : n?.unit,
+                          cat: g ? undefined : n?.cat,
+                          price: Number(g?.avg ?? n?.price) || 0,
                         }
                         form.setFieldsValue({ items: list })
                       }}
@@ -368,8 +460,20 @@ export default function RecvFormModal({
           )}
         </Form.List>
 
-        <div style={{ marginTop: 8 }}>
-          应付合计：<b>¥{fmt(payable)}</b>
+        <div style={{ marginTop: 8, display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ paddingBottom: 4 }}>
+            明细合计：<b>¥{fmt(gross)}</b>
+          </div>
+          <Form.Item
+            label="整单优惠/抹零（元，让利不摊入成本）"
+            name="discount"
+            style={{ marginBottom: 0 }}
+          >
+            <InputNumber min={0} max={gross} step={0.01} style={{ width: 130 }} placeholder="0" />
+          </Form.Item>
+          <div style={{ paddingBottom: 4 }}>
+            应付合计：<b>¥{fmt(payable)}</b>
+          </div>
         </div>
 
         <Typography.Title level={5} style={{ marginTop: 16 }}>
@@ -408,11 +512,77 @@ export default function RecvFormModal({
               本版已知差异：① 实收量仅登记展示，库存/应付仍按订购量计算（旧版只有「数量」一列）；
               ② 实付超过应付会被拒绝（不学旧版的静默截断）；③ 关联采购单只登记单向关联，
               采购单「收货进度」回写（旧版 syncAllOrderRecv）尚未实现；④ 不显示「折库存单位」列
-              （原料档案无 conv 换算系数）；⑤ 需要新原料请先到「原料档案」新增，本版不代建。
+              （原料档案无 conv 换算系数）；⑤ 明细下拉可「＋ 新增原料」——本单直接按名自动建档
+              （待完善草稿），无需先到原料档案。
             </Typography.Text>
           }
         />
       </Form>
     </Modal>
+
+    <Modal
+      title="新增原料（本单直接按名建档，提交后到原料档案确认）"
+      open={newIngOpen}
+      width={460}
+      onCancel={() => {
+        if (newIngRow != null) {
+          const list = [...(form.getFieldValue('items') ?? [])]
+          if (list[newIngRow]) {
+            list[newIngRow] = { ...list[newIngRow], ing_id: undefined }
+            form.setFieldsValue({ items: list })
+          }
+        }
+        setNewIngOpen(false)
+        setNewIngRow(null)
+      }}
+      okText="确定并加入本单"
+      onOk={async () => {
+        const vals = await newIngForm.validateFields()
+        const name = String(vals.name ?? '').trim()
+        if (!name) return
+        const key = '__new_' + newIngSeq.current++
+        const unit = String(vals.unit ?? '').trim() || '斤'
+        const cat = String(vals.cat ?? '').trim() || '其他'
+        const price = Number(vals.price) || 0
+        setNewIngs((prev) => [...prev, { key, name, unit, cat, price }])
+        if (newIngRow != null) {
+          const list = [...(form.getFieldValue('items') ?? [])]
+          list[newIngRow] = {
+            ...list[newIngRow],
+            ing_id: key,
+            name,
+            unit,
+            cat,
+            price,
+          }
+          form.setFieldsValue({ items: list })
+        }
+        setNewIngOpen(false)
+        setNewIngRow(null)
+      }}
+      destroyOnHidden
+    >
+      <Form form={newIngForm} layout="vertical">
+        <Form.Item
+          label="原料名称"
+          name="name"
+          rules={[{ required: true, whitespace: true, message: '请输入原料名称' }]}
+        >
+          <Input placeholder="如：娃娃菜 / 猪里脊" />
+        </Form.Item>
+        <Space size="middle" wrap>
+          <Form.Item label="采购单位" name="unit">
+            <Input placeholder="斤 / 袋 / 箱" style={{ width: 120 }} />
+          </Form.Item>
+          <Form.Item label="分类" name="cat">
+            <Input placeholder="其他" style={{ width: 120 }} />
+          </Form.Item>
+          <Form.Item label="本次单价（元）" name="price">
+            <InputNumber min={0} step={0.01} style={{ width: 120 }} placeholder="0" />
+          </Form.Item>
+        </Space>
+      </Form>
+    </Modal>
+  </>
   )
 }

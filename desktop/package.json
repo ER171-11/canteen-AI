@@ -1,0 +1,68 @@
+{
+  "name": "canteenai-desktop",
+  "version": "0.1.0",
+  "description": "熊猫五福餐厅 · 电脑版（Electron 封装 admin-web + 零依赖 BFF）",
+  "private": true,
+  "main": "electron-main.js",
+  "author": "canteenAI",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.canteenai.desktop",
+    "productName": "熊猫五福餐厅管理后台",
+    "copyright": "Copyright © 2026 canteenAI",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "YOUR_GITHUB_OWNER",
+        "repo": "YOUR_GITHUB_REPO"
+      }
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron-main.js",
+      "electron-preload.js",
+      "package.json",
+      "app/dist/**/*",
+      "app/bff/**/*",
+      "!app/bff/data/**",
+      "!app/bff/.env",
+      "!app/bff/**/*.test.js",
+      "!app/bff/**/test/**",
+      "!app/bff/**/*.test.js.snap"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/bff/**"
+    ],
+    "win": {
+      "sign": "noop-sign.js",
+      "target": "nsis",
+      "artifactName": "canteenAI-Setup-${version}.${ext}",
+      "electronLanguages": [
+        "zh-CN"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "熊猫五福餐厅管理后台"
+    }
+  }
+}

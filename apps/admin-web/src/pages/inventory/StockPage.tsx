@@ -4,12 +4,14 @@ import {
   Button,
   Card,
   Col,
+  Descriptions,
   Form,
   Input,
   InputNumber,
   Modal,
   Radio,
   Row,
+  Select,
   Space,
   Statistic,
   Table,
@@ -17,10 +19,16 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { fetchSnapshot, submitAndConfirmAction } from '../../api'
-import type { IngItem } from '../../api/types'
+import {
+  fetchSnapshot,
+  fetchIngTerms,
+  submitAndConfirmAction,
+  submitIngAttrSet,
+  submitTermUpsert,
+} from '../../api'
+import type { IngItem, IngTerm } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
-import { fmtNum, safetyLine, stockStatus, stockValue } from './utils'
+import { fmtNum, safeHref, safetyLine, stockStatus, stockValue } from './utils'
 import { COLORS } from '../../theme'
 
 type IngRow = IngItem & {
@@ -45,6 +53,14 @@ export default function StockPage() {
   const [showMore, setShowMore] = useState(false)
   const [form] = Form.useForm()
 
+  /* ---- W2 受控词表 + 属性 Tag ---- */
+  const [terms, setTerms] = useState<IngTerm[]>([])
+  const [termOpen, setTermOpen] = useState(false)
+  const [termName, setTermName] = useState('')
+  const [termCat, setTermCat] = useState('')
+  const [termAliases, setTermAliases] = useState('')
+  const [termBusy, setTermBusy] = useState(false)
+
   const load = useCallback(() => {
     setLoading(true)
     fetchSnapshot()
@@ -63,6 +79,13 @@ export default function StockPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  /* W2：加载受控词表（只读；失败不阻塞主流程，退化为无词条） */
+  useEffect(() => {
+    fetchIngTerms()
+      .then((r) => setTerms(r.terms ?? []))
+      .catch(() => setTerms([]))
+  }, [])
 
   const stats = useMemo(() => {
     let critical = 0
@@ -84,15 +107,54 @@ export default function StockPage() {
     [items],
   )
 
+  /* W2：词条索引（标准名/别名/词条ID → 词条），用于搜索命中与标签渲染 */
+  const termIndex = useMemo(() => {
+    const m = new Map<string, IngTerm>()
+    for (const t of terms) {
+      for (const k of [t.name, ...(t.aliases || [])]) {
+        const nk = String(k).replace(/\s+/g, '').trim()
+        if (nk) m.set(nk, t)
+      }
+      if (t.id) m.set(t.id, t)
+    }
+    return m
+  }, [terms])
+
+  const termById = useMemo(() => {
+    const m = new Map<string, IngTerm>()
+    for (const t of terms) m.set(t.id, t)
+    return m
+  }, [terms])
+
+  /* W2：当前搜索词归一出的词条 ID（「东北」「东北产地」等别名 → 同一词条，精确命中） */
+  const hitTermId = useMemo(() => {
+    const nk = q.trim().replace(/\s+/g, '')
+    return nk ? termIndex.get(nk)?.id ?? null : null
+  }, [q, termIndex])
+
   const filtered = useMemo(() => {
     const kw = q.trim()
     return items.filter(
       (g) =>
         (!onlyPending || g.pending) &&
         (!cat || g.cat === cat) &&
-        (!kw || (g.name ?? '').includes(kw)),
+        (!kw || (g.name ?? '').includes(kw) || (hitTermId && (g.tags ?? []).includes(hitTermId))),
     )
-  }, [items, cat, q, onlyPending])
+  }, [items, cat, q, onlyPending, hitTermId])
+
+  /* W2：编辑 Modal 的词条多选选项（按受控维度分组） */
+  const termOptions = useMemo(() => {
+    const groups: Record<string, IngTerm[]> = {}
+    for (const t of terms) (groups[t.category] = groups[t.category] || []).push(t)
+    return Object.entries(groups).map(([c, list]) => ({
+      label: c,
+      options: list.map((t) => ({
+        label: `${t.name}${t.status === 'pending' ? '（待审）' : t.status === 'rejected' ? '（已驳回）' : ''}`,
+        value: t.id,
+        disabled: t.status !== 'active',
+      })),
+    }))
+  }, [terms])
 
   const openEdit = (r?: IngRow) => {
     setCurrent(r || null)
@@ -115,10 +177,71 @@ export default function StockPage() {
             conv: r.conv || 1,
             yld: Math.round((r.yld ?? 1) * 100),
             on: r.on !== false,
+            tags: r.tags ?? [],
+            qc_report_url: r.qc_report_url ?? '',
           }
-        : { unit: '斤', buy: '斤', pack: '斤', conv: 1, safe: 0, yld: 100, on: true },
+        : { unit: '斤', buy: '斤', pack: '斤', conv: 1, safe: 0, yld: 100, on: true, tags: [], qc_report_url: '' },
     )
     setEditOpen(true)
+  }
+
+  /* 详情面板：列表仅保留核心列，其余属性点击行首 ▸ 展开查看 */
+  const renderDetail = (r: IngRow) => {
+    const tags = r.tags ?? []
+    return (
+      <Descriptions
+        size="small"
+        bordered
+        column={{ xs: 1, sm: 2, md: 3 }}
+        labelStyle={{ width: 110 }}
+      >
+        <Descriptions.Item label="库存单位">{r.unit ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label="包规">{r.pack || r.buy || r.spec || '-'}</Descriptions.Item>
+        <Descriptions.Item label="默认供应商">{r.sup || '-'}</Descriptions.Item>
+        <Descriptions.Item label="起订量 MOQ">{r.moq || '-'}</Descriptions.Item>
+        <Descriptions.Item label="换算率">
+          {r.conv == null || r.conv === 1
+            ? '—'
+            : `1 ${r.buy || r.pack || ''} = ${r.conv} ${r.unit || ''}`}
+        </Descriptions.Item>
+        <Descriptions.Item label="安全线">{safetyLine(r) || '-'}</Descriptions.Item>
+        <Descriptions.Item label="库存均价">{`${fmtNum(r.avg)} 元/${r.unit || '单位'}`}</Descriptions.Item>
+        <Descriptions.Item label="最近采购价">{r.last ? `${fmtNum(r.last)} 元/${r.buy || '单位'}` : '—'}</Descriptions.Item>
+        <Descriptions.Item label="库存总值">{`${fmtNum((Number(r.stock) || 0) * (Number(r.avg) || 0))} 元`}</Descriptions.Item>
+        <Descriptions.Item label="出成率">{`${Math.round((r.yld ?? 1) * 100)}%`}</Descriptions.Item>
+        <Descriptions.Item label="启用">{r.on === false ? '停用' : '启用'}</Descriptions.Item>
+        <Descriptions.Item label="标签 / 属性" span={3}>
+          {tags.length ? (
+            <Space size={4} wrap>
+              {tags.map((t) => {
+                const term = termById.get(t)
+                const isHit = hitTermId === t
+                return term ? (
+                  <Tag key={t} color={isHit ? 'geekblue' : 'blue'} style={{ marginInlineEnd: 0 }}>
+                    {term.name}
+                  </Tag>
+                ) : (
+                  <Tag key={t} color={isHit ? 'orange' : 'default'} style={{ marginInlineEnd: 0 }}>
+                    {t}
+                  </Tag>
+                )
+              })}
+            </Space>
+          ) : (
+            <span style={{ color: '#999' }}>-</span>
+          )}
+        </Descriptions.Item>
+        <Descriptions.Item label="质检报告" span={3}>
+          {safeHref(r.qc_report_url) ? (
+            <a href={safeHref(r.qc_report_url)!} target="_blank" rel="noopener noreferrer">
+              查看报告
+            </a>
+          ) : (
+            <span style={{ color: '#999' }}>-</span>
+          )}
+        </Descriptions.Item>
+      </Descriptions>
+    )
   }
 
   const columns: ColumnsType<IngRow> = [
@@ -134,83 +257,18 @@ export default function StockPage() {
       ),
     },
     { title: '分类', dataIndex: 'cat', width: 90, render: (v) => v ?? '-' },
-    { title: '单位', dataIndex: 'unit', width: 60, render: (v) => v ?? '-' },
-    {
-      title: '包规',
-      key: 'pack',
-      width: 90,
-      ellipsis: true,
-      render: (_, r) => r.pack || r.buy || r.spec || '-',
-    },
-    {
-      title: '供应商',
-      dataIndex: 'sup',
-      width: 110,
-      ellipsis: true,
-      render: (v) => v || '-',
-    },
-    {
-      title: 'MOQ',
-      dataIndex: 'moq',
-      width: 70,
-      render: (v) => v || '-',
-    },
-    {
-      title: '换算率',
-      key: 'conv',
-      width: 120,
-      render: (_, r) =>
-        r.conv == null || r.conv === 1
-          ? '—'
-          : `1 ${r.buy || r.pack || ''} = ${r.conv} ${r.unit || ''}`,
-    },
     {
       title: '当前量',
       key: 'stock',
-      width: 90,
+      width: 100,
       align: 'right',
       sorter: (a, b) => (a.stock ?? a.qty ?? 0) - (b.stock ?? b.qty ?? 0),
       render: (_, r) => r.stock ?? r.qty ?? 0,
     },
     {
-      title: '安全线',
-      key: 'safe',
-      width: 80,
-      align: 'right',
-      render: (_, r) => safetyLine(r) || '-',
-    },
-    {
-      title: '库存均价',
-      key: 'avg',
-      width: 110,
-      align: 'right',
-      render: (_, r) => `${fmtNum(r.avg)} 元/${r.unit || '单位'}`,
-    },
-    {
-      title: '最近采购价',
-      key: 'last',
-      width: 120,
-      align: 'right',
-      render: (_, r) => (r.last ? `${fmtNum(r.last)} 元/${r.buy || '单位'}` : '—'),
-    },
-    {
-      title: '库存总值',
-      key: 'val',
-      width: 110,
-      align: 'right',
-      render: (_, r) => `${fmtNum((Number(r.stock) || 0) * (Number(r.avg) || 0))} 元`,
-    },
-    {
-      title: '出成率',
-      key: 'yld',
-      width: 80,
-      align: 'right',
-      render: (_, r) => `${Math.round((r.yld ?? 1) * 100)}%`,
-    },
-    {
       title: '状态',
       key: 'status',
-      width: 80,
+      width: 90,
       filters: [
         { text: '告急', value: '告急' },
         { text: '偏低', value: '偏低' },
@@ -223,12 +281,6 @@ export default function StockPage() {
       },
     },
     {
-      title: '启用',
-      key: 'on',
-      width: 80,
-      render: (_, r) => (r.on === false ? <Tag>停用</Tag> : <Tag color={COLORS.green}>启用</Tag>),
-    },
-    {
       title: '操作',
       key: 'act',
       width: 80,
@@ -239,6 +291,56 @@ export default function StockPage() {
       ),
     },
   ]
+
+  /* ---- W2 词条管理：申请 / 审核（上架·驳回） ---- */
+  const reloadTerms = useCallback(() => {
+    fetchIngTerms()
+      .then((r) => setTerms(r.terms ?? []))
+      .catch(() => setTerms([]))
+  }, [])
+
+  const submitTerm = async () => {
+    if (!termName.trim()) {
+      message.warning('请输入词条名')
+      return
+    }
+    if (!termCat) {
+      message.warning('请选择受控维度')
+      return
+    }
+    setTermBusy(true)
+    try {
+      await submitTermUpsert({
+        name: termName.trim(),
+        category: termCat,
+        aliases: termAliases.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+      })
+      message.success('已提交词条申请（待审核上架）')
+      setTermName('')
+      setTermCat('')
+      setTermAliases('')
+      reloadTerms()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '失败')
+    } finally {
+      setTermBusy(false)
+    }
+  }
+
+  const setTermStatus = async (t: IngTerm, status: string) => {
+    setTermBusy(true)
+    try {
+      await submitTermUpsert({ id: t.id, status })
+      message.success(status === 'active' ? '已上架' : '已驳回/下架')
+      reloadTerms()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '失败')
+    } finally {
+      setTermBusy(false)
+    }
+  }
 
   return (
     <div>
@@ -292,6 +394,7 @@ export default function StockPage() {
             <Button type="primary" onClick={() => openEdit()}>
               新增原料
             </Button>
+            <Button onClick={() => setTermOpen(true)}>词条管理</Button>
             <span style={{ color: '#888', fontSize: 12 }}>包规·供应商·安全线经确认台写入</span>
           </Space>
         }
@@ -305,6 +408,7 @@ export default function StockPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
+            <span style={{ color: '#999', fontSize: 12 }}>点击行首 ▸ 查看单位 / 包规 / 供应商 / 均价等详情</span>
             <Space wrap size={4}>
               <Tag.CheckableTag checked={cat === ''} onChange={() => setCat('')}>
                 全部分类
@@ -325,6 +429,10 @@ export default function StockPage() {
             rowClassName={(r) => (r.on === false ? 'ing-off-row' : '')}
             pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 项` }}
             size="small"
+            expandable={{
+              expandedRowRender: renderDetail,
+              expandRowByClick: true,
+            }}
           />
         </Space>
       </Card>
@@ -354,8 +462,15 @@ export default function StockPage() {
           }
           /* 分类 + 库存单位齐全 → 视为已完善（pending:false，后端清掉草稿标记） */
           const pending = !(cat && unit)
+          /* W2：标签/属性从主数据 payload 中剥离，独立走 ing.attr_set（不混入成本/库存口径） */
+          const { tags: formTags, ...rest } = v
+          /* W3 产品超链接：质检报告只在用户改动过时才带该键（清空则显式传 ''）——未改动不写键，存量不被污染 */
+          const qcUrl = String(v.qc_report_url ?? '').trim()
+          const prevQcUrl = String(current?.qc_report_url ?? '').trim()
+          if (qcUrl === prevQcUrl) delete rest.qc_report_url
+          else rest.qc_report_url = qcUrl
           const payload = {
-            ...v,
+            ...rest,
             pending,
             // 出成率：表单存百分比（5~100），提交时折算为分数（0.05~1）
             yld: v.yld == null ? undefined : Math.min(1, Math.max(0.05, Number(v.yld) / 100)),
@@ -367,6 +482,16 @@ export default function StockPage() {
               payload,
               operator: 'admin',
             })
+            const newTags = (Array.isArray(formTags) ? formTags : [])
+              .map((t: string) => String(t).trim())
+              .filter(Boolean)
+            const oldTags = current?.tags ?? []
+            if (newTags.join('\u0001') !== oldTags.join('\u0001')) {
+              const attrPayload: { tags: string[]; id?: string; name?: string } = { tags: newTags }
+              if (current?.id) attrPayload.id = current.id
+              else attrPayload.name = String(v.name ?? '').trim()
+              await submitIngAttrSet(attrPayload)
+            }
             if (!r.confirmed) message.success('已入队，待审批中心确认')
             else if (wasPending) message.success('已确认转正')
             else if (pending) message.success('已保存（仍为待完善）')
@@ -398,6 +523,20 @@ export default function StockPage() {
           <Form.Item name="name" label="原料名" rules={[{ required: true }]}>
             <Input placeholder="火龙果汁 / 黑猪前肩肉" />
           </Form.Item>
+          <Form.Item
+            name="tags"
+            label="标签 / 属性（受控词条 + 自定义）"
+            extra="选择标准词条（产地/部位/颜色…），也可直接输入自定义营销 Tag。仅用于检索与归类，不影响成本与库存。"
+          >
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder="选标准词条，或输入自定义 Tag"
+              options={termOptions}
+              optionFilterProp="label"
+              tokenSeparators={[',', '，']}
+            />
+          </Form.Item>
           {current || showMore ? (
             <>
               <Space style={{ width: '100%' }} size={12}>
@@ -421,6 +560,23 @@ export default function StockPage() {
               </Space>
               <Form.Item name="spec" label="规格备注">
                 <Input placeholder="品牌/产地/净含量" />
+              </Form.Item>
+              <Form.Item
+                name="qc_report_url"
+                label="质检报告链接"
+                extra={
+                  <>
+                    仅保存链接（报告本体独立存储，主数据不臃肿）；留空保存即清除已登记链接。
+                    {current && safeHref(current.qc_report_url) ? (
+                      <>
+                        {' '}当前：
+                        <a href={safeHref(current.qc_report_url)!} target="_blank" rel="noopener noreferrer">查看报告</a>
+                      </>
+                    ) : null}
+                  </>
+                }
+              >
+                <Input placeholder="https://oss.example.com/qc/ing-I1.pdf" />
               </Form.Item>
               <Space style={{ width: '100%' }} size={12}>
                 <Form.Item name="sup" label="默认供应商" style={{ flex: 1 }}>
@@ -462,6 +618,102 @@ export default function StockPage() {
             </>
           )}
         </Form>
+      </Modal>
+
+      <Modal
+        title="受控词条管理（申请 → 审核 → 上架）"
+        open={termOpen}
+        onCancel={() => setTermOpen(false)}
+        footer={null}
+        width={780}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="受控词条按「产地/颜色/部位/等级/品种/规格/包装/口味」归类，多别名归一到同一词条。新词条默认「待审核」，审核上架后原料才能选用。"
+          />
+          <Space wrap>
+            <Input
+              placeholder="词条名（如：云南）"
+              style={{ width: 160 }}
+              value={termName}
+              onChange={(e) => setTermName(e.target.value)}
+            />
+            <Select
+              placeholder="受控维度"
+              style={{ width: 120 }}
+              value={termCat || undefined}
+              onChange={(v) => setTermCat(v)}
+              options={['产地', '颜色', '部位', '等级', '品种', '规格', '包装', '口味'].map((c) => ({
+                label: c,
+                value: c,
+              }))}
+            />
+            <Input
+              placeholder="别名（逗号分隔，如：云南产地,产自云南）"
+              style={{ width: 280 }}
+              value={termAliases}
+              onChange={(e) => setTermAliases(e.target.value)}
+            />
+            <Button type="primary" loading={termBusy} onClick={submitTerm}>
+              申请词条
+            </Button>
+          </Space>
+          <Table<IngTerm>
+            rowKey="id"
+            size="small"
+            dataSource={terms}
+            pagination={false}
+            columns={[
+              { title: 'ID', dataIndex: 'id', width: 70 },
+              { title: '词条名', dataIndex: 'name', width: 120 },
+              { title: '维度', dataIndex: 'category', width: 80 },
+              {
+                title: '别名',
+                dataIndex: 'aliases',
+                render: (a: string[]) => (a?.length ? a.join('、') : '-'),
+              },
+              {
+                title: '状态',
+                dataIndex: 'status',
+                width: 90,
+                render: (s: string) =>
+                  s === 'active' ? (
+                    <Tag color="green">已上架</Tag>
+                  ) : s === 'pending' ? (
+                    <Tag color="orange">待审核</Tag>
+                  ) : (
+                    <Tag>已驳回</Tag>
+                  ),
+              },
+              {
+                title: '操作',
+                key: 'act',
+                width: 140,
+                render: (_, t) =>
+                  t.status === 'pending' ? (
+                    <Space size={4}>
+                      <Button size="small" type="primary" onClick={() => setTermStatus(t, 'active')}>
+                        上架
+                      </Button>
+                      <Button size="small" onClick={() => setTermStatus(t, 'rejected')}>
+                        驳回
+                      </Button>
+                    </Space>
+                  ) : t.status === 'active' ? (
+                    <Button size="small" onClick={() => setTermStatus(t, 'rejected')}>
+                      下架
+                    </Button>
+                  ) : (
+                    <Button size="small" type="primary" onClick={() => setTermStatus(t, 'active')}>
+                      重新上架
+                    </Button>
+                  ),
+              },
+            ]}
+          />
+        </Space>
       </Modal>
     </div>
   )

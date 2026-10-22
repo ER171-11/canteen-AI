@@ -29,7 +29,7 @@ export default function LoginPage() {
   const login = useAuthStore((s) => s.login)
   const [loading, setLoading] = useState(false)
 
-  const doLogin = async (account: string, password: string) => {
+  const doLogin = async (account: string, password: string, to?: string) => {
     setLoading(true)
     const deviceFp = getDeviceFp()
     try {
@@ -53,7 +53,7 @@ export default function LoginPage() {
         canWrite: !!resp.can_write,
       })
       message.success(`登录成功 · ${resp.store_name || resp.role}`)
-      navigate(firstAccessiblePath(resp.role), { replace: true })
+      navigate(to ?? firstAccessiblePath(resp.role), { replace: true })
     } catch (err) {
       const status = (err as { response?: { status?: number; data?: { error?: string } } })?.response
       message.error(status?.data?.error || `登录失败（HTTP ${status?.status || '?'}）`)
@@ -113,6 +113,17 @@ export default function LoginPage() {
               </Button>
             ))}
           </Space>
+          <div style={{ marginTop: 8 }}>
+            <Button
+              block
+              size="small"
+              type="dashed"
+              disabled={loading}
+              onClick={() => doLogin('boss', QUICK_LOGIN_PASSWORD, '/m')}
+            >
+              手机版 UI 测试（老板账号，登录后直接进入 /m）
+            </Button>
+          </div>
         </div>
       </Card>
     </div>

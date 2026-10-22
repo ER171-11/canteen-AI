@@ -25,6 +25,7 @@ const { spawnSync } = require('child_process');
 const { openZip } = require('./zipread');
 const { Store } = require('../db');
 const { httpJson } = require('../common');
+const { resolveIngType } = require('../../lib/ing_type');
 
 const BASE = __dirname;
 const DEFAULT_DIR = path.resolve(BASE, '..', '..', '..', 'store-inventory', '订单');
@@ -652,6 +653,7 @@ function createIng(db, name, unit) {
     id: 'I' + seq,
     name: cleanName(name),
     cat: '其他',
+    type: resolveIngType(name), // W4：食材/耗材语义分层，导入自动识别（决策 #6）
     unit: u,
     buy: u,
     conv: 1,

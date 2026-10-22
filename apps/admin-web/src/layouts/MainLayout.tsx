@@ -17,7 +17,7 @@ import {
   message,
 } from 'antd'
 import type { MenuProps } from 'antd'
-import { LogoutOutlined, ShopOutlined, SyncOutlined } from '@ant-design/icons'
+import { LogoutOutlined, MobileOutlined, ShopOutlined, SyncOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../store/auth'
 import EnvBanner from '../components/EnvBanner'
 import { canAccess, firstAccessiblePath } from '../rbac/roles'
@@ -193,6 +193,9 @@ export default function MainLayout() {
             </Tag>
             <Tag color={canWrite ? 'blue' : 'default'}>{canWrite ? '可写' : '只读'}</Tag>
             <Typography.Text type="secondary">{account}</Typography.Text>
+            <Button type="primary" ghost size="small" icon={<MobileOutlined />} onClick={() => navigate('/m')}>
+              手机版
+            </Button>
             <Button type="text" icon={<LogoutOutlined />} onClick={onLogout}>
               退出
             </Button>

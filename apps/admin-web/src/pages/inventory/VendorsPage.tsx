@@ -12,6 +12,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Row,
   Select,
   Space,
@@ -25,7 +26,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import type { Dayjs } from 'dayjs'
+import dayjs, { type Dayjs } from 'dayjs'
 import {
   fetchSupplyVendors,
   fetchSupplyCompare,
@@ -35,11 +36,13 @@ import {
   fetchAdminPrice,
   saveSupplyConfig,
   upsertSupplyVendor,
+  deleteSupplyVendor,
   logSupplyQuote,
   logSupplyPo,
 } from '../../api'
 import type {
   PricePlanItem,
+  PriceQuoteRow,
   PriceReportRow,
   PriceResp,
   SupplyAccountRow,
@@ -47,6 +50,7 @@ import type {
   SupplyCompareResp,
   SupplyConfigResp,
   SupplyOverviewResp,
+  SupplyQuote,
   SupplyVendorRow,
   SupplyVendorsResp,
 } from '../../api/types'
@@ -54,10 +58,86 @@ import { useAuthStore } from '../../store/auth'
 import { client } from '../../api/client'
 import { comparePlatformUrl, DEF_COMPARE_PLATFORMS, normalizeComparePlatforms } from './comparePlatforms'
 import type { ComparePlatform } from './comparePlatforms'
+import { safeHref } from './utils'
 import { COLORS } from '../../theme'
 
 type SupplyTab = 'vendors' | 'compare' | 'accounts' | 'price'
 type PriceFilter = 'all' | 'better' | 'worse' | 'none'
+
+/** FP-PRICE-06/08 报价明细统一行：两表（比价 / 原料比价）与全量表共用同一列口径 */
+type QuoteDetailRow = {
+  key: string
+  ingName: string
+  unit: string
+  buy: string
+  src: string
+  price: number
+  per: string
+  perStock: number
+  diff: number | null
+  date: string
+  note: string
+}
+
+/** W3 供应商资质临期分级 → Tag 颜色（与食安 certLevel 口径一致） */
+const CERT_LEVEL_TAG: Record<string, { color: string; text: string }> = {
+  expired: { color: 'red', text: '已逾期' },
+  red: { color: 'red', text: '临期' },
+  orange: { color: 'orange', text: '临期' },
+  yellow: { color: 'gold', text: '临期' },
+  green: { color: 'green', text: '有效' },
+  unknown: { color: 'default', text: '未登记' },
+}
+
+
+
+const qDetailOf = (
+  q: PriceQuoteRow | SupplyQuote,
+  ingName: string,
+  unit: string,
+  buy: string,
+  idx: number,
+  diff?: number,
+): QuoteDetailRow => ({
+  key: `${ingName}|${q.src}|${q.date ?? ''}|${q.price}|${idx}`,
+  ingName,
+  unit,
+  buy,
+  src: q.src,
+  price: q.price,
+  per: q.per,
+  perStock: q.perStock,
+  diff: diff ?? null,
+  date: String(q.date ?? ''),
+  note: q.note ?? '',
+})
+
+/** 报价明细列（逐列对齐旧版 `quoteListHtml` :5035 / `openQuoteList` :5035） */
+function quoteDetailCols(showIng: boolean): ColumnsType<QuoteDetailRow> {
+  const cols: ColumnsType<QuoteDetailRow> = [{ title: '日期', dataIndex: 'date', width: 110 }]
+  if (showIng) {
+    cols.push({ title: '原料', dataIndex: 'ingName', width: 160, render: (x) => <strong>{x}</strong> })
+  }
+  cols.push(
+    { title: '来源', dataIndex: 'src', width: 130 },
+    {
+      title: '报价', dataIndex: 'price', width: 130, align: 'right',
+      render: (x, r) => `¥${x}/${r.per === 'buy' ? (r.buy || r.unit) : r.unit}`,
+    },
+    {
+      title: '折库存单位价', dataIndex: 'perStock', width: 130, align: 'right',
+      render: (x, r) => <strong>¥{x}/{r.unit}</strong>,
+    },
+    {
+      title: '对比本店', dataIndex: 'diff', width: 100, align: 'right',
+      render: (x) => (x == null ? '-' : <span style={{ color: x < 0 ? COLORS.green : x > 0 ? COLORS.red : undefined }}>{x > 0 ? '+' : ''}{x}</span>),
+    },
+    { title: '备注', dataIndex: 'note', render: (x) => <Typography.Text type="secondary">{x || ''}</Typography.Text> },
+  )
+  return cols
+}
+
+const QUOTE_ALL_COLS = quoteDetailCols(true)
 
 const DEFAULT_CFG: SupplyConfigResp['supply'] = {
   spread_warn_pct: 10,
@@ -81,10 +161,14 @@ export default function VendorsPage() {
   const [priceQ, setPriceQ] = useState('')
   const [priceF, setPriceF] = useState<PriceFilter>('all')
   const [planOpen, setPlanOpen] = useState(false)
+  /* FP-PRICE-08：「全部外部报价记录」全量表 */
+  const [quoteAllOpen, setQuoteAllOpen] = useState(false)
   /* FP-PRICE-09：「去比价」外链所用的平台表（`config.compare_platforms`，缺省用旧版 DEF_PLATFORMS） */
   const [platforms, setPlatforms] = useState<ComparePlatform[]>(DEF_COMPARE_PLATFORMS.map((p) => ({ ...p })))
 
   const [vOpen, setVOpen] = useState(false)
+  /* 非空 = 处于「编辑档案」模式（复用登记弹窗，提交带 edit 口径） */
+  const [vEdit, setVEdit] = useState<SupplyVendorRow | null>(null)
   const [vForm] = Form.useForm()
   const [qOpen, setQOpen] = useState(false)
   const [qForm] = Form.useForm()
@@ -102,7 +186,8 @@ export default function VendorsPage() {
       fetchSupplyOverview(),
       fetchSupplyConfig().catch(() => null),
       fetchAdminPrice().catch(() => null),
-      client.get<{ config?: Record<string, unknown> }>('/admin/config').catch(() => null),
+      /* FP-PRICE-09/10：平台表取自 `GET /api/admin/config` 响应体（axios 的 `data`）里的 `config.compare_platforms` */
+      client.get<{ config?: { compare_platforms?: unknown } }>('/admin/config').catch(() => null),
     ])
       .then(([v, c, a, o, cf, pr, cfg]) => {
         setVendors(v)
@@ -124,6 +209,79 @@ export default function VendorsPage() {
     load()
   }, [load])
 
+  /* 供应商登记（新建）/ 编辑：同一弹窗，靠 vEdit 区分口径 */
+  const openVendorCreate = useCallback(() => {
+    setVEdit(null)
+    setVOpen(true)
+  }, [])
+
+  const openVendorEdit = useCallback((r: SupplyVendorRow) => {
+    setVEdit(r)
+    setVOpen(true)
+  }, [])
+
+  /**
+   * 表单回填（「之前填过的内容不用再填一遍」）。
+   *
+   * 关键前提：Modal 必须 `forceRender`（见下方 <Modal>）——否则表单在首次打开时才挂载，
+   * 挂载时序晚于本次 effect，setFieldsValue 会被丢弃，表现为编辑弹窗一片空白。
+   * 常驻挂载后再 resetFields + setFieldsValue，值与 Form.List（资质证照）都能稳定回显。
+   */
+  const fillVendorForm = useCallback((row: SupplyVendorRow | null) => {
+    /* 只写一次 setFieldsValue（不先 resetFields）：reset 的重置与 set 的写入会抢同一批渲染，
+       表现为「部分字段回显、部分空白」（Select / Form.List 子字段尤其明显） */
+    if (!row) {
+      vForm.setFieldsValue({
+        name: '', vendor_id: '', category: undefined, period: '月结30天', level: 3,
+        status: '合作中', contact: '', phone: '', note: '', certs: [],
+      })
+      return
+    }
+    const certs = (row.certs ?? []).map((c) => ({
+      type: c.type,
+      cert_no: c.cert_no ?? '',
+      expire_at: c.expire_at ? dayjs(c.expire_at) : null,
+      url: c.url ?? '',
+    }))
+    vForm.setFieldsValue({
+      name: row.name,
+      vendor_id: row.id == null ? '' : String(row.id),
+      category: row.category,
+      period: row.period === '未标' ? '' : row.period,
+      level: row.level ?? null,
+      status: row.status || '合作中',
+      contact: row.contact ?? '',
+      phone: row.phone ?? '',
+      note: row.note ?? '',
+      certs,
+    })
+    /* Form.List 的行由本次写入创建，子字段在行挂载后才可写：下一拍补写一次，确保证号/到期日回填 */
+    if (certs.length) {
+      window.setTimeout(() => vForm.setFieldsValue({ certs }), 0)
+    }
+  }, [vForm])
+
+  useEffect(() => {
+    if (!vOpen) return
+    fillVendorForm(vEdit)
+  }, [vOpen, vEdit, fillVendorForm])
+
+  /* 删除档案：入队 vendor.delete；有往来账会被执行器拒绝（提示改为「暂停」） */
+  const removeVendor = useCallback(async (r: SupplyVendorRow) => {
+    const vid = r.id == null ? undefined : String(r.id)
+    setBusy(true)
+    try {
+      const res = await deleteSupplyVendor({ vendor_id: vid, name: vid ? undefined : r.name })
+      if (res.ok) { message.success(res.note || '供应商删除已入队'); load() }
+      else message.error(res.error || '删除失败')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '删除失败')
+    } finally {
+      setBusy(false)
+    }
+  }, [load])
+
   const vCols: ColumnsType<SupplyVendorRow> = useMemo(
     () => [
       { title: '供应商', dataIndex: 'name', width: 150, render: (x) => <strong>{x}</strong> },
@@ -138,25 +296,138 @@ export default function VendorsPage() {
       { title: '状态', dataIndex: 'status', width: 100, render: (x) => <Tag>{x}</Tag> },
       { title: '联系人', dataIndex: 'contact', width: 110, render: (x) => x ?? '-' },
       { title: '电话', dataIndex: 'phone', width: 140, render: (x) => x ?? '-' },
+      {
+        title: '资质',
+        dataIndex: 'cert',
+        width: 190,
+        render: (_, r) => {
+          const cert = r.cert
+          const meta = (cert && CERT_LEVEL_TAG[cert.level]) || CERT_LEVEL_TAG.unknown
+          const days = cert?.days_left
+          const txt = cert?.level === 'expired'
+            ? '已逾期'
+            : cert?.level === 'green' ? '有效' : cert?.level === 'unknown' ? '未登记' : `临期 ${days} 天`
+          const certs = r.certs ?? []
+          /* W3：证照亮证明细（类型 / 证号 / 到期日）放 Tooltip，列表内只留可点击的附件链接 */
+          const tip = certs.length
+            ? certs.map((c) => `${c.type}${c.cert_no ? ` ${c.cert_no}` : ''}${c.expire_at ? `（到期 ${c.expire_at}）` : ''}`).join('\n')
+            : (cert?.next_expire_at ? `最近到期：${cert.next_expire_at}` : undefined)
+          return (
+            <Space direction="vertical" size={2}>
+              <Tooltip title={tip ? <span style={{ whiteSpace: 'pre-line' }}>{tip}</span> : undefined}>
+                <Tag color={meta.color}>{txt}</Tag>
+              </Tooltip>
+              {certs.map((c, i) => {
+                const href = safeHref(c.url)
+                if (!href) return null
+                return (
+                  <a key={`${c.type}-${i}`} href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>
+                    {c.type || '证照附件'}
+                  </a>
+                )
+              })}
+            </Space>
+          )
+        },
+      },
+      {
+        title: '操作',
+        key: 'act',
+        width: 120,
+        fixed: 'right',
+        render: (_, r) => (
+          <Space size={0}>
+            <Tooltip title={canWrite ? undefined : '当前角色无写权限'}>
+              <Button size="small" type="link" disabled={!canWrite} onClick={() => openVendorEdit(r)}>编辑</Button>
+            </Tooltip>
+            <Popconfirm
+              title={`删除供应商「${r.name}」？`}
+              description="有往来账的供应商不能删除（请把状态改为「暂停」）；历史报价与单据不随档案删除。"
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => removeVendor(r)}
+            >
+              <Tooltip title={canWrite ? undefined : '当前角色无写权限'}>
+                <Button size="small" type="link" danger disabled={!canWrite}>删除</Button>
+              </Tooltip>
+            </Popconfirm>
+          </Space>
+        ),
+      },
     ],
-    [cfg.low_level],
+    [cfg.low_level, canWrite, openVendorEdit, removeVendor],
   )
 
+  /* 比价表：候选价口径同「原料比价」主表（折库存单位价）；单家报价不构成比价 → 最高价/价差显示 '-' */
   const cmpCols: ColumnsType<SupplyCompareResp['rows'][number]> = useMemo(
     () => [
-      { title: '原料', dataIndex: 'name', width: 140, render: (x) => <strong>{x}</strong> },
-      { title: '候选数', dataIndex: 'candidates', width: 90 },
-      { title: '最低价', key: 'best', width: 150, render: (_, r) => <span style={{ color: COLORS.green }}>{r.best.src} ¥{r.best.price}</span> },
-      { title: '最高价', key: 'worst', width: 150, render: (_, r) => <span style={{ color: COLORS.red }}>{r.worst.src} ¥{r.worst.price}</span> },
+      {
+        title: '原料', dataIndex: 'name', width: 170,
+        render: (x, r) => (
+          <>
+            <strong>{x}</strong>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+              {r.conv > 1 ? `1${r.buy}=${r.conv}${r.unit}` : r.unit}
+            </Typography.Text>
+          </>
+        ),
+      },
+      { title: '候选数', dataIndex: 'candidates', width: 80 },
+      { title: '本店均价', dataIndex: 'avg', width: 100, align: 'right', render: (x, r) => `¥${x}/${r.unit}` },
+      {
+        title: '最低价', key: 'best', width: 170,
+        render: (_, r) => (
+          <span>
+            <strong style={{ color: COLORS.green }}>¥{r.best.perStock}/{r.unit}</strong>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+              {r.best.src} ¥{r.best.price}/{r.best.per === 'buy' ? r.buy : r.unit}
+            </Typography.Text>
+          </span>
+        ),
+      },
+      {
+        title: '最高价', key: 'worst', width: 170,
+        render: (_, r) => (r.candidates < 2 ? <Typography.Text type="secondary">-</Typography.Text> : (
+          <span>
+            <strong style={{ color: COLORS.red }}>¥{r.worst.perStock}/{r.unit}</strong>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+              {r.worst.src} ¥{r.worst.price}/{r.worst.per === 'buy' ? r.buy : r.unit}
+            </Typography.Text>
+          </span>
+        )),
+      },
+      {
+        title: '对比本店', dataIndex: 'diff', width: 110, align: 'right',
+        sorter: (a, b) => (a.diff ?? 0) - (b.diff ?? 0),
+        /* 本店均价为 0 时无对比基准，显示 '-'（否则会得到「外价比 ¥0 贵 X 元」的失真结论） */
+        render: (x, r) => (!(r.avg > 0)
+          ? <Typography.Text type="secondary" title="本店暂无均价基准">-</Typography.Text>
+          : <span style={{ color: x < 0 ? COLORS.green : x > 0 ? COLORS.red : undefined }}>{x > 0 ? '+' : ''}{x}</span>),
+      },
       {
         title: '价差',
         dataIndex: 'spread_pct',
-        width: 100,
+        width: 90,
         sorter: (a, b) => (a.spread_pct ?? 0) - (b.spread_pct ?? 0),
-        render: (x) => (x == null ? '-' : <Tag color={x > (compare?.warn_pct ?? 10) ? COLORS.orange : COLORS.gray}>{x}%</Tag>),
+        render: (x) => (x == null ? <Typography.Text type="secondary">-</Typography.Text> : <Tag color={x > (compare?.warn_pct ?? 10) ? COLORS.orange : COLORS.gray}>{x}%</Tag>),
       },
     ],
     [compare],
+  )
+
+  /* FP-PRICE-06 报价记录：按原料行展开看多家报价分组（旧版 data-quotelist → quoteListHtml :5035） */
+  const cmpExpand = useCallback(
+    (r: SupplyCompareResp['rows'][number]) => (
+      <Table<QuoteDetailRow>
+        rowKey="key"
+        size="small"
+        pagination={false}
+        columns={quoteDetailCols(false)}
+        dataSource={r.quotes.map((q, i) => qDetailOf(q, r.name, r.unit, r.buy, i, r.avg > 0 ? Math.round((q.perStock - r.avg) * 100) / 100 : undefined))}
+      />
+    ),
+    [],
   )
 
   const accCols: ColumnsType<SupplyAccountRow> = useMemo(
@@ -194,19 +465,26 @@ export default function VendorsPage() {
       {
         title: '差价', dataIndex: 'diff', width: 100, align: 'right',
         sorter: (a, b) => (a.diff ?? 0) - (b.diff ?? 0),
-        render: (x) => x == null ? '-' : <span style={{ color: x < 0 ? COLORS.green : COLORS.red }}>{x > 0 ? '+' : ''}{x}</span>,
+        /* 本店均价为 0（无采购基价）时不显示省/贵差值，避免「比 ¥0 贵 X 元」的失真对比 */
+        render: (x, r) => (x == null || !(r.avg > 0)
+          ? <Typography.Text type="secondary" title="本店暂无均价基准">-</Typography.Text>
+          : <span style={{ color: x < 0 ? COLORS.green : COLORS.red }}>{x > 0 ? '+' : ''}{x}</span>),
       },
       {
         title: '节省%', dataIndex: 'savePct', width: 100, align: 'right',
         sorter: (a, b) => (a.savePct ?? 0) - (b.savePct ?? 0),
-        render: (x, r) => x == null ? '-' : <Tag color={r.diff! < 0 ? COLORS.green : COLORS.red}>{r.diff! < 0 ? '省' : '高'} {x}%</Tag>,
+        render: (x, r) => (x == null || !(r.avg > 0)
+          ? <Typography.Text type="secondary">-</Typography.Text>
+          : <Tag color={r.diff! < 0 ? COLORS.green : COLORS.red}>{r.diff! < 0 ? '省' : '高'} {x}%</Tag>),
       },
       {
         title: '来源与时间', key: 'recent', width: 200,
         render: (_, r) => r.best
           ? (
             <>
-              <Tag color={r.diff! < -0.01 ? COLORS.green : r.diff! > 0.01 ? COLORS.red : COLORS.gray}>{r.diff! < -0.01 ? '外价更低' : r.diff! > 0.01 ? '外价更高' : '基本持平'}</Tag>
+              {r.avg > 0
+                ? <Tag color={r.diff! < -0.01 ? COLORS.green : r.diff! > 0.01 ? COLORS.red : COLORS.gray}>{r.diff! < -0.01 ? '外价更低' : r.diff! > 0.01 ? '外价更高' : '基本持平'}</Tag>
+                : <Tag color={COLORS.gray}>无本店基准</Tag>}
               {r.recent.slice(0, 2).map((q, i) => (
                 <Typography.Text key={i} type="secondary" style={{ fontSize: 12, display: 'block' }}>{q.src} · {q.date}</Typography.Text>
               ))}
@@ -264,6 +542,29 @@ export default function VendorsPage() {
     })
   }, [price, priceQ, priceF])
 
+  /* FP-PRICE-06 报价记录：原料比价主表按「原料」行展开看多家报价分组（旧版 quoteListHtml :5035） */
+  const priceExpand = useCallback(
+    (r: PriceReportRow) => (
+      <Table<QuoteDetailRow>
+        rowKey="key"
+        size="small"
+        pagination={false}
+        columns={quoteDetailCols(false)}
+        dataSource={r.quotes.map((q, i) => qDetailOf(q, r.name, r.unit, r.buy, i, r.avg > 0 ? q.diff : undefined))}
+      />
+    ),
+    [],
+  )
+
+  /* FP-PRICE-08 全部外部报价记录（旧版 openQuoteList :5035）：与主表同源（price.report.rows），按日期倒序 */
+  const allQuotes = useMemo<QuoteDetailRow[]>(
+    () =>
+      (price?.report.rows ?? [])
+        .flatMap((r) => r.quotes.map((q, i) => qDetailOf(q, r.name, r.unit, r.buy, i, r.avg > 0 ? q.diff : undefined)))
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    [price],
+  )
+
   const run = async (fn: () => Promise<{ ok?: boolean; note?: string; error?: string }>, close: () => void, okMsg: string) => {
     setBusy(true)
     try {
@@ -278,12 +579,52 @@ export default function VendorsPage() {
     }
   }
 
+  /* 编辑弹窗内的「旧记录」摘要：报价样本 + 往来账，取页面已加载数据，不额外请求 */
+  const vHistory = useMemo(() => {
+    if (!vEdit) return null
+    const name = String(vEdit.name || '')
+    const quotes = (price?.report.rows ?? [])
+      .flatMap((r) => r.quotes
+        .filter((q) => String(q.src || '') === name)
+        .map((q) => ({
+          ing: r.name,
+          unit: r.unit,
+          buy: r.buy,
+          price: q.price,
+          per: q.per,
+          date: String(q.date || ''),
+        })))
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+    const accs = (accounts?.rows ?? []).filter((a) => String(a.supplier || '') === name)
+    const payable = Math.round(accs.reduce((s, a) => s + (Number(a.balance) || 0), 0) * 100) / 100
+    return { quotes, payable, accCount: accs.length }
+  }, [vEdit, price, accounts])
+
   const submitVendor = async () => {
     const v = await vForm.validateFields()
+    const editing = vEdit != null
     await run(() => upsertSupplyVendor({
-      name: v.name, vendor_id: v.vendor_id || undefined, category: v.category, period: v.period,
-      level: v.level == null ? undefined : Number(v.level), status: v.status, contact: v.contact, phone: v.phone, note: v.note,
-    }), () => setVOpen(false), '供应商档案已入队')
+      name: v.name,
+      vendor_id: v.vendor_id || undefined,
+      category: v.category,
+      period: v.period || undefined,
+      /* 编辑口径允许显式 null（清空评级）；新建仍按缺省处理 */
+      level: v.level == null ? (editing ? null : undefined) : Number(v.level),
+      status: v.status,
+      contact: v.contact ?? '',
+      phone: v.phone ?? '',
+      note: v.note ?? '',
+      /* W3 资质证照：DatePicker 的 Dayjs 转回 YYYY-MM-DD；空行由后端 normalizeCerts 剔除 */
+      certs: (v.certs ?? []).map((c: { type?: string; cert_no?: string; expire_at?: Dayjs | string | null; url?: string }) => ({
+        type: c.type || '',
+        cert_no: c.cert_no ?? '',
+        expire_at: c.expire_at ? (typeof c.expire_at === 'string' ? c.expire_at : (c.expire_at as Dayjs).format('YYYY-MM-DD')) : '',
+        url: c.url ?? '',
+      })),
+      edit: editing || undefined,
+      /* 老档案无编号时靠原名定位（改名不新增一条） */
+      old_name: editing && vEdit && vEdit.id == null ? vEdit.name : undefined,
+    }), () => { setVOpen(false); setVEdit(null) }, editing ? '供应商档案修改已入队' : '供应商档案已入队')
   }
   /* FP-PRICE-05 报价口径实时折算（口径同 bff/lib/price.js::quotePerStock：
      per='buy' 按采购单位价 ÷ conv，'stock' 即库存单位价），对比本店均价给「低/高」提示 */
@@ -291,7 +632,8 @@ export default function VendorsPage() {
   const qPrice = Form.useWatch('price', qForm)
   const qPer = Form.useWatch('per', qForm)
   const qRows = price?.report.rows ?? []
-  const qRow = useMemo(() => qRows.find((r) => r.name === qIng) || null, [qRows, qIng])
+  /* 报价归属以原料 id 为准（ing=原料 id，name 随报价落库供两表显示）——早前按名称提交导致原料比价表匹配不上 */
+  const qRow = useMemo(() => qRows.find((r) => r.ingId === qIng) || null, [qRows, qIng])
   const qHint = useMemo(() => {
     if (!qRow) return null
     const p = Number(qPrice) || 0
@@ -306,8 +648,10 @@ export default function VendorsPage() {
 
   const submitQuote = async () => {
     const v = await qForm.validateFields()
+    const row = qRows.find((r) => r.ingId === v.ing) || null
     await run(() => logSupplyQuote({
-      ing: v.ing, src: v.src, price: Number(v.price), per: v.per, unit: v.unit, note: v.note, set_default_sup: v.set_default_sup === true,
+      ing: v.ing, name: row?.name, src: v.src, price: Number(v.price), per: v.per, unit: v.unit,
+      note: v.note, set_default_sup: v.set_default_sup === true,
     }), () => setQOpen(false), '报价已入队')
   }
   const submitPo = async () => {
@@ -341,10 +685,20 @@ export default function VendorsPage() {
 
   const aging = accounts?.aging
 
+  /* W3.4 看板临期告警：优先用 /api/supply/overview 透出的 cert_expiring（与 /api/supply/vendors 同源同数），
+     老后端无该字段时回退供应商列表数据，避免看板静默丢资质告警 */
+  const certExpiring = overview?.cert_expiring ?? vendors?.cert_expiring ?? []
+  const certExpiredCnt = certExpiring.filter((c) => c.level === 'expired').length
+  /* 告警按严重度排序后全量展示：原 slice(0,4) 会把最后压入的资质告警截断 */
+  const OVERVIEW_LEVEL_RANK: Record<string, number> = { red: 0, orange: 1, yellow: 2 }
+  const overviewAlerts = (overview?.alerts ?? [])
+    .slice()
+    .sort((a, b) => (OVERVIEW_LEVEL_RANK[a.level] ?? 9) - (OVERVIEW_LEVEL_RANK[b.level] ?? 9))
+
   return (
     <div>
       {isMock && <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="后端 /api/supply 未连通，当前为本地样例数据" />}
-      {(overview?.alerts ?? []).slice(0, 4).map((a, i) => (
+      {overviewAlerts.map((a, i) => (
         <Alert key={i} type={a.level === 'red' ? 'error' : a.level === 'orange' ? 'warning' : 'info'} showIcon style={{ marginBottom: 12 }} message={a.text} />
       ))}
 
@@ -353,7 +707,7 @@ export default function VendorsPage() {
         extra={
           <Space wrap>
             <Tooltip title={tip}><Button disabled={!canWrite} onClick={openCfg}>配置</Button></Tooltip>
-            <Tooltip title={tip}><Button disabled={!canWrite} onClick={() => { vForm.resetFields(); vForm.setFieldsValue({ status: '合作中', period: '月结30天', level: 3 }); setVOpen(true) }}>供应商登记</Button></Tooltip>
+            <Tooltip title={tip}><Button disabled={!canWrite} onClick={openVendorCreate}>供应商登记</Button></Tooltip>
             <Tooltip title={tip}><Button disabled={!canWrite} onClick={() => { qForm.resetFields(); setQOpen(true) }}>报价登记</Button></Tooltip>
             <Tooltip title={tip}><Button type="primary" disabled={!canWrite} onClick={() => { poForm.resetFields(); setPoOpen(true) }}>采购应付</Button></Tooltip>
             <Button size="small" onClick={load}>刷新</Button>
@@ -362,7 +716,7 @@ export default function VendorsPage() {
       >
         <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
           <Col xs={12} md={6}>
-            <Card size="small"><Statistic title="供应商" value={overview?.vendors.count ?? 0} suffix="家" /><Typography.Text type="secondary" style={{ fontSize: 12 }}>低评级 {overview?.vendors.low_rated ?? 0} 家</Typography.Text></Card>
+            <Card size="small"><Statistic title="供应商" value={overview?.vendors.count ?? 0} suffix="家" /><Typography.Text type="secondary" style={{ fontSize: 12 }}>低评级 {overview?.vendors.low_rated ?? 0} 家 · </Typography.Text><Typography.Text style={{ fontSize: 12, color: certExpiring.length ? COLORS.red : undefined }}>资质临期 {overview?.vendors.cert_expiring_count ?? certExpiring.length} 家</Typography.Text></Card>
           </Col>
           <Col xs={12} md={6}>
             <Card size="small"><Statistic title="可比价原料" value={overview?.compare.available ?? 0} suffix="项" /><Typography.Text type="secondary" style={{ fontSize: 12 }}>{overview?.compare.top ? `最大价差 ${overview.compare.top.spread_pct}%（${overview.compare.top.name}）` : '暂无价差'}</Typography.Text></Card>
@@ -383,7 +737,32 @@ export default function VendorsPage() {
               key: 'vendors',
               label: `供应商档案（${vendors?.count ?? 0}）`,
               children: vendors?.rows.length ? (
-                <Table<SupplyVendorRow> rowKey={(r) => String(r.id ?? r.name)} columns={vCols} dataSource={vendors.rows} loading={loading} pagination={{ pageSize: 12 }} size="small" />
+                <>
+                  {certExpiring.length > 0 && (
+                    <Alert
+                      type={certExpiredCnt ? 'error' : 'warning'}
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message={`资质临期/逾期 ${certExpiring.length} 家${certExpiredCnt ? `（其中已逾期 ${certExpiredCnt} 家）` : ''}`}
+                      description={
+                        <Space direction="vertical" size={2}>
+                          {certExpiring.map((c) => {
+                            const meta = CERT_LEVEL_TAG[c.level] || CERT_LEVEL_TAG.unknown
+                            return (
+                              <span key={c.name}>
+                                <strong>{c.name}</strong>{' '}
+                                <Tag color={meta.color}>{c.level === 'expired' ? '已逾期' : `临期 ${c.days_left} 天`}</Tag>
+                                {c.next_expire_at ? <Typography.Text type="secondary">最近到期 {c.next_expire_at}</Typography.Text> : null}
+                                {c.expired_count > 1 ? <Typography.Text type="secondary">（{c.expired_count} 张证照已逾期）</Typography.Text> : null}
+                              </span>
+                            )
+                          })}
+                        </Space>
+                      }
+                    />
+                  )}
+                  <Table<SupplyVendorRow> rowKey={(r) => String(r.id ?? r.name)} columns={vCols} dataSource={vendors.rows} loading={loading} pagination={{ pageSize: 12 }} size="small" scroll={{ x: 1200 }} />
+                </>
               ) : <Empty description="暂无供应商档案" />,
             },
             {
@@ -391,8 +770,16 @@ export default function VendorsPage() {
               label: `比价（${compare?.available ?? 0}）`,
               children: compare?.rows.length ? (
                 <>
-                  <Typography.Paragraph type="secondary">按报价最低为最优候选；AI 仅建议，切换供应商需确认。</Typography.Paragraph>
-                  <Table<SupplyCompareResp['rows'][number]> rowKey={(r) => r.name} columns={cmpCols} dataSource={compare.rows} loading={loading} pagination={{ pageSize: 12 }} size="small" />
+                  <Typography.Paragraph type="secondary">按报价最低为最优候选（候选价统一折算为「元/库存单位」再比较）；AI 仅建议，切换供应商需确认。展开「原料」行可看该原料的多家报价分组。</Typography.Paragraph>
+                  <Table<SupplyCompareResp['rows'][number]>
+                    rowKey="ingId"
+                    columns={cmpCols}
+                    dataSource={compare.rows}
+                    loading={loading}
+                    pagination={{ pageSize: 12 }}
+                    size="small"
+                    expandable={{ expandedRowRender: cmpExpand, rowExpandable: (r) => r.quotes.length > 0 }}
+                  />
                 </>
               ) : <Empty description="暂无多供应商报价样本" />,
             },
@@ -421,7 +808,15 @@ export default function VendorsPage() {
               children: (
                 <>
                   {price && (
-                    <Alert type="info" showIcon style={{ marginBottom: 12 }} message={`待比价原料：${price.report.tip.onSale} 种 · 尚无报价 ${price.report.tip.noQuote} 种 · 已有报价 ${price.report.tip.hasQuote} 种`} />
+                    <Alert
+                      type="info"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message={
+                        `待比价原料：${price.report.tip.onSale} 种 · 尚无报价 ${price.report.tip.noQuote} 种 · 已有报价 ${price.report.tip.hasQuote} 种`
+                        + `（尚无报价 + 已有报价 = 在售原料总数 ${price.report.tip.onSale}）`
+                      }
+                    />
                   )}
                   <Space style={{ marginBottom: 12 }} wrap>
                     <Input.Search placeholder="搜索原料名 / 分类" allowClear style={{ width: 240 }} value={priceQ} onChange={(e) => setPriceQ(e.target.value)} onSearch={setPriceQ} />
@@ -432,9 +827,18 @@ export default function VendorsPage() {
                       { value: 'none', label: '暂无报价' },
                     ]} />
                     <Button onClick={() => setPlanOpen(true)}>待比价清单</Button>
+                    <Button onClick={() => setQuoteAllOpen(true)}>全部报价记录（{allQuotes.length}）</Button>
                   </Space>
                   {priceRows.length ? (
-                    <Table<PriceReportRow> rowKey="ingId" columns={priceCols} dataSource={priceRows} loading={loading} pagination={{ pageSize: 12 }} size="small" />
+                    <Table<PriceReportRow>
+                      rowKey="ingId"
+                      columns={priceCols}
+                      dataSource={priceRows}
+                      loading={loading}
+                      pagination={{ pageSize: 12 }}
+                      size="small"
+                      expandable={{ expandedRowRender: priceExpand, rowExpandable: (r) => r.quotes.length > 0 }}
+                    />
                   ) : <Empty description="暂无原料比价数据" />}
                 </>
               ),
@@ -447,29 +851,130 @@ export default function VendorsPage() {
         )}
       </Card>
 
-      <Modal title="供应商登记" open={vOpen} onCancel={() => setVOpen(false)} confirmLoading={busy} destroyOnHidden onOk={submitVendor}>
+      <Modal
+        title={vEdit ? `编辑供应商档案 · ${vEdit.name}` : '供应商登记'}
+        open={vOpen}
+        onCancel={() => { setVOpen(false); setVEdit(null) }}
+        confirmLoading={busy}
+        /* 常驻挂载表单：保证 setFieldsValue 有字段可写（详见 fillVendorForm 注释） */
+        forceRender
+        width={760}
+        onOk={submitVendor}
+      >
+        {/* 编辑时先亮出该供应商的历史，避免「打开就一片空白、以为没记忆」 */}
+        {vEdit && vHistory && (
+          <div style={{ marginBottom: 12 }}>
+            <Descriptions size="small" column={3} bordered>
+              <Descriptions.Item label="历史报价">{vHistory.quotes.length} 条</Descriptions.Item>
+              <Descriptions.Item label="应付余额">¥{vHistory.payable}</Descriptions.Item>
+              <Descriptions.Item label="往来账">{vHistory.accCount} 笔</Descriptions.Item>
+            </Descriptions>
+            {vHistory.quotes.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  最近报价（只读；改价请走「报价登记」）：
+                </Typography.Text>
+                {vHistory.quotes.slice(0, 3).map((q, i) => (
+                  <Typography.Text key={i} style={{ display: 'block', fontSize: 12 }}>
+                    {q.ing} · ¥{q.price}/{q.per === 'buy' ? q.buy : q.unit} · {q.date}
+                  </Typography.Text>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <Form form={vForm} layout="vertical" preserve={false}>
           <Form.Item name="name" label="供应商名称" rules={[{ required: true, message: '请填写名称' }]}><Input /></Form.Item>
-          <Form.Item name="vendor_id" label="编号"><Input placeholder="选填，留空自动生成" /></Form.Item>
+          <Form.Item name="vendor_id" label="编号">
+            <Input placeholder="选填，留空自动生成" disabled={vEdit != null} />
+          </Form.Item>
           <Form.Item name="category" label="供应品类" rules={[{ required: true }]}>
-            <Select options={['肉类', '蔬菜', '粮油', '调料', '冻品', '其他'].map((s) => ({ value: s, label: s }))} />
+            {/* 编辑时把档案里已有的自定义品类也并进选项，避免打开就显示空值 */}
+            <Select
+              options={Array.from(new Set(['肉类', '蔬菜', '粮油', '调料', '冻品', '其他']
+                .concat(vEdit && vEdit.category && vEdit.category !== '未分类' ? [vEdit.category] : [])))
+                .map((s) => ({ value: s, label: s }))}
+            />
           </Form.Item>
           <Form.Item name="period" label="账期"><Input placeholder="月结30天 / 现结" /></Form.Item>
           <Form.Item name="level" label="评级（星）"><InputNumber style={{ width: '100%' }} min={0} max={5} /></Form.Item>
-          <Form.Item name="status" label="状态"><Select options={['合作中', '考察中', '暂停'].map((s) => ({ value: s, label: s }))} /></Form.Item>
+          <Form.Item name="status" label="状态">
+            <Select options={['合作中', '考察中', '暂停']
+              .concat(vEdit && vEdit.status && ['合作中', '考察中', '暂停'].indexOf(vEdit.status) < 0 ? [vEdit.status] : [])
+              .map((s) => ({ value: s, label: s }))} />
+          </Form.Item>
           <Form.Item name="contact" label="联系人"><Input /></Form.Item>
           <Form.Item name="phone" label="电话"><Input /></Form.Item>
-          <Alert type="info" showIcon message="档案入队 vendor.upsert，经审批中心确认才写回。" />
+          <Form.Item name="note" label="备注"><Input placeholder="选填" /></Form.Item>
+          <Form.List name="certs">
+            {(fields, { add, remove }) => (
+              <>
+                <Typography.Text strong style={{ display: 'block', margin: '4px 0 8px' }}>资质证照</Typography.Text>
+                {fields.map(({ key, name, ...restField }) => (
+                  <Space key={key} align="baseline" style={{ display: 'flex', marginBottom: 8, width: '100%' }}>
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'type']}
+                      rules={[{ required: true, message: '请选类型' }]}
+                      style={{ marginBottom: 0, width: 150 }}
+                    >
+                      <Select
+                        placeholder="类型"
+                        options={['营业执照', '食品经营许可', '检验合格', '其他'].map((s) => ({ value: s, label: s }))}
+                      />
+                    </Form.Item>
+                    <Form.Item {...restField} name={[name, 'cert_no']} style={{ marginBottom: 0, width: 180 }}>
+                      <Input placeholder="证号" />
+                    </Form.Item>
+                    <Form.Item {...restField} name={[name, 'expire_at']} style={{ marginBottom: 0, width: 150 }}>
+                      <DatePicker placeholder="到期日" style={{ width: '100%' }} />
+                    </Form.Item>
+                    {/* W3 产品超链接：附件链接填好后就地给「预览附件」，免去回列表再点 */}
+                    <Form.Item
+                      noStyle
+                      shouldUpdate={(prev, cur) => prev.certs?.[name]?.url !== cur.certs?.[name]?.url}
+                    >
+                      {({ getFieldValue }) => {
+                        const href = safeHref(getFieldValue(['certs', name, 'url']))
+                        return (
+                          <Form.Item
+                            {...restField}
+                            name={[name, 'url']}
+                            style={{ marginBottom: 0, width: 200 }}
+                            extra={href ? <a href={href} target="_blank" rel="noopener noreferrer">预览附件</a> : undefined}
+                          >
+                            <Input placeholder="附件链接（选填）" />
+                          </Form.Item>
+                        )
+                      }}
+                    </Form.Item>
+                    <Button type="link" danger onClick={() => remove(name)}>移除</Button>
+                  </Space>
+                ))}
+                <Button type="dashed" block onClick={() => add({ type: '营业执照', cert_no: '', expire_at: null, url: '' })}>
+                  + 添加证照
+                </Button>
+              </>
+            )}
+          </Form.List>
+          <Alert
+            type="info"
+            showIcon
+            message={vEdit
+              ? '修改入队 vendor.upsert（编辑口径，可清空字段），经审批中心确认才写回；下拉状态即可把供应商改为「暂停 / 考察中」。'
+              : '档案入队 vendor.upsert，经审批中心确认才写回。'}
+          />
         </Form>
       </Modal>
 
       <Modal title="录入供应商报价" open={qOpen} onCancel={() => setQOpen(false)} confirmLoading={busy} destroyOnHidden onOk={submitQuote}>
         <Form form={qForm} layout="vertical" preserve={false}>
           <Form.Item name="ing" label="原料" rules={[{ required: true, message: '请选择原料' }]}>
+            {/* value 取原料 id：报价据此归集到「原料比价」主表（名称仅作显示与回退匹配） */}
             <Select
               showSearch
               placeholder="选择在售原料"
-              options={qRows.map((r) => ({ value: r.name, label: `${r.name}（本店均价 ¥${r.avg}/${r.unit}）` }))}
+              options={qRows.map((r) => ({ value: r.ingId, label: `${r.name}（本店均价 ¥${r.avg}/${r.unit}）` }))}
               filterOption={(inp, opt) => String(opt?.label ?? '').includes(inp)}
             />
           </Form.Item>
@@ -527,6 +1032,13 @@ export default function VendorsPage() {
         {price?.plan.items.length ? (
           <Table<PricePlanItem> rowKey="ingId" columns={planCols} dataSource={price.plan.items} pagination={{ pageSize: 12 }} size="small" />
         ) : <Empty description="暂无在售原料" />}
+      </Modal>
+
+      {/* FP-PRICE-08 全部外部报价记录（旧版 openQuoteList）：列 = 日期/原料/来源/报价/折库存单位/对比本店/备注 */}
+      <Modal title={`全部外部报价记录（${allQuotes.length}）`} open={quoteAllOpen} footer={null} onCancel={() => setQuoteAllOpen(false)} width={1000}>
+        {allQuotes.length ? (
+          <Table<QuoteDetailRow> rowKey="key" columns={QUOTE_ALL_COLS} dataSource={allQuotes} pagination={{ pageSize: 12 }} size="small" />
+        ) : <Empty description="暂无外部报价记录" />}
       </Modal>
     </div>
   )

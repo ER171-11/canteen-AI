@@ -1,6 +1,18 @@
 import type { IngItem, InventoryDoc, InventoryLine } from '../../api/types'
 import { COLORS } from '../../theme'
 
+/**
+ * W3 产品超链接（供应商资质证照 / 原料质检报告）：链接地址 → 可点击 href。
+ * 只放行 http(s) 与站内绝对路径；裸域名补 https；其余（file:、javascript: 等）返回 null 按纯文本展示。
+ */
+export function safeHref(url?: string | null): string | null {
+  const u = String(url ?? '').trim()
+  if (!u) return null
+  if (/^https?:\/\//i.test(u) || u.startsWith('/')) return u
+  if (/^[\w.-]+\.[a-z]{2,}(\/|$|\?)/i.test(u)) return `https://${u}`
+  return null
+}
+
 /** safe=0/缺失时按 est×2 兜底安全线 */
 export function safetyLine(ing: IngItem): number {
   if (ing.safe && ing.safe > 0) return ing.safe

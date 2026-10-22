@@ -70,6 +70,10 @@ export interface SettleData {
   lines: SettleLine[]
   count: number
   totalQty: number
+  /** 明细合计 Σ lines[].amount（让利前金额） */
+  gross: number
+  /** 整单优惠/抹零（≥0，payable = gross − discount） */
+  discount: number
   payable: number
   paid: number
   debt: number
@@ -93,11 +97,19 @@ export function buildSettleData(doc: InventoryDoc, lookup: IngLookup): SettleDat
       amount: r2(Number(l.amount != null ? l.amount : (Number(l.qty) || 0) * (Number(l.price) || 0))),
     }
   })
+  const gross = r2(lines.reduce((a, b) => a + b.amount, 0))
+  const payable = r2(Number(doc.payable) || 0)
+  const discount =
+    doc.discount != null
+      ? r2(Math.max(0, Number(doc.discount)))
+      : r2(Math.max(0, gross - payable))
   return {
     lines,
     count: lines.length,
     totalQty: r3(lines.reduce((a, b) => a + b.qty, 0)),
-    payable: r2(Number(doc.payable) || 0),
+    gross,
+    discount,
+    payable,
     paid: docPaid(doc),
     debt: docDebt(doc),
   }

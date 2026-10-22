@@ -259,6 +259,8 @@ export interface SaleListItem {
   void_at?: string | null
   void_reason?: string | null
   note?: string
+  /** 明细行（编辑销售单 FP-SALE-12 用；无明细时 null，前端回退单行编辑） */
+  lines?: Array<{ name?: string; qty?: number; price?: number; amount?: number | null }> | null
 }
 
 /** GET /api/admin/sales 响应 */
@@ -324,6 +326,8 @@ export interface Dish {
   q30?: number
   /** 近 30 天毛利额（= 近30天营收 − 每份成本×近30天销量，FP-DISH-12） */
   gp30?: number
+  /** FP-DISH-06：有销售记录（id/菜名/sku_id 任一被销售明细引用）→ 不可删除，只能下架 */
+  sold?: boolean
   /** 是否上架 */
   on?: boolean
 }
@@ -379,6 +383,12 @@ export interface ApiError {
 /** BOM 条目：face_main/main/aux/seasoning 数组元素，对象或字符串均可能出现 */
 export type BomEntry = Record<string, string | number | undefined> | string
 
+/** 标准配方卡「制作方法」一段（BFF lib/recipe_method.js 归并：和面/调馅/打水上劲/包制/熟制） */
+export interface RecipeMethodStep {
+  stage: string
+  text: string
+}
+
 /** GET /api/kitchen/recipes → items 元素 */
 export interface RecipeItem {
   sku_id: string
@@ -394,6 +404,8 @@ export interface RecipeItem {
   aux?: BomEntry[]
   seasoning?: BomEntry[]
   steps?: string[]
+  /** 归并后的制作方法（优先于 steps 呈现） */
+  method?: RecipeMethodStep[]
   params?: Record<string, string | number>
   blessing?: string
   diet_tags?: string[]
@@ -535,8 +547,23 @@ export interface InspectionBoardProgress {
   board: string
   total: number
   done: number
+  missing_count?: number
   rate: number
-  missing: string[]
+  operator?: string | null
+  last_ts?: string | null
+  every30_pending?: number
+  /** 漏项明细（后端返回对象数组，非 node_id 字符串数组） */
+  missing: InspectionMissing[]
+}
+
+export interface InspectionMissing {
+  node_id: string
+  name: string
+  node_group?: string
+  every30?: boolean
+  photo_taken?: boolean
+  operator?: string | null
+  ts?: string | null
 }
 
 export interface InspectionNode {
@@ -852,7 +879,37 @@ export interface IngItem {
    * 照常参与库存与成本，只是主数据（分类/单位等）未被核对；补全后「确认转正」清除此标记。
    */
   pending?: boolean
+  /**
+   * 【W2 受控词表 Tag】受控词条 ID 数组 + 自定义营销 Tag（如 ['T002','夏季清仓']）。
+   * 只读渲染 / 检索用，不进任何成本 / 库存 / 损耗口径（ing.attr_set 写入）。
+   */
+  tags?: string[]
+  /**
+   * 【W3 产品超链接】质检报告 URL（对象存储/OSS 链接，报告本体独立存储）。
+   * 缺省无该键 = 未登记；ing.upsert 显式传入才写，未传不动存量。
+   */
+  qc_report_url?: string
   _u?: string
+}
+
+/** W2 受控词表词条 term{ id, name, category, aliases[], status }（GET /api/inventory/ing-terms） */
+export interface IngTerm {
+  id: string
+  name: string
+  /** 受控维度：产地 / 颜色 / 部位 / 等级 / 品种 / 规格 / 包装 / 口味 */
+  category: string
+  aliases: string[]
+  /** pending（申请）→ active（上架）/ rejected（驳回） */
+  status: 'pending' | 'active' | 'rejected' | string
+}
+
+/** GET /api/inventory/ing-terms 响应 */
+export interface IngTermsResp {
+  ok: boolean
+  categories: string[]
+  count: number
+  terms: IngTerm[]
+  source: 'data' | 'seed'
 }
 
 /* ---------------- 结算单（进货付款审批单） ---------------- */
@@ -909,6 +966,10 @@ export interface InventoryDoc {
   date?: string
   supplier?: string
   lines?: InventoryLine[]
+  /** 明细合计 Σ lines[].amount（让利前的金额） */
+  gross?: number
+  /** 整单优惠/抹零（≥0，让利不摊入成本，payable = gross − discount） */
+  discount?: number
   payable?: number
   payments?: DocPayment[]
   note?: string
@@ -1195,6 +1256,7 @@ export interface PosTable {
 
 export interface SnapshotData {
   ings?: IngItem[]
+  ing_terms?: IngTerm[]
   recv?: RecvRecord[]
   orders?: InventoryDoc[]
   /* data.restock 补货参数 / data.plans 建议单（FP-PO-17/19/20） */
@@ -1289,6 +1351,24 @@ export interface StaffScheduleResp {
   days: string[]
   staff: StaffScheduleRow[]
   totals: { people: number; hours: number; shifts: number }
+}
+
+/** GET /api/staff/roster —— 员工花名册（staff 主数据 + 历史推断并集） */
+export interface StaffRosterItem {
+  staff_id: string | null
+  staff_name: string
+  role: string | null
+  phone: string | null
+  hire_date: string | null
+  status: string
+  remark: string | null
+  source: string | null
+}
+export interface StaffRosterResp {
+  ok: boolean
+  rev?: number | string | null
+  count: number
+  staff: StaffRosterItem[]
 }
 
 /** GET /api/staff/clock */
@@ -2100,6 +2180,31 @@ export interface FinanceEnqueueResp {
 
 /* ---------------- 供应链 M10 /api/supply/*（后场：GET 只读聚合 + POST 入队） ---------------- */
 
+/** W3 供应商资质证照（后端 normCerts 归一为 {type, cert_no, expire_at, url}） */
+export interface SupplyVendorCert {
+  type: string
+  cert_no: string
+  expire_at: string
+  url: string
+}
+
+/** W3 供应商资质临期分级（certSummary 复用食安 certLevel/daysLeft，取最紧迫级别） */
+export interface SupplyVendorCertSummary {
+  level: CertLevel
+  days_left: number | null
+  next_expire_at: string | null
+  expired_count: number
+}
+
+/** W3 供应商资质临期清单项（只含 expired/red/orange 三档） */
+export interface SupplyVendorCertExpiring {
+  name: string
+  level: CertLevel
+  days_left: number | null
+  next_expire_at: string | null
+  expired_count: number
+}
+
 export interface SupplyVendorRow {
   id: string | number | null
   name: string
@@ -2109,6 +2214,12 @@ export interface SupplyVendorRow {
   level: number | null
   contact: string | null
   phone: string | null
+  /** 备注（编辑弹窗预填；后端 normVendor 缺省空串） */
+  note?: string
+  /** W3 资质证照列表 */
+  certs?: SupplyVendorCert[] | null
+  /** W3 资质临期分级（每行必带，无证照为 unknown） */
+  cert?: SupplyVendorCertSummary
 }
 export interface SupplyVendorsResp {
   ok: boolean
@@ -2120,20 +2231,38 @@ export interface SupplyVendorsResp {
   by_period: Record<string, number>
   low_rated: string[]
   advice: string[]
+  /** W3 资质临期清单（expired/red/orange） */
+  cert_expiring?: SupplyVendorCertExpiring[]
 }
 
 export interface SupplyQuote {
+  /** 原料键：有主数据时为原料 id，无主数据回落原料名 */
   ing: string
   src: string
+  /** 原报价（元 / per 口径单位） */
   price: number
+  per: string
   unit: string | null
+  /** 折库存单位价（元/库存单位），口径同 lib/price.js::quotePerStock */
+  perStock: number
+  note: string
   date: string | null
 }
 export interface SupplyCompareRow {
+  ingId: string
   name: string
+  /** 本店库存单位 / 采购单位换算（无主数据时为空） */
+  unit: string
+  buy: string
+  conv: number
+  /** 本店均价（元/库存单位） */
+  avg: number
   candidates: number
-  best: { src: string; price: number }
-  worst: { src: string; price: number }
+  best: { src: string; price: number; per: string; perStock: number }
+  worst: { src: string; price: number; per: string; perStock: number }
+  /** 最低折价 − 本店均价 */
+  diff: number
+  /** 候选 < 2 时为 null（单家报价不构成比价） */
   spread_pct: number | null
   quotes: SupplyQuote[]
 }
@@ -2172,9 +2301,17 @@ export interface SupplyAccountsResp {
 export interface SupplyOverviewResp {
   ok: boolean
   rev?: number | string | null
-  vendors: { count: number; by_category: Record<string, number>; low_rated: number }
+  vendors: {
+    count: number
+    by_category: Record<string, number>
+    low_rated: number
+    /** W3 资质临期/逾期家数（= cert_expiring.length，与 /api/supply/vendors 同源同数） */
+    cert_expiring_count?: number
+  }
   compare: { available: number; top: { name: string; spread_pct: number | null; best: { src: string; price: number } } | null }
   accounts: { count: number; payable: number; aging: { current: number; over30: number; over60: number; overdue: number }; need_settle: number }
+  /** W3 看板透出的资质临期清单（只含 expired/red/orange，与 /api/supply/vendors 同一份） */
+  cert_expiring?: SupplyVendorCertExpiring[]
   alerts: Array<{ level: string; text: string }>
   advice: string[]
 }
@@ -2205,6 +2342,22 @@ export interface PriceBest {
   note: string
 }
 
+/** FP-PRICE-06/08 报价明细行（原料比价行展开「报价记录」与「全部报价记录」共用） */
+export interface PriceQuoteRow {
+  id: string
+  src: string
+  /** 原报价（元 / per 口径单位） */
+  price: number
+  per: string
+  unit: string
+  date: string
+  note: string
+  /** 折库存单位价（元/库存单位） */
+  perStock: number
+  /** 对比本店：折价 − 本店均价 */
+  diff: number
+}
+
 export interface PriceReportRow {
   ingId: string
   name: string
@@ -2216,6 +2369,8 @@ export interface PriceReportRow {
   best: PriceBest | null
   diff: number | null
   savePct: number | null
+  /** 该原料的全部报价（日期倒序） */
+  quotes: PriceQuoteRow[]
   recent: Array<{ src: string; date: string }>
 }
 

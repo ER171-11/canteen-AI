@@ -75,6 +75,7 @@ function looksLikeSql(s) {
  *   insert(table, row) → rowid 或 null（失败返回 null，供算法回落）
  *   upsert(table, row, keys) → {rowid, matched}
  *   update(table, sets, where) → {rowcount}
+ *   remove(table, where) → {rowcount}（where 为空拒绝执行，防全表删）
  */
 function makeSqliteStore(dbPath) {
   const db = new DatabaseSync(dbPath, { timeout: 15000 });
@@ -137,6 +138,16 @@ function makeSqliteStore(dbPath) {
       }
       const rid = this.insert(table, row);
       return { rowid: rid, matched: false };
+    },
+
+    /** DELETE：where 为空对象时拒绝执行（防全表删），返回 {rowcount} */
+    remove(table, where) {
+      const w = Object.assign({}, where || {});
+      const wKeys = Object.keys(w).filter((k) => w[k] !== undefined && w[k] !== null);
+      if (!wKeys.length) return { rowcount: 0 };
+      const sql = 'DELETE FROM "' + table + '" WHERE ' + wKeys.map((k) => '"' + k + '"=?').join(' AND ');
+      const info = safeRun(sql, wKeys.map((k) => ser(w[k])));
+      return { rowcount: info ? Number(info.changes) : 0 };
     },
 
     update(table, sets, where) {

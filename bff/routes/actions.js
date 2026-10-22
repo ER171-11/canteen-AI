@@ -243,6 +243,70 @@ function propose(type, payload, meta) {
   };
 }
 
+/**
+ * 把动作应用到「云端快照副本」（BFF 侧执行已迁移算法）。
+ * 两个入口共用同一段逻辑：
+ *   ① 端点 POST /api/actions/{id}/apply（人工触发）；
+ *   ② 桌面端本地执行开关（CANTEEN_LOCAL_APPLY=1，确认后自动执行，见 confirm 分支）。
+ * @returns {Promise<{status:number, body:object}>} HTTP 状态码 + 响应体
+ */
+async function applyToSnapshot(id, ctx) {
+  const q = loadQueue();
+  if (sweep(q)) saveQueue(q);
+  const a = q.find((x) => x.id === id);
+  if (!a) return { status: 404, body: { ok: false, error: 'action not found', id } };
+  if (OPEN_STATES.indexOf(a.status) < 0) {
+    return { status: 409, body: { ok: false, error: 'invalid state: ' + a.status, id, status: a.status } };
+  }
+  // 前厅动作在美团承接模式下禁止写库（切换 self 后才允许消费）
+  if (a.front_house && !provider.isSelf()) {
+    return {
+      status: 423,
+      body: {
+        ok: false,
+        error: 'pending_provider: 前厅动作在美团承接模式下不写库，置 FRONT_OF_HOUSE_PROVIDER=self 后启用',
+        id, status: a.status
+      }
+    };
+  }
+  const { executeAction } = require('../lib/algorithms/execute');
+  const snap = loadSnapshot();
+  if (!snap) return { status: 409, body: { ok: false, error: 'no snapshot', id } };
+  /* await 兼容异步算法（如 safety.ai_judge 需调用视觉模型）；同步算法返回值直接可用 */
+  const out = await executeAction(snap, a);
+  if (!out.handled) {
+    // 未登记的算法：交回店内消费者（need-manual），不静默丢弃
+    return { status: 422, body: { ok: false, error: out.error, id, status: a.status, route: 'store-consumer' } };
+  }
+  if (!out.ok) {
+    a.status = '已驳回';
+    a.error = out.error;
+    a.executed_at = new Date().toISOString();
+    a.updated_at = a.executed_at;
+    saveQueue(q);
+    return { status: 200, body: { ok: false, id, status: a.status, error: a.error } };
+  }
+  // 落库新快照：rev 自增，保证 confirm 的 rev 校验语义
+  const newRev = typeof snap.rev === 'number' ? snap.rev + 1 : 1;
+  const next = Object.assign({}, out.snapshot, {
+    rev: newRev,
+    generated_at: new Date().toISOString()
+  });
+  store.writeJSON('snapshot.json', next);
+  a.status = '已执行';
+  a.executed_rev = newRev;
+  a.via = 'bff';
+  a.result = out.result == null ? null : out.result;
+  a.error = null;
+  a.executed_at = next.generated_at;
+  a.updated_at = a.executed_at;
+  saveQueue(q);
+  return {
+    status: 200,
+    body: { ok: true, id, status: a.status, rev: newRev, executed_at: a.executed_at, result: a.result }
+  };
+}
+
 async function handle(req, res, ctx, pathname) {
   // GET /api/actions?status=
   if (req.method === 'GET' && pathname === '/api/actions') {
@@ -304,69 +368,8 @@ async function handle(req, res, ctx, pathname) {
       ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: actions.write required' });
       return true;
     }
-    const id = am[1];
-    const q = loadQueue();
-    if (sweep(q)) saveQueue(q);
-    const a = q.find((x) => x.id === id);
-    if (!a) {
-      ctx.sendJSON(res, 404, { ok: false, error: 'action not found', id });
-      return true;
-    }
-    if (OPEN_STATES.indexOf(a.status) < 0) {
-      ctx.sendJSON(res, 409, { ok: false, error: 'invalid state: ' + a.status, id, status: a.status });
-      return true;
-    }
-    // 前厅动作在美团承接模式下禁止写库（切换 self 后才允许消费）
-    if (a.front_house && !provider.isSelf()) {
-      ctx.sendJSON(res, 423, {
-        ok: false,
-        error: 'pending_provider: 前厅动作在美团承接模式下不写库，置 FRONT_OF_HOUSE_PROVIDER=self 后启用',
-        id, status: a.status
-      });
-      return true;
-    }
-    const { executeAction } = require('../lib/algorithms/execute');
-    const snap = loadSnapshot();
-    if (!snap) {
-      ctx.sendJSON(res, 409, { ok: false, error: 'no snapshot', id });
-      return true;
-    }
-    /* await 兼容异步算法（如 safety.ai_judge 需调用视觉模型）；同步算法返回值直接可用 */
-    const out = await executeAction(snap, a);
-    if (!out.handled) {
-      // 未登记的算法：交回店内消费者（need-manual），不静默丢弃
-      ctx.sendJSON(res, 422, { ok: false, error: out.error, id, status: a.status, route: 'store-consumer' });
-      return true;
-    }
-    if (!out.ok) {
-      a.status = '已驳回';
-      a.error = out.error;
-      a.executed_at = new Date().toISOString();
-      a.updated_at = a.executed_at;
-      saveQueue(q);
-      ctx.sendJSON(res, 200, { ok: false, id, status: a.status, error: a.error });
-      return true;
-    }
-    // 落库新快照：rev 自增，保证 confirm 的 rev 校验语义
-    const store = require('../lib/store');
-    const newRev = typeof snap.rev === 'number' ? snap.rev + 1 : 1;
-    const next = Object.assign({}, out.snapshot, {
-      rev: newRev,
-      generated_at: new Date().toISOString()
-    });
-    store.writeJSON('snapshot.json', next);
-    a.status = '已执行';
-    a.executed_rev = newRev;
-    a.via = 'bff';
-    a.result = out.result == null ? null : out.result;
-    a.error = null;
-    a.executed_at = next.generated_at;
-    a.updated_at = a.executed_at;
-    saveQueue(q);
-    ctx.sendJSON(res, 200, {
-      ok: true, id, status: a.status, rev: newRev,
-      executed_at: a.executed_at, result: a.result
-    });
+    const r = await applyToSnapshot(am[1], ctx);
+    ctx.sendJSON(res, r.status, r.body);
     return true;
   }
 
@@ -436,7 +439,25 @@ async function handle(req, res, ctx, pathname) {
       a.confirmed_at = new Date().toISOString();
       a.updated_at = a.confirmed_at;
       saveQueue(q);
-      ctx.sendJSON(res, 200, { ok: true, id: a.id, status: a.status, rev: a.rev, confirmed_at: a.confirmed_at });
+      /* 桌面端本地执行开关（CANTEEN_LOCAL_APPLY=1）：
+       * 桌面端只跑 BFF、没有店内消费器（store-node/consumer），确认后没人执行队列，
+       * 动作会永远停在「待执行」——审批中心看着成功、单据和库存却永远不变。
+       * 开启后由 BFF 直接把动作应用到云端快照副本（复用 apply 同一段逻辑）。
+       * 注意：开启后动作不会再回店内消费器（状态直接变「已执行」），
+       *       故不可与真实店内节点（consumer）并用，只在「无店内节点」的桌面上开。 */
+      let applied = null;
+      if (process.env.CANTEEN_LOCAL_APPLY === '1') {
+        const r = await applyToSnapshot(id, ctx);
+        applied = Object.assign({ http: r.status }, r.body);
+      }
+      ctx.sendJSON(res, 200, {
+        ok: true,
+        id: a.id,
+        status: applied && applied.ok ? applied.status : a.status,
+        rev: a.rev,
+        confirmed_at: a.confirmed_at,
+        applied
+      });
       return true;
     }
 

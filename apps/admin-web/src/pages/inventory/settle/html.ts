@@ -108,6 +108,7 @@ export function settleSheet(
   <div class="sum">
     <div class="big">小写合计：<span class="num">¥${fmt(d.payable)}</span></div>
     <div class="big">人民币大写：${numToCn(d.payable)}</div>
+    <div class="sub">明细合计 ¥${fmt(d.gross)}\u3000|\u3000整单优惠 −¥${fmt(d.discount)}</div>
     <div class="sub">明细 ${d.count} 项 · 合计数量 ${fmt(d.totalQty, 3)}\u3000|\u3000应付全额 ¥${fmt(d.payable)}\u3000已付 ¥${fmt(d.paid)}\u3000欠款 ¥${fmt(d.debt)}</div>
   </div>
   <div class="signs">${signs}</div>

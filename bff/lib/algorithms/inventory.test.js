@@ -63,6 +63,8 @@ function normalize(d) {
     if (!o || typeof o !== 'object') return;
     for (const k of Object.keys(o)) {
       if (k === '_u' || k === 'ts') { o[k] = '<TS>'; continue; }
+      // W4 · ings[].type 为 Node 超集字段（食材/耗材语义分层），Python 参考实现尚未产出，平价比较前剥除（仅原料对象）
+      if (k === 'type' && typeof o.id === 'string' && /^I\d+$/.test(o.id)) { delete o[k]; continue; }
       if (k === 'id') {
         if (typeof o[k] === 'string' && /^[A-Z]+[0-9a-fA-F]{6,}$/.test(o[k])) o[k] = '<ID>';
         continue;
@@ -437,6 +439,26 @@ function main() {
     let e2 = false;
     try { inv.applyOrderCreate({ orders: [], ings: [] }, { supplier: 'X', items: [{ ing_id: 'g1', qty: 0, price: 1 }] }); } catch (e) { e2 = true; }
     assert.ok(e2, '数量为 0 应抛错');
+
+    // po.create 整单优惠/抹零：payable = 明细合计 − 优惠，行级 amount/unitCost 不动（采购单不入库、不影响均价）
+    const d3 = {
+      ings: [{ id: 'g1', name: '面粉', unit: '斤', buy: '袋', sup: '供应商A', avg: 50, conv: 25 }],
+      suppliers: ['供应商A'],
+      orders: []
+    };
+    inv.applyOrderCreate(d3, {
+      date: '2026-10-14', supplier: '供应商A', discount: 20,
+      items: [{ ing_id: 'g1', qty: 2, price: 50 }]
+    });
+    const od = d3.orders[0];
+    assert.strictEqual(od.gross, 100, '明细合计 = Σ qty×price 不变');
+    assert.strictEqual(od.discount, 20, '整单优惠落库');
+    assert.strictEqual(od.payable, 80, '应付 = 明细合计 − 优惠');
+    assert.strictEqual(od.lines[0].amount, 100, '行级 amount 不动');
+    assert.strictEqual(od.lines[0].unitCost, 2, '行级 unitCost 不动（让利不摊入成本）');
+    let e5 = false;
+    try { inv.applyOrderCreate({ orders: [], ings: [{ id: 'g1', conv: 1 }] }, { supplier: 'X', discount: 101, items: [{ ing_id: 'g1', qty: 1, price: 1 }] }); } catch (e) { e5 = true; }
+    assert.ok(e5, '优惠超过明细合计应抛错');
     pass++;
     console.log('  PASS po.create (standalone)');
 
@@ -461,8 +483,61 @@ function main() {
     let e3 = false;
     try { inv.applyOrderEdit({ orders: [] }, { order_id: 'nope' }); } catch (err) { e3 = true; }
     assert.ok(e3, '找不到采购单应抛错');
+
+    // po.edit 整单优惠/抹零：应付重算，行级 amount/unitCost 不动
+    inv.applyOrderEdit(data2, { order_id: 'o1', date: '2026-10-13', supplier: '新供应商',
+      items: [{ ing_id: 'g1', qty: 4, price: 50 }], discount: 15 });
+    const ed = data2.orders[0];
+    assert.strictEqual(ed.gross, 200, '明细合计 = Σ qty×price 不变');
+    assert.strictEqual(ed.discount, 15, '整单优惠落库');
+    assert.strictEqual(ed.payable, 185, '应付 = 明细合计 − 优惠');
+    assert.strictEqual(ed.lines[0].amount, 200, '行级 amount 不动');
+    assert.strictEqual(ed.lines[0].unitCost, 2, '行级 unitCost 不动（让利不摊入成本）');
+    let e6 = false;
+    try { inv.applyOrderEdit(data2, { order_id: 'o1', items: [{ ing_id: 'g1', qty: 1, price: 1 }], discount: 999 }); } catch (err) { e6 = true; }
+    assert.ok(e6, '优惠超过明细合计应抛错');
     pass++;
     console.log('  PASS po.edit (standalone)');
+  }
+
+  /* ---------- po.create / po.edit：新增原料（旧版 openNewIngForPo 回归） ---------- */
+  {
+    // po.create：明细含 name 无 ing_id → 按名自动建档（待完善草稿），不入库
+    const d = {
+      ings: [{ id: 'g1', name: '面粉', unit: '斤', buy: '袋', avg: 50, conv: 25 }],
+      suppliers: ['供应商A'],
+      orders: []
+    };
+    inv.applyOrderCreate(d, {
+      date: '2026-10-15', supplier: '供应商A',
+      items: [{ name: '娃娃菜', unit: '斤', cat: '蔬菜', qty: 3, price: 2.5 }]
+    });
+    assert.strictEqual(d.ings.length, 2, '自动建档后档案数 2');
+    const ni = d.ings.find((g) => g.name === '娃娃菜');
+    assert.ok(ni, '新原料应存在于档案');
+    assert.strictEqual(ni.pending, true, '新原料应为待完善草稿');
+    assert.strictEqual(d.orders[0].lines[0].ing, ni.id, '行原料引用应指向新档案 id');
+    assert.strictEqual(d.orders[0].payable, 7.5);
+    // 无 ing_id 但名称命中已有档案 → 不重复建档
+    inv.applyOrderCreate(d, {
+      date: '2026-10-15', supplier: '供应商A',
+      items: [{ name: '面粉', qty: 1, price: 50 }]
+    });
+    assert.strictEqual(d.ings.length, 2, '名称命中不得重复建档');
+    assert.strictEqual(d.orders[1].lines[0].ing, 'g1');
+
+    // po.edit：同样支持按名自动建档
+    const d2 = {
+      ings: [{ id: 'g1', name: '面粉', buy: '袋', conv: 25 }],
+      orders: [{ id: 'o1', no: 'CG1', date: '2026-10-01', supplier: '旧供应商', payable: 100, lines: [] }]
+    };
+    inv.applyOrderEdit(d2, { order_id: 'o1', date: '2026-10-13', supplier: '新供应商',
+      items: [{ name: '萝卜', unit: '斤', cat: '蔬菜', qty: 4, price: 3 }] });
+    assert.strictEqual(d2.ings.length, 2, '编辑自动建档后档案数 2');
+    assert.ok(d2.ings.find((g) => g.name === '萝卜'), '萝卜应存在于档案');
+    assert.strictEqual(d2.orders[0].lines[0].ing, d2.ings.find((g) => g.name === '萝卜').id);
+    pass++;
+    console.log('  PASS po.create/po.edit 新增原料 (standalone)');
   }
 
   /* ---------- restock.config / ignore / adjust：新增动作（旧版为浏览器内 JS，仅 Node 单测） ---------- */
@@ -509,6 +584,33 @@ function main() {
     assert.ok(e4, '无建议单时应抛错');
     pass++;
     console.log('  PASS restock.ignore/adjust (standalone)');
+  }
+
+  /* ---------- quote.upsert：归属键归一 + 默认供应商（Node 超集，见 registry/inventory 注释） ---------- */
+  {
+    /* 历史脏数据：q.ing 存的是原料名；本次按原料 id 补录同一供应商 → 应「更新」而非「重建」 */
+    const d = {
+      ings: [{ id: 'I1', name: '东古一品鲜500ml', sup: '' }],
+      quotes: [{ id: 'Q200', ing: '东古一品鲜500ml', src: '测试商', price: 1, per: 'buy', date: '2026-10-01' }]
+    };
+    const m1 = inv.applyQuoteUpsert(d, { ing: 'I1', name: '东古一品鲜500ml', src: '测试商', price: 1.5, per: 'buy' });
+    assert.strictEqual(m1, 'quote 更新 I1@测试商 → ¥1.5', 'msg 应按原料 id 归并更新: ' + m1);
+    assert.strictEqual(d.quotes.length, 1, '同一供应商同一原料不得重复建条');
+    assert.strictEqual(d.quotes[0].ing, 'I1', '历史按名录入的行应就地归一为原料 id');
+    assert.strictEqual(d.quotes[0].price, 1.5, '价格应被覆盖');
+
+    /* 覆盖既有报价时勾「设为默认供应商」同样生效（FP-PRICE-15） */
+    inv.applyQuoteUpsert(d, { ing: 'I1', name: '东古一品鲜500ml', src: '供应商B', price: 2, set_default_sup: true });
+    assert.strictEqual(d.ings[0].sup, '供应商B', '新建分支应写入默认供应商');
+    inv.applyQuoteUpsert(d, { ing: 'I1', name: '东古一品鲜500ml', src: '供应商B', price: 1.8, set_default_sup: true });
+    assert.strictEqual(d.ings[0].sup, '供应商B', '覆盖既有报价时默认供应商应保持生效');
+
+    /* 名称找不到对应原料时不得误改：仍按原样建条 */
+    const d2 = { ings: [{ id: 'I9', name: '面粉' }], quotes: [] };
+    inv.applyQuoteUpsert(d2, { ing: '未登记原料', name: '未登记原料', src: 'A', price: 3 });
+    assert.strictEqual(d2.quotes[0].ing, '未登记原料', '无对应原料时保留原键，不编造 id');
+    pass++;
+    console.log('  PASS quote.upsert 归属键归一/默认供应商 (standalone)');
   }
 
   console.log('[inventory.test] PASS ' + pass + ' cases');

@@ -2,6 +2,7 @@
 /*
  * routes/staff.js — M2 排班员工模块 API（数据源：店内快照 ext.staff_* ，只读聚合）
  *
+ *   GET  /api/staff/roster                     员工花名册（staff 主数据 + 历史推断并集）
  *   GET  /api/staff/schedule?week=YYYY-MM-DD   周排班 A/B/C 班矩阵 + 工时汇总
  *   GET  /api/staff/clock?date=YYYY-MM-DD      应到/实到/迟到/缺勤（阈值可配）
  *   GET  /api/staff/perf                       绩效排行
@@ -13,6 +14,7 @@
  *   POST /api/staff/swaps/:id/reject           驳回
  *   POST /api/staff/swaps/:id/approve          店长审批 → 写回入队（rev）
  *   GET  /api/staff/quiz                       关键工艺抽查题库
+ *   POST /api/staff                            新增员工（staff.upsert 入队，工号可留空自动生成）
  *   POST /api/staff/uniform                    着装合规入档（uniform.log 入队）
  *   POST /api/staff/quiz/pass                  培训/抽查通过（staff.train_pass 入队）
  *
@@ -91,23 +93,92 @@ function thresholds() { return attendance.thresholdsOf(effectiveConfig()); }
 
 /* ---------------- 只读聚合 ---------------- */
 
+/**
+ * 员工花名册：以「在册员工」并集为行基准（不随当周是否排班增减），
+ * 主数据优先取 staff 花名册表（新增员工即使未排班也会在册），
+ * 再并集 staff_shifts ∪ staff_train ∪ staff_perf 补齐历史员工。当周无排班的格子显示 '-'（见 TST-M2-01 1.5）。
+ */
+function staffRoster(ext) {
+  const map = new Map();
+  const add = (id, name, role, extra) => {
+    const key = trim(id);
+    if (!key) return;
+    const cur = map.get(key) || { staff_id: id, staff_name: name || id, role: role || null };
+    if (!cur.staff_name && name) cur.staff_name = name;
+    if (!cur.role && role) cur.role = role;
+    if (extra) {
+      if (cur.phone == null && extra.phone != null) cur.phone = extra.phone;
+      if (cur.hire_date == null && extra.hire_date != null) cur.hire_date = extra.hire_date;
+      if (cur.status == null && extra.status != null) cur.status = extra.status;
+      if (cur.remark == null && extra.remark != null) cur.remark = extra.remark;
+      if (cur.source == null && extra.source != null) cur.source = extra.source;
+    }
+    map.set(key, cur);
+  };
+  arr(ext.staff).forEach((s) => add(trim(s && s.staff_id), trim(s && s.staff_name), trim(s && s.role), {
+    phone: trim(s && s.phone), hire_date: trim(s && s.hire_date),
+    status: trim(s && s.status), remark: trim(s && s.remark), source: trim(s && s.source)
+  }));
+  arr(ext.staff_shifts).forEach((s) => add(trim(s && s.staff_id), trim(s && s.staff_name), trim(s && s.role)));
+  arr(ext.staff_train).forEach((s) => add(trim(s && s.staff_id), trim(s && s.staff_name), null));
+  arr(ext.staff_perf).forEach((s) => add(trim(s && s.staff_id), trim(s && s.staff_name), null));
+  return [...map.values()];
+}
+
+/** 员工花名册（完整字段，供 /api/staff/roster 展示与「添加员工」落点） */
+function rosterPayload() {
+  const { ext, snap } = loadExt();
+  const staff = staffRoster(ext).map((r) => ({
+    staff_id: r.staff_id || null,
+    staff_name: r.staff_name,
+    role: r.role || null,
+    phone: r.phone || null,
+    hire_date: r.hire_date || null,
+    status: r.status || '在岗',
+    remark: r.remark || null,
+    source: r.source || null
+  }));
+  staff.sort((a, b) => String(a.staff_id || '').localeCompare(String(b.staff_id || '')));
+  return { ok: true, rev: snap ? snap.rev : null, count: staff.length, staff };
+}
+
 function schedulePayload(weekStart) {
   const { ext } = loadExt();
   const days = weekOf(weekStart);
   const shifts = arr(ext.staff_shifts);
   const weekShifts = shifts.filter((s) => days.indexOf(trim(s && s.date)) >= 0);
 
-  const staff = [];
+  // 行 = 在册员工花名册（稳定）；名册外的人忽略。缺格保持 '-'。
+  const roster = staffRoster(ext);
   const idx = {};
+  const staff = roster.map((r) => {
+    const row = { staff_id: r.staff_id || null, staff_name: r.staff_name, role: r.role || null, cells: {}, hours: 0, days: 0 };
+    idx[r.staff_id || r.staff_name] = row;
+    return row;
+  });
   for (const s of weekShifts) {
     const id = trim(s && s.staff_id) || trim(s && s.staff_name);
-    if (!id) continue;
-    if (!idx[id]) {
-      idx[id] = { staff_id: trim(s.staff_id) || null, staff_name: trim(s.staff_name) || id, role: trim(s.role) || null, cells: {}, hours: 0, days: 0 };
-      staff.push(idx[id]);
-    }
+    if (!id || !idx[id]) continue;
     const row = idx[id];
     if (!row.role && trim(s.role)) row.role = trim(s.role);
+  }
+  // 同一员工同日可能有多条记录（历史换班/改班残留）：口径「休」优先——
+  // 当日存在 休/休息/请假 行则该日按休计（0 工时），忽略残留班次行；
+  // 否则同日多行取最后一条（与格子显示口径一致），避免工时重复累加。
+  const byDay = new Map(); // 'id@date' → 生效班次行
+  for (const s of weekShifts) {
+    const id = trim(s && s.staff_id) || trim(s && s.staff_name);
+    if (!id || !idx[id]) continue;
+    const key = id + '@' + trim(s.date);
+    const prev = byDay.get(key);
+    if (!prev) { byDay.set(key, s); continue; }
+    const prevRest = shiftCode(prev.shift) === '休';
+    const curRest = shiftCode(s.shift) === '休';
+    if (curRest || !prevRest) byDay.set(key, s);
+  }
+  for (const s of byDay.values()) {
+    const id = trim(s && s.staff_id) || trim(s && s.staff_name);
+    const row = idx[id];
     const code = shiftCode(s.shift);
     row.cells[trim(s.date)] = code;
     if (code !== '休' && code !== '-') {
@@ -124,7 +195,7 @@ function schedulePayload(weekStart) {
     days,
     staff,
     totals: {
-      people: staff.length,
+      people: staff.filter((r) => r.days > 0).length, // 在岗人数 = 本周实际排班人数
       hours: Math.round(staff.reduce((n, r) => n + r.hours, 0) * 10) / 10,
       shifts: staff.reduce((n, r) => n + r.days, 0)
     },
@@ -234,6 +305,9 @@ function handle(req, res, ctx, pathname) {
 
   // ---- 只读 ----
   if (m === 'GET' || m === 'HEAD') {
+    if (pathname === '/api/staff/roster') {
+      ctx.sendJSON(res, 200, rosterPayload()); return true;
+    }
     if (pathname === '/api/staff/schedule') {
       ctx.sendJSON(res, 200, schedulePayload(ctx.query.get('week'))); return true;
     }
@@ -268,6 +342,26 @@ function handle(req, res, ctx, pathname) {
       const th = attendance.thresholdsOf({ attendance: body.attendance || body });
       store.writeJSON(CONFIG_FILE, { attendance: th, updated_at: new Date().toISOString(), by: operatorOf(ctx, body) });
       ctx.sendJSON(res, 200, { ok: true, attendance: th, msg: '阈值已更新（BFF 本地生效）' });
+      return true;
+    })();
+  }
+
+  if (pathname === '/api/staff') {
+    if (!needWrite(ctx, res)) return true;
+    return (async () => {
+      const body = await readJson(ctx, req);
+      const op = operatorOf(ctx, body);
+      const id = doEnqueue('staff.upsert', {
+        staff_id: trim(body.staff_id) || null,      // 空则由算法自动生成工号
+        staff_name: trim(body.staff_name) || null,
+        role: trim(body.role) || null,
+        phone: trim(body.phone) || null,
+        hire_date: body.hire_date ? trim(body.hire_date) : null,
+        status: trim(body.status) || '在岗',
+        remark: trim(body.remark) || null,
+        source: 'admin.staff'
+      }, op, ctx.traceId);
+      ctx.sendJSON(res, 200, { ok: true, code: 200, msg: 'queued', data: { id } });
       return true;
     })();
   }

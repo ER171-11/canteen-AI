@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Card, Col, List, Row, Segmented, Skeleton, Statistic, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Col, List, Modal, Row, Segmented, Skeleton, Statistic, Tag, Typography } from 'antd'
 import { useAnalysisPeriod, PERIODS } from '../../hooks/usePeriodSwitch'
-import { postAnalysisSuggestions, type AnalysisSuggestion } from '../../api'
+import { postAnalysisSuggestions, submitAndConfirmAction, type AnalysisSuggestion } from '../../api'
 import { COLORS } from '../../theme'
 
 function TrendLine({ points }: { points: { date: string; revenue: number }[] }) {
@@ -75,6 +75,40 @@ export default function AnalysisTrendPage() {
   const [suggestions, setSuggestions] = useState<AnalysisSuggestion[]>([])
   const [weatherConclusion, setWeatherConclusion] = useState('')
   const [aiNote, setAiNote] = useState('')
+  const [applied, setApplied] = useState<Record<number, string>>({})
+
+  // 采纳触达：把 AI 建议登记为动作，经确认台（入队 → 确认 → 待执行）才落库，AI 绝不自动触达
+  const adopt = (index: number, s: AnalysisSuggestion) => {
+    const allow = s.action?.type === 'member.coupon' || s.title.includes('会员')
+    if (!allow) return
+    const params = (s.action?.params || {}) as { discount?: number; target?: string }
+    const discount = typeof params.discount === 'number' ? params.discount : 0.8
+    const target = params.target || 'inactive_30d'
+    Modal.confirm({
+      title: '采纳并触达（需确认）',
+      content: `确认将建议「${s.title}」登记为动作，向「${target}」目标会员推送 ${(discount * 10).toFixed(1)} 折券？动作将进入确认台「待执行」，由消费器落库后生效（AI 不会自动触达）。`,
+      okText: '确认采纳',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const res = await submitAndConfirmAction({
+            type: 'member.coupon',
+            operator: 'boss',
+            payload: { title: s.title, content: s.content, discount, target },
+          })
+          if (res.confirmed) {
+            Modal.success({ title: '已采纳', content: '动作进入「待执行」，经确认台、由消费器落库后生效。可在「动作队列」页查看。' })
+          } else {
+            Modal.warning({ title: '已入队但未确认', content: `动作 ID：${res.id || '-'}（可能 rev 不匹配，请到动作队列手动确认）` })
+          }
+          setApplied((p) => ({ ...p, [index]: res.id || 'done' }))
+        } catch (e: any) {
+          Modal.error({ title: '采纳失败', content: String(e?.message || e || '未知错误') })
+        }
+      },
+    })
+  }
+
   useEffect(() => {
     postAnalysisSuggestions()
       .then((r) => {
@@ -125,8 +159,22 @@ export default function AnalysisTrendPage() {
         <List
           size="small"
           dataSource={suggestions}
-          renderItem={(s) => (
-            <List.Item>
+          renderItem={(s, index) => (
+            <List.Item
+              actions={
+                s.action?.type === 'member.coupon' || s.title.includes('会员')
+                  ? [
+                      applied[index] ? (
+                        <Tag key="done" color="green">已采纳</Tag>
+                      ) : (
+                        <Button key="adopt" type="link" size="small" onClick={() => adopt(index, s)}>
+                          采纳触达
+                        </Button>
+                      ),
+                    ]
+                  : []
+              }
+            >
               <List.Item.Meta
                 title={s.title}
                 description={s.content}

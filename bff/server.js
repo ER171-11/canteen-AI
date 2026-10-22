@@ -61,6 +61,7 @@ const ROUTES = [
   require('./routes/snapshot'),
   require('./routes/report'),
   require('./routes/inventory'),
+  require('./routes/sales_import'),
   require('./routes/actions'),
   require('./routes/sync'),
   require('./routes/agent'),
@@ -76,6 +77,8 @@ const ROUTES = [
   require('./routes/equipment'),
   require('./routes/finance'),
   require('./routes/supply'),
+  // 检索域隔离 + 搜索索引字段白名单（W5，只读）
+  require('./routes/search'),
   require('./routes/loss'),
   require('./routes/analysis'),
   require('./routes/reserved'),
@@ -281,6 +284,36 @@ const server = http.createServer(async (req, res) => {
     }
   }
 });
+
+/*
+ * 监听失败必须致命并退出：
+ *   listen 失败（常见 EADDRINUSE：8787 已被旧的 BFF / 别的程序占用）只会触发 'error' 事件，
+ *   若无人接管就冒泡成 uncaughtException，被下面的兜底 handler 吞掉 —— 进程于是「活着但不服务」，
+ *   启动脚本与用户都以为后端已就绪，前端却只能看到「BFF 离线 / 未就绪」。这里直接报错退出。
+ */
+server.on('error', (err) => {
+  const code = err && err.code;
+  console.error('[BFF] 启动失败：无法监听 ' + HOST + ':' + PORT + ' —— ' + ((err && err.message) || err));
+  if (code === 'EADDRINUSE') {
+    console.error('[BFF] 端口被占用：关闭旧的 BFF 窗口/进程，或用 BFF_PORT=<其它端口> 重新启动。');
+  } else if (code === 'EACCES') {
+    console.error('[BFF] 端口无监听权限：换一个 BFF_PORT，或以管理员身份运行。');
+  }
+  process.exit(1);
+});
+
+/* 启动时做一次 schema 自动迁移（数据继承）：老版本快照自动补齐到当前 schema，rev 不变 */
+try {
+  const schema = require('./lib/schema');
+  const r = schema.migrateOnBoot();
+  if (r.migrated) {
+    console.log(`[BFF][schema] 数据已迁移 v${r.from} → v${r.to}（${r.steps.length} 步），备份=${r.backup || '无'}`);
+  } else if (r.error) {
+    console.error(`[BFF][schema] 数据迁移失败，数据保持原样：${r.error}${r.backup ? '，备份=' + r.backup : ''}`);
+  }
+} catch (e) {
+  console.error('[BFF][schema] 启动迁移异常：' + ((e && e.message) || e));
+}
 
 server.listen(PORT, HOST, () => {
   console.log(`[BFF] listening http://${HOST}:${PORT}`);

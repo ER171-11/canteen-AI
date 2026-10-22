@@ -159,6 +159,7 @@ export default function StandardRecipeCard({
     },
   ]
 
+  const method = recipe.method ?? []
   const steps = recipe.steps ?? []
 
   return (
@@ -229,7 +230,17 @@ export default function StandardRecipeCard({
       <Typography.Title level={5} style={{ marginTop: 16 }}>
         METHOD · 制作方法
       </Typography.Title>
-      {steps.length > 0 ? (
+      {method.length > 0 ? (
+        /* 标准卡口径：docx 逐条 SOP 已归并为 和面/调馅/打水上劲/包制/熟制 5 段 */
+        <ol style={{ paddingLeft: 20, margin: 0 }}>
+          {method.map((m, i) => (
+            <li key={`${m.stage}-${i}`} style={{ marginBottom: 6, lineHeight: 1.7 }}>
+              <strong>{m.stage}：</strong>
+              {m.text}
+            </li>
+          ))}
+        </ol>
+      ) : steps.length > 0 ? (
         <ol style={{ paddingLeft: 20, margin: 0 }}>
           {steps.map((s, i) => (
             <li key={i} style={{ marginBottom: 4 }}>

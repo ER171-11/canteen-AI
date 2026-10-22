@@ -35,6 +35,30 @@ export interface RecvImportNewIng {
   cat: string
 }
 
+/** 手动指定列：把「品名/数量/单价…」直接对到具体列（旧版 openColMap 同款） */
+export interface RecvImportOverride {
+  /** 表头所在行（0 基）；-1 = 无表头（第一行即数据） */
+  rowIndex: number
+  /** 字段 → 列号（0 基） */
+  map: Record<string, number>
+}
+
+/** 预览面板所需的原始网格（前 25 行 × 前 30 列），供「手动指定列」 */
+export interface RecvImportHead {
+  format: string
+  sheet: string
+  sheetCount: number
+  rows: string[][]
+  headerRowIndex: number
+  colMap: Record<string, number> | null
+  /** 字段 → 中文列名 */
+  labels: Record<string, string>
+  /** 字段顺序 */
+  fields: string[]
+  /** 字段 → 支持的列名别名 */
+  aliases: Record<string, string[]>
+}
+
 /**
  * POST /api/inventory/recv/import/preview 的**成功**响应。
  * 失败时 BFF 返回 4xx + {ok:false,error}，调用方从 error.response.data.error 取文案展示
@@ -58,6 +82,8 @@ export interface RecvImportPreview {
   single: boolean
   totalLines: number
   totalAmount: number
+  /** 手动指定列面板所需的原始网格（成功/失败都会回传） */
+  head: RecvImportHead
 }
 
 /**
@@ -65,10 +91,12 @@ export interface RecvImportPreview {
  *
  * 红线：本端点在 BFF 侧不写文件、不改快照、不入队；真正的写要等用户点「确认导入」后
  * 由页面投**一个** recv.import 动作走 /api/actions（ADR-004 §2.4：批内原子）。
+ * 传 override 即为「手动指定列」重解析（同一文件、同一端点，服务端无状态）。
  */
 export async function previewRecvImport(body: {
   fileName: string
   contentBase64: string
+  override?: RecvImportOverride
 }): Promise<RecvImportPreview> {
   const { data } = await client.post<RecvImportPreview>('/inventory/recv/import/preview', body)
   return data

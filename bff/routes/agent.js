@@ -219,7 +219,7 @@ function answerFromSnapshot(question, snap) {
       const recipes = Array.isArray(snap.ext && snap.ext.recipes) ? snap.ext.recipes : [];
       for (const r of recipes) {
         try {
-          const card = costLib.buildCostCard(r, data);
+          const card = costLib.buildCostCard(r, data, recipes);
           if (card && card.gross_margin != null) {
             rows.push({
               name: r.name || r.sku_id, color: r.color || '',

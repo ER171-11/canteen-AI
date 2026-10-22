@@ -183,7 +183,7 @@ function realAnalysis(snap, paramOverrides) {
       const sku = d && d.sku_id != null ? String(d.sku_id) : null;
       if (costLib && sku && extRecipes[sku]) {
         try {
-          const card = costLib.buildCostCard(extRecipes[sku], data);
+          const card = costLib.buildCostCard(extRecipes[sku], data, arr(extOf(snap).recipes));
           if (card && card.gross_margin != null) margin = card.gross_margin / 100;
         } catch (e) { /* 回落静态 */ }
       }

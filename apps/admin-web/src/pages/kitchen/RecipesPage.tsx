@@ -21,25 +21,18 @@ import {
 } from 'antd'
 import { fetchAdminDishes, fetchKitchenRecipe, fetchKitchenRecipes, fetchSnapshot, submitAndConfirmAction } from '../../api'
 import type { CostCard, Dish, RecipeItem } from '../../api/types'
+import { calcLineCost, resolveIngName } from '../../lib/recipeCostCore'
 import ColorBadge from './components/ColorBadge'
 import BomTable from './components/BomTable'
 import StandardRecipeCard from './components/StandardRecipeCard'
+import RecipeImportModal from './components/RecipeImportModal'
 import MockAlert from './components/MockAlert'
+import { downloadRecipeTemplate } from './recipeTemplate'
 import { colorMeta, colorOrderKey, FIVE_COLOR_ORDER } from './colorMeta'
 import { COLORS } from '../../theme'
 
 type BomFormLine = { name?: string; qty?: number; unit?: string }
 type IngOpt = { id: string; name: string; unit?: string; avg?: number; yld?: number }
-
-/** 单行成本预览：毛料消耗 = 净料用量 / 出成率；行成本 = 毛料 × 均价（元/库存单位） */
-function calcLine(line: BomFormLine | undefined, ing: IngOpt | undefined) {
-  const qty = Number(line?.qty)
-  if (!ing || !(qty > 0)) return null
-  const yld = ing.yld && ing.yld > 0 ? ing.yld : 1
-  const gross = qty / yld
-  const avg = typeof ing.avg === 'number' && isFinite(ing.avg) && ing.avg > 0 ? ing.avg : null
-  return { gross, lc: avg != null ? gross * avg : null }
-}
 
 function linesFromBom(arr: RecipeItem['main']): BomFormLine[] {
   if (!arr?.length) return [{ name: '', qty: undefined, unit: 'g' }]
@@ -61,9 +54,11 @@ function linesFromBom(arr: RecipeItem['main']): BomFormLine[] {
 export default function RecipesPage() {
   const [items, setItems] = useState<RecipeItem[]>([])
   const [ings, setIngs] = useState<IngOpt[]>([])
+  const [ingAlias, setIngAlias] = useState<Record<string, string>>({})
   const [isMock, setIsMock] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<RecipeItem | null>(null)
   const [costCard, setCostCard] = useState<CostCard | null>(null)
@@ -75,18 +70,24 @@ export default function RecipesPage() {
   const watched = Form.useWatch([], form) as Record<string, unknown> | undefined
   const linesOf = (key: 'main' | 'aux' | 'seasoning') =>
     (watched?.[key] as BomFormLine[] | undefined) || []
+  /* 原料名 → IngOpt 索引（供 resolveIngName 精确命中） */
+  const byName = useMemo(() => {
+    const m: Record<string, IngOpt> = {}
+    for (const g of ings) if (g.name) m[g.name] = g
+    return m
+  }, [ings])
   const bomSummary = useMemo(() => {
     let total = 0
     for (const k of ['main', 'aux', 'seasoning'] as const) {
       for (const line of linesOf(k)) {
-        const ing = line?.name ? ings.find((g) => g.name === line.name) : undefined
-        const c = calcLine(line, ing)
-        if (c?.lc != null) total += c.lc
+        const ing = line?.name ? resolveIngName(line.name, ingAlias, byName) : undefined
+        const c = calcLineCost(line?.qty, ing)
+        if (c?.lineCost != null) total += c.lineCost
       }
     }
     const price = Number(watched?.price)
     return { total, gm: price > 0 ? (price - total) / price : null, price }
-  }, [watched, ings])
+  }, [watched, ings, ingAlias, byName])
 
   const load = useCallback(() => {
     fetchKitchenRecipes()
@@ -121,8 +122,17 @@ export default function RecipesPage() {
               yld: g.yld,
             })),
         )
+        const alias = (snap.data?.config as { ing_alias?: unknown } | undefined)?.ing_alias
+        setIngAlias(
+          alias && typeof alias === 'object' && !Array.isArray(alias)
+            ? (alias as Record<string, string>)
+            : {},
+        )
       })
-      .catch(() => setIngs([]))
+      .catch(() => {
+        setIngs([])
+        setIngAlias({})
+      })
     fetchAdminDishes()
       .then((resp) => setDishes(resp.items ?? []))
       .catch(() => setDishes([]))
@@ -214,15 +224,29 @@ export default function RecipesPage() {
   return (
     <div>
       {isMock && <MockAlert endpoint="/api/kitchen/recipes" />}
+      <RecipeImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onQueued={load}
+      />
       <Row gutter={16}>
         <Col xs={24} md={7} lg={6}>
           <Card
             title="配方列表"
             size="small"
             extra={
-              <Button type="link" size="small" onClick={() => openEdit(null)}>
-                新增
-              </Button>
+              <Space size={0}>
+                {/* FP-DISH-16/17：批量导入食谱卡 + 下载模板（旧版 #tab-dish 工具条同款入口） */}
+                <Button type="link" size="small" onClick={() => setImportOpen(true)}>
+                  批量导入
+                </Button>
+                <Button type="link" size="small" onClick={downloadRecipeTemplate}>
+                  下载模板
+                </Button>
+                <Button type="link" size="small" onClick={() => openEdit(null)}>
+                  新增
+                </Button>
+              </Space>
             }
             styles={{ body: { maxHeight: '72vh', overflow: 'auto' } }}
           >
@@ -291,7 +315,7 @@ export default function RecipesPage() {
                   <Button type="primary" onClick={() => openEdit(selected)}>
                     编辑配料
                   </Button>
-                  <Tag color={COLORS.purple}>色源：{colorMeta(selected.color).source}</Tag>
+                  <Tag color={COLORS.purple}>主料说明：{colorMeta(selected.color).source}</Tag>
                 </Space>
               }
             >
@@ -393,10 +417,10 @@ export default function RecipesPage() {
                 <StandardRecipeCard recipe={selected} card={costCard} />
               ) : (
                 <>
-                  <Typography.Title level={5}>面皮（色源）face_main</Typography.Title>
+                  <Typography.Title level={5}>主料说明 face_main</Typography.Title>
                   <BomTable data={selected.face_main} />
                   <Typography.Title level={5} style={{ marginTop: 16 }}>
-                    主馅 main
+                    主料 main
                   </Typography.Title>
                   <BomTable data={selected.main} />
                   <Typography.Title level={5} style={{ marginTop: 16 }}>
@@ -404,7 +428,7 @@ export default function RecipesPage() {
                   </Typography.Title>
                   <BomTable data={selected.aux} />
                   <Typography.Title level={5} style={{ marginTop: 16 }}>
-                    调味 seasoning
+                    调料 seasoning
                   </Typography.Title>
                   <BomTable data={selected.seasoning} />
                 </>
@@ -496,7 +520,7 @@ export default function RecipesPage() {
           </Form.Item>
           <Space style={{ width: '100%' }} size={12}>
             <Form.Item name="name" label="菜谱名" rules={[{ required: true }]} style={{ flex: 1 }}>
-              <Input placeholder="红色·冬菇荸荠饺" />
+              <Input placeholder="如：招牌红烧肉" />
             </Form.Item>
             <Form.Item name="color" label="色别" style={{ width: 120 }}>
               <Select
@@ -508,11 +532,11 @@ export default function RecipesPage() {
             </Form.Item>
           </Space>
           <Space style={{ width: '100%' }} size={12}>
-            <Form.Item name="filling" label="馅心/副标题" style={{ flex: 1 }}>
+            <Form.Item name="filling" label="副标题" style={{ flex: 1 }}>
               <Input />
             </Form.Item>
-            <Form.Item name="face_main" label="面皮色源" style={{ flex: 1 }}>
-              <Input placeholder="火龙果汁" />
+            <Form.Item name="face_main" label="主料说明" style={{ flex: 1 }}>
+              <Input placeholder="如：五花肉500g" />
             </Form.Item>
           </Space>
           <Space style={{ width: '100%' }} size={12}>
@@ -536,7 +560,7 @@ export default function RecipesPage() {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                     <Typography.Text strong>
-                      {key === 'main' ? '主馅' : key === 'aux' ? '辅料' : '调味'}
+                      {key === 'main' ? '主料' : key === 'aux' ? '辅料' : '调料'}
                     </Typography.Text>
                     <Button type="link" size="small" onClick={() => add({ unit: 'g' })}>
                       + 行
@@ -544,8 +568,8 @@ export default function RecipesPage() {
                   </div>
                   {fields.map((field) => {
                     const line = linesOf(key)[field.name] as BomFormLine | undefined
-                    const ing = line?.name ? ings.find((g) => g.name === line.name) : undefined
-                    const c = calcLine(line, ing)
+                    const ing = line?.name ? resolveIngName(line.name, ingAlias, byName) : undefined
+                    const c = calcLineCost(line?.qty, ing)
                     return (
                       <Space key={field.key} style={{ display: 'flex', marginBottom: 8 }} align="start">
                         <Form.Item
@@ -570,7 +594,7 @@ export default function RecipesPage() {
                               const cur = form.getFieldValue(key) || []
                               const next = [...cur]
                               next[field.name] = { ...(next[field.name] || {}), name }
-                              const hit = ings.find((g) => g.name === name)
+                              const hit = name ? resolveIngName(name, ingAlias, byName) : null
                               if (hit?.unit) next[field.name].unit = hit.unit
                               form.setFieldValue(key, next)
                             }}
@@ -591,7 +615,7 @@ export default function RecipesPage() {
                         <div style={{ width: 84 }}>
                           <div style={{ color: '#999', fontSize: 11, lineHeight: '20px' }}>行成本</div>
                           <div style={{ lineHeight: '30px', textAlign: 'right' }}>
-                            {c?.lc != null ? c.lc.toFixed(2) : '—'}
+                            {c?.lineCost != null ? c.lineCost.toFixed(2) : '—'}
                           </div>
                         </div>
                         <Button type="link" danger onClick={() => remove(field.name)}>

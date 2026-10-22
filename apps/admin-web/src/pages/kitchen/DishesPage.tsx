@@ -6,11 +6,13 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Switch,
   Table,
   Tag,
+  Tooltip,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -156,7 +158,7 @@ export default function DishesPage() {
     {
       title: '操作',
       key: 'act',
-      width: 220,
+      width: 300,
       render: (_, r) => (
         <Space size={4} wrap>
           <Button size="small" onClick={() => openEdit(r)}>
@@ -178,6 +180,25 @@ export default function DishesPage() {
           >
             {r.on ? '下架' : '上架'}
           </Button>
+          {/* FP-DISH-06 删除菜品：有销售记录禁删（旧版 delDish 同口径；sold 由 BFF 用执行器同规则算出）
+              Tooltip 包一层 span：disabled 按钮不派发鼠标事件，直接包 Tooltip 浮不出提示 */}
+          <Tooltip title={r.sold ? '该菜已有销售记录，不能删除（可改为「下架」）' : ''}>
+            <span style={{ display: 'inline-block' }}>
+              <Popconfirm
+                title={`删除菜品「${r.name}」？`}
+                description="删除后同时解除其配方绑定（金丰配方主数据保留）。提交后需到审批中心确认。"
+                okText="确认删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                disabled={!!r.sold}
+                onConfirm={() => run('dish.delete', { id: r.id, name: r.name }, `已删除 ${r.name}`)}
+              >
+                <Button size="small" danger disabled={!!r.sold} loading={busy}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </span>
+          </Tooltip>
         </Space>
       ),
     },

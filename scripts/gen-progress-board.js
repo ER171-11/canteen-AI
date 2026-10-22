@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /*
- * scripts/gen-progress-board.js — 生成 docs/进度看板.html
+ * scripts/gen-progress-board.js — 生成 docs/进度看板/进度看板.html
  *
  * 目的：提供一种不依赖 AI agent 的进度查询手段。双击 HTML 即可看全盘进度，
  *       不需起服务、不需联网、不需翻文档找数字。
@@ -27,12 +27,12 @@ const OPT = { drift: ARGV.indexOf('--no-drift') < 0, gates: ARGV.indexOf('--gate
 
 const DIR_BASE = path.join(ROOT, 'docs', '迁移基线');
 const F_DEBT = path.join(DIR_BASE, '欠账总表.md');
-const F_TASKS = path.join(ROOT, 'docs', '下一步任务清单_2026-09-28.md');
+const F_TASKS = path.join(ROOT, 'docs', '计划与排期', '下一步任务清单_2026-09-28.md');
 const DIR_ADR = path.join(ROOT, 'docs', 'decisions');
 const F_CI = path.join(ROOT, '.github', 'workflows', 'ci.yml');
 const F_DRIFT = path.join(ROOT, 'scripts', 'gen-debt-table.ps1');
 const F_REDLINE_PS1 = path.join(ROOT, 'ci', 'redline_guard.ps1');
-const OUT_HTML = path.join(ROOT, 'docs', '进度看板.html');
+const OUT_HTML = path.join(ROOT, 'docs', '进度看板', '进度看板.html');
 
 /* ------------------------------------------------------------------ 工具 */
 
@@ -371,7 +371,7 @@ function render(d) {
 
   /* 任务 */
   if (d.tasks) {
-    S.push(section('任务 T1–T10', '来源：docs/下一步任务清单_2026-09-28.md',
+    S.push(section('任务 T1–T10', '来源：docs/计划与排期/下一步任务清单_2026-09-28.md',
       table(['任务', '优先级', '内容', '状态'], d.tasks.tasks.map((t) => '<tr>'
         + td('<b>' + esc(t.id) + '</b>') + td('<span class="dim">' + esc(t.priority) + '</span>')
         + td(esc(t.title))
@@ -500,7 +500,7 @@ function main() {
   const sources = [
     ['docs/迁移基线/FP-*.md（' + pages.length + ' 份）', mtime(path.join(DIR_BASE, pages.length ? pages[0].file : 'FP-进货入库.md'))],
     ['docs/迁移基线/欠账总表.md', mtime(F_DEBT)],
-    ['docs/下一步任务清单_2026-09-28.md', mtime(F_TASKS)],
+    ['docs/计划与排期/下一步任务清单_2026-09-28.md', mtime(F_TASKS)],
     ['docs/decisions/ ADR 文件（' + adrs.length + ' 份）', adrs.length ? mtime(path.join(DIR_ADR, adrs[adrs.length - 1].file)) : '—'],
     ['.github/workflows/ci.yml', mtime(F_CI)],
     ['scripts/gen-debt-table.ps1（漂移判据）', mtime(F_DRIFT)],

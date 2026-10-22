@@ -36,6 +36,7 @@ import SchedulePage from './pages/hr/SchedulePage'
 import AttendancePage from './pages/hr/AttendancePage'
 import PerformancePage from './pages/hr/PerformancePage'
 import TrainPage from './pages/hr/TrainPage'
+import StaffRosterPage from './pages/hr/StaffRosterPage'
 import LicensesPage from './pages/safety/LicensesPage'
 import TracePage from './pages/safety/TracePage'
 import SamplePage from './pages/safety/SamplePage'
@@ -43,6 +44,7 @@ import SafetyPointsPage from './pages/safety/SafetyPointsPage'
 import SafetyProgressPage from './pages/safety/SafetyProgressPage'
 import DeviceEnergyPage from './pages/safety/DeviceEnergyPage'
 import FinancePage from './pages/finance/FinancePage'
+import MobileApp from './pages/mobile/MobileApp'
 
 /** 路由守卫：未登录跳 /login */
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -62,6 +64,14 @@ export default function App() {
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/m/*"
+          element={
+            <RequireAuth>
+              <MobileApp />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/"
           element={
@@ -115,6 +125,7 @@ export default function App() {
           <Route path="member/birthday" element={<ModuleBrowsePage routeKey="member/birthday" />} />
 
           {/* 人员 */}
+          <Route path="hr/roster" element={<StaffRosterPage />} />
           <Route path="hr/staff" element={<ModuleBrowsePage routeKey="hr/staff" />} />
           <Route path="hr/schedule" element={<SchedulePage />} />
           <Route path="hr/attendance" element={<AttendancePage />} />

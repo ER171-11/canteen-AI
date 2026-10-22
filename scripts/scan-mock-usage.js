@@ -7,7 +7,7 @@
  *       淘汰完成后本脚本连同前端运行时开关一并移除。
  *
  * 用法：
- *   node scripts/scan-mock-usage.js           # 扫描并生成 docs/模拟数据清单.md
+ *   node scripts/scan-mock-usage.js           # 扫描并生成 docs/数据与接口/模拟数据清单.md
  *   node scripts/scan-mock-usage.js --md      # 同上（显式）
  *   node scripts/scan-mock-usage.js --json    # 仅打印结构化 JSON（stdout）
  *   node scripts/scan-mock-usage.js --mark    # 在命中「定义行」上方插入 // TODO(mock-removal) 标记
@@ -28,7 +28,7 @@ const ROOT = path.resolve(__dirname, '..');
 const ARGV = process.argv.slice(2);
 const has = (f) => ARGV.indexOf(f) >= 0;
 
-const OUT_MD = path.join(ROOT, 'docs', '模拟数据清单.md');
+const OUT_MD = path.join(ROOT, 'docs', '数据与接口', '模拟数据清单.md');
 
 const OPT = {
   json: has('--json'),

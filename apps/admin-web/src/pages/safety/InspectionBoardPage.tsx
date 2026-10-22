@@ -117,7 +117,7 @@ export default function InspectionBoardPage() {
                 <Statistic
                   title="漏项"
                   value={(data?.boards ?? []).reduce(
-                    (a, b) => a + (b.missing?.length ?? 0),
+                    (a, b) => a + (b.missing_count ?? b.missing?.length ?? 0),
                     0,
                   )}
                   valueStyle={{ color: COLORS.red }}
@@ -146,6 +146,7 @@ export default function InspectionBoardPage() {
 
       {boards.map((b) => {
         const miss = b.missing ?? []
+        const missIds = new Set(miss.map((m) => m.node_id))
         const nodes = nodesByBoard[b.board] ?? []
         return (
           <Card
@@ -162,7 +163,7 @@ export default function InspectionBoardPage() {
             <Progress percent={b.rate} strokeColor={COLORS.green} />
             <Row gutter={[8, 8]} style={{ margin: '12px 0' }}>
               {nodes.map((n) => {
-                const done = !miss.includes(n.id)
+                const done = !missIds.has(n.id)
                 return (
                   <Col key={n.id} xs={12} sm={8} md={6} lg={4}>
                     <Card size="small" style={{ borderTop: `3px solid ${done ? COLORS.green : COLORS.red}` }}>
@@ -188,7 +189,7 @@ export default function InspectionBoardPage() {
                 description={
                   <span>
                     {miss
-                      .map((id) => (nodes.find((n) => n.id === id)?.name ?? id))
+                      .map((m) => m.name || m.node_id)
                       .join('、')}
                   </span>
                 }

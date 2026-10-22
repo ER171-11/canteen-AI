@@ -50,6 +50,8 @@ function normalize(d) {
     if (!o || typeof o !== 'object') return;
     for (const k of Object.keys(o)) {
       if (k === '_u' || k === 'ts' || k === 'updated_at') { o[k] = '<TS>'; continue; }
+      // W4 · ings[].type 为 Node 超集字段（食材/耗材语义分层），Python 参考实现尚未产出，平价比较前剥除（仅原料对象）
+      if (k === 'type' && typeof o.id === 'string' && /^I\d+$/.test(o.id)) { delete o[k]; continue; }
       if (k === 'id' || k === 'sku_id') { o[k] = stripSku(o[k]); continue; }
       if (typeof o[k] === 'string' && /^SKU-APP-[0-9a-fA-F]{8}$/.test(o[k])) { o[k] = '<SKU>'; continue; }
       walk(o[k]);

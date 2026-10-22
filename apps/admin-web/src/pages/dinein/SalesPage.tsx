@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
+  Button,
   Card,
   Col,
   Popconfirm,
@@ -18,7 +19,12 @@ import { fetchReportDaily, fetchSalesList, postAction } from '../../api'
 import type { ReportDaily, SaleListItem } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
 import { COLORS } from '../../theme'
+import SaleCreateModal from './SaleCreateModal'
+import SaleEditModal from './SaleEditModal'
 import SalePayModal from './SalePayModal'
+import SaleImportModal from './SaleImportModal'
+import SaleBatchesModal from './SaleBatchesModal'
+import DishAliasModal from './DishAliasModal'
 
 /**
  * 销售收银（FP-SALE-07 销售单列表 / FP-SALE-08 顶部 KPI / FP-SALE-11 分次收款）。
@@ -70,6 +76,11 @@ export default function SalesPage() {
   const [channel, setChannel] = useState<string>('全部')
   const [status, setStatus] = useState<string>('全部')
   const [payTarget, setPayTarget] = useState<SaleListItem | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<SaleListItem | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [aliasOpen, setAliasOpen] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -169,9 +180,12 @@ export default function SalesPage() {
     },
     {
       title: '操作',
-      width: 150,
+      width: 190,
       render: (_: unknown, r: SaleListItem) => (
         <Space size={4}>
+          <Typography.Link disabled={r.status === '已作废'} onClick={() => setEditTarget(r)}>
+            编辑
+          </Typography.Link>
           <Typography.Link
             disabled={r.status === '已作废' || !(Number(r.debt) > 0)}
             onClick={() => setPayTarget(r)}
@@ -249,6 +263,12 @@ export default function SalesPage() {
         title={`销售单列表（${shown.length} / ${rows.length} 单）`}
         extra={
           <Space wrap>
+            <Button type="primary" onClick={() => setCreateOpen(true)}>
+              录入销售单
+            </Button>
+            <Button onClick={() => setImportOpen(true)}>导入平台数据</Button>
+            <Button onClick={() => setBatchOpen(true)}>批次管理</Button>
+            <Button onClick={() => setAliasOpen(true)}>菜名映射</Button>
             <Select
               value={channel}
               style={{ width: 120 }}
@@ -281,10 +301,36 @@ export default function SalesPage() {
         )}
       </Card>
 
+      <SaleCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onQueued={load}
+      />
+      <SaleEditModal
+        open={!!editTarget}
+        sale={editTarget}
+        onClose={() => setEditTarget(null)}
+        onQueued={load}
+      />
       <SalePayModal
         open={!!payTarget}
         sale={payTarget}
         onClose={() => setPayTarget(null)}
+        onQueued={load}
+      />
+      <SaleImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onQueued={load}
+      />
+      <SaleBatchesModal
+        open={batchOpen}
+        onClose={() => setBatchOpen(false)}
+        onQueued={load}
+      />
+      <DishAliasModal
+        open={aliasOpen}
+        onClose={() => setAliasOpen(false)}
         onQueued={load}
       />
     </div>

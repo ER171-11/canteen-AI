@@ -5,7 +5,7 @@
 > 目标系统：`apps/admin-web/src/pages/inventory/InboundPage.tsx`（**T6 收尾后 832 行**）+ `bff/routes/inventory.js` + `bff/routes/settle.js`
 > 模式：**替代**（全部 ⬜ 视为回归缺陷，需排期补齐）
 > 建立日期：2026-09-28　更新日期：2026-09-29（**T6 收尾**：翻转 FP-RECV-01/08/09 并**全表重取新版行号**；上一版为 T6-C 批量导入 + 模板）
-> 状态：🟡 进行中　规范依据：`docs/迁移颗粒度规范.md`
+> 状态：🟡 进行中　规范依据：`docs/规范/迁移颗粒度规范.md`
 >
 > **行号时效**：表中**旧版**行号指向只读的旧 HTML（永不变）；**新版**行号是**当前源码快照**，
 > 任何改动 `InboundPage.tsx` 的任务都必须复核并同步本表行号（T5 后曾发生整体漂移，
@@ -56,7 +56,7 @@
 
 **结论**：旧版「进货入库」页 15 项功能中，**13 项是真正从旧版平移过来的**（供应商筛选、付款状态展示、汇总卡、明细展开、结算单、批量结算单、结算单模板、补付、批量导入、下载模板、新建、编辑、作废），
 其余 2 项已移植项是新版自身的新增能力（逐项验收、补录验收）。**页面级 ⬜ 已清零，但「清零」≠「已验收」**：
-人工开箱复核（`§7` 验收判据）与结算单 PDF 版面比对（备注「视觉校验欠账」）仍未做，见 `docs/下一步任务清单_2026-09-28.md` §7.1。
+人工开箱复核（`§7` 验收判据）与结算单 PDF 版面比对（备注「视觉校验欠账」）仍未做，见 `docs/计划与排期/下一步任务清单_2026-09-28.md` §7.1。
 
 ## 建议补齐顺序
 
@@ -69,7 +69,7 @@
 
 ## 备注
 
-- 本清单为**首个试点**，用于验证 `docs/迁移颗粒度规范.md` 的可执行性；后续页面照此建立。
+- 本清单为**首个试点**，用于验证 `docs/规范/迁移颗粒度规范.md` 的可执行性；后续页面照此建立。
 - 平价测试（算法/数据层）已全绿，属**另一条门禁**，不能替代本页面级清单。
 - **重复登记**：FP-RECV-06 与 FP-SET-18（结算单模板配置）是同一份实现的两个入口，非两项工作量；
   统计口径上两处各记 1 项，汇总时不要再重复计工作量。
@@ -83,7 +83,7 @@
   红线①原文是「`rebuildStock` 只可调用，不可改写」，且 `ci/redline_baseline.sha256` 的哈希范围只含
   `bff/store-node/db.js`/`merge.js`，`stock.js` 不在其中，因此门禁查不出这次改写。
   **处置建议**：或在下一阶段正式登记为「有意偏离」并把 `stock.js` 纳入哈希基线，
-  或改回原实现另寻回退路径。本阶段**只记录、不改代码**（`docs/Python到Node忠实性映射表.md` §1/§3 已同步标注）。
+  或改回原实现另寻回退路径。本阶段**只记录、不改代码**（`docs/数据与接口/Python到Node忠实性映射表.md` §1/§3 已同步标注）。
 - **旧版证据更正（2026-09-29，T6-C 实施时发现）**：本表原先把 FP-RECV-02 的证据写成
   `previewRecImport :3709` / `commitRecImport :3754`、FP-RECV-03 写成 `downloadRecTemplate :3784` ——
   这三项实为**菜品配方页的「食谱卡」导入**（`#fileRecImport` :327 → `readImportFile(f,'rec')` :3797、
@@ -92,7 +92,7 @@
   模板按钮 `#btnRecvTpl` :3791 绑定到的是 **`downloadPoTemplate` :3778**。证据已按行更正，实现本来就是照「进货入库」这条做的，不涉及代码改动。
 - **T6-C 的 4 项校验说明（FP-RECV-02）**：
   1. **预览零写**：`bff/routes/recv_import.test.js` 断言「预览前后 `snapshot.json` 字节一致、数据目录无新文件」；
-     真实 HTTP 链路也已复跑（详见 `docs/下一步任务清单_2026-09-28.md` §8.2.4）。
+     真实 HTTP 链路也已复跑（详见 `docs/计划与排期/下一步任务清单_2026-09-28.md` §8.2.4）。
   2. **整批一个动作**：`RecvImportModal` 只投 1 条 `recv.import`，执行器 `applyRecvImport` 批末统一 `rebuildStock` 一次
      （`recv_import.test.js` 用例 3 断言 `rebuild_stock` 在返回摘要里只出现 1 次）。
   3. **明确不支持必须可见**：旧版二进制 .xls（OLE2/BIFF8）**不支持**，解析层直接返回「另存为 .xlsx 或 CSV」；
@@ -106,4 +106,13 @@
   5. **⚠️ 待人工裁定（红线①）：** `ings[].pending` 是 **Node 超集字段**（Python `queue_consumer.py` 无对应实现，
      `recv.import` 本身也无 Python 分支，故无差分野），只由 `recv.import` 自动建档与 `ing.upsert`
      （payload 显式传 `pending:true` 时）写入；不传时输出与 Python 逐字段一致，平价测试不受影响。
-     `applyIngUpsert` 的新增 `pending` 分支属写入白名单变更，已登记于 `docs/Python到Node忠实性映射表.md` §1 补注。
+     `applyIngUpsert` 的新增 `pending` 分支属写入白名单变更，已登记于 `docs/数据与接口/Python到Node忠实性映射表.md` §1 补注。
+- **整单优惠/抹零（让利不摊入成本，2026-10-16）**：为承载菜市场「抹零」这类 `总价 ≠ Σ 数量×单价` 的交易，
+  给进货/采购单新增**超集字段** `gross`（明细合计）与 `discount`（整单优惠，≥0），口径 `payable = gross − discount`
+  （唯一出口 `resolveDocPayable`，`bff/lib/algorithms/inventory.js`）。
+  红线：① 让利**不摊入成本** —— 行级 `amount/unitCost/price` 一律不动，`rebuildStock` 的移动加权均价与最近进价
+  `g.last` 均不受影响；② `discount ≤ gross`，超过即拒绝（红线⑥ 不静默降级）；③ **仅当 `discount > 0` 才落库
+  `gross/discount`**，默认 0 时不写字段，与 Python 逐字段一致（`inventory.test.js` 对拍已实证）。
+  覆盖：`applyRecvInbound` / `applyRecvUpdate` / `applyRecvImport` / `applyOrderCreate` / `applyOrderEdit`；
+  自采购单转进货（oid 分支）原样透传折扣；前端 `RecvFormModal` / `OrderFormModal` 增「整单优惠」输入，
+  结算单 `settle/data.ts` + `html.ts` + `pdf.ts` 增「明细合计 / 整单优惠」展示；`recv_inbound.test.js` / `recv_update.test.js` 各补用例。

@@ -604,6 +604,198 @@ function insertRecipeSubstitute(ctx, data, payload) {
   return 'recipe.substitute ' + frm + '→' + to + ' (记审计·未写库)';
 }
 
+/* ---------- dish.delete（FP-DISH-06） ---------- */
+
+/**
+ * 销售单是否引用了该菜：id / 菜名 / sku_id 三选一命中即视为「已有销售记录」。
+ * 旧版只比对 l.dish === d.id（HTML:2676）；新版销售线路里可能存的是 sku_id（如 SKU-WF-HONG），
+ * 故一并比对 sku_id 与菜名，避免把有销售的菜误删。
+ */
+function dishReferencedBySales(data, dish) {
+  const ids = {};
+  if (dish.id != null) ids[String(dish.id)] = 1;
+  if (dish.name) ids[String(dish.name)] = 1;
+  if (dish.sku_id) ids[String(dish.sku_id)] = 1;
+  const sales = Array.isArray(data.sales) ? data.sales : [];
+  for (const s of sales) {
+    if (!s) continue;
+    const lines = Array.isArray(s.lines) ? s.lines : [];
+    for (const l of lines) {
+      if (l && l.dish != null && ids[String(l.dish)]) return true;
+    }
+    if (s.dish != null && ids[String(s.dish)]) return true;
+  }
+  return false;
+}
+
+/**
+ * dish.delete：删除菜品（含其配方绑定）。旧版 delDish（HTML:2675-2680）逐条移植。
+ *
+ * 红线：有销售记录的菜**禁删**，只允许停售（旧版同口径）。物理删除是本域既定口径
+ * （同 order.delete / pos.table_remove），本函数**不触碰库存**。
+ *
+ * 新版把「菜品主数据」与「配方主数据」分开了，故删除范围与旧版略有不同：
+ *   - 菜品体：从 data.dishes 移除；
+ *   - 配方绑定：删 data.rec[dish.id] / data.rec[sku_id]（结账扣料的依据）；
+ *   - 金丰配方主数据（recipes 表 / ext.recipes）**不删**——它是全店配方目录，不是本菜的附属物。
+ */
+function applyDishDelete(data, payload) {
+  if (!Array.isArray(data.dishes)) throw new Error('data.dishes 不是数组');
+  const key = String((payload && (payload.id || payload.dish_id || payload.name || payload.dish)) || '').trim();
+  if (!key) throw new Error('dish.delete 缺 id/name');
+  const idx = data.dishes.findIndex((d) => d && (String(d.id) === key || String(d.name) === key
+    || (d.sku_id && String(d.sku_id) === key)));
+  if (idx < 0) throw new Error('找不到菜品 ' + key);
+  const d = data.dishes[idx];
+  if (dishReferencedBySales(data, d)) {
+    throw new Error('该菜已有销售记录，不能删除（可停售）：' + (d.name || d.id));
+  }
+  const rec = (data.rec && typeof data.rec === 'object' && !Array.isArray(data.rec)) ? data.rec : null;
+  let unbind = 0;
+  if (rec) {
+    for (const k of [d.id, d.sku_id]) {
+      if (k != null && rec[String(k)] !== undefined) {
+        delete rec[String(k)];
+        unbind += 1;
+      }
+    }
+  }
+  data.dishes.splice(idx, 1);
+  return 'dish 删除 ' + (d.id || '') + ' ' + (d.name || '')
+    + (unbind ? ' · 解除配方绑定' + unbind + ' 处' : '');
+}
+
+/* ---------- recipe.import（FP-DISH-16/18：食谱卡批量导入的唯一写入口） ---------- */
+
+/** BOM 行字符串 → 原料名（去尾部「用量+单位」，去括号规格） */
+function bomNameOf(line) {
+  let s = String(line == null ? '' : line).trim();
+  s = s.replace(/[\d./]+\s*[a-zA-Z\u4e00-\u9fff]*\s*$/, '').trim();
+  return s.replace(/[（(].*?[）)]/g, '').trim() || String(line == null ? '' : line).trim();
+}
+
+/** 导入行 → {name,qty,unit,cat}；非法行返回 null */
+function importRowOf(r) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return null;
+  const name = String(r.name || r.ing || r.ingName || r.ing_name || '').trim();
+  const qty = Number(r.qty);
+  if (!name || !isFinite(qty) || qty <= 0) return null;
+  return {
+    name: name,
+    qty: qty,
+    unit: String(r.unit || 'g').trim() || 'g',
+    cat: String(r.cat || '').trim()
+  };
+}
+
+/** 读当前配方主料行（字符串数组），供 merge 模式按原料合并 */
+function currentMainOf(ctx, data, name) {
+  const store = (ctx && ctx.store) ? ctx.store : null;
+  let row = null;
+  if (store && typeof store.query === 'function') {
+    row = queryOne(store, 'recipes', { name: name });
+  } else {
+    const recipes = extOf(data).recipes;
+    if (Array.isArray(recipes)) row = recipes.find((r) => r && String(r.name) === name) || null;
+  }
+  if (!row) return null;
+  return rowToCur(row).main || [];
+}
+
+/** merge：旧行按原料名命中 → 覆盖该行用量；未命中的新原料追加 */
+function mergeMainRows(cur, rows) {
+  const out = cur.map((s) => String(s));
+  const idx = {};
+  out.forEach((s, i) => {
+    const n = bomNameOf(s);
+    if (n && !(n in idx)) idx[n] = i;
+  });
+  for (const r of rows) {
+    const line = r.name + formatG(Number(r.qty)) + r.unit;
+    const i = idx[r.name];
+    if (i != null) out[i] = line;
+    else {
+      idx[r.name] = out.length;
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+/**
+ * recipe.import：食谱卡批量导入「提交」（整批一个动作，走审批队列；与 recv.import 同型）。
+ *
+ * 逐道菜复用**唯一写入口** upsertRecipe（ensure_ings 缺料建档 + sync_dish 同步菜品壳），
+ * 因此「未匹配原料/菜品自动建档」的口径与手工「新增菜谱」完全一致，不另起一套写路径。
+ *
+ * mode='replace'（默认）：视为该菜配方的完整定义 —— 覆盖主料，并清空辅料/调味旧行（旧版覆盖语义）；
+ * mode='merge'：按原料名合并用量，未出现的旧行保留。
+ * 明细统一记入「主料」；模板无分组列（与旧版一致），导入后可在「编辑配料」里调整分组。
+ */
+function applyRecipeImport(ctx, data, payload) {
+  const groups = (payload && Array.isArray(payload.groups)) ? payload.groups : [];
+  if (!groups.length) throw new Error('recipe.import 缺 groups（请先预览再提交）');
+  const mode = String((payload && payload.mode) || 'replace') === 'merge' ? 'merge' : 'replace';
+  const ensure = (payload && payload.ensure_ings !== undefined)
+    ? truthyOn(payload.ensure_ings, ['yes']) : true;
+  const syncDish = (payload && payload.sync_dish !== undefined)
+    ? truthyOn(payload.sync_dish, ['yes']) : true;
+
+  /* 未匹配原料建档：对齐旧版 createIngFromImport（HTML:2806）——带文件里的「库存单位/原料分类」，
+     建完再进 upsertRecipe（其 ensure_ings 会发现已存在而跳过），避免分类一律落成「菜谱挂钩」。 */
+  let createdIngs = 0;
+  if (ensure) {
+    const have = new Set();
+    for (const g0 of (Array.isArray(data.ings) ? data.ings : [])) {
+      if (g0 && g0.name) have.add(String(g0.name));
+    }
+    for (const g of groups) {
+      for (const r of (Array.isArray(g && g.rows) ? g.rows : []).map(importRowOf).filter(Boolean)) {
+        if (have.has(r.name) || r.name === '清水' || r.name === '水') continue;
+        applyIngUpsert(data, {
+          name: r.name,
+          unit: r.unit || '斤',
+          cat: r.cat || '菜谱挂钩',
+          qty: 0,
+          safe: 0,
+          on: true
+        });
+        have.add(r.name);
+        createdIngs += 1;
+      }
+    }
+  }
+
+  let saved = 0;
+  let lines = 0;
+  for (const g of groups) {
+    const name = String((g && g.dish) || '').trim();
+    if (!name) continue;
+    let rows = (Array.isArray(g.rows) ? g.rows : []).map(importRowOf).filter(Boolean);
+    if (!rows.length) continue;
+    if (mode === 'merge') {
+      const cur = currentMainOf(ctx, data, name);
+      if (cur && cur.length) rows = mergeMainRows(cur, rows);
+    }
+    upsertRecipe(ctx, data, {
+      name: name,
+      dish_cat: String((g.cat || '常规')).trim() || '常规',
+      main: rows,
+      aux: mode === 'replace' ? [] : undefined,
+      seasoning: mode === 'replace' ? [] : undefined,
+      ensure_ings: ensure,
+      sync_dish: syncDish,
+      on: true
+    });
+    saved += 1;
+    lines += rows.length;
+  }
+  if (!saved) throw new Error('recipe.import 没有可导入的菜（菜品名称需非空、净料用量需 >0）');
+  return 'recipe.import ' + saved + ' 道菜 / ' + lines + ' 行'
+    + (createdIngs ? ' · 建原料' + createdIngs : '')
+    + ' · ' + (mode === 'merge' ? '按原料合并' : '覆盖');
+}
+
 /* ---------- _bom_lines ---------- */
 
 /** 把 main/aux/seasoning 收成字符串行：原料名+用量+单位。 */
@@ -905,8 +1097,11 @@ module.exports = {
   applyDishUpsert,
   applyDishPrice,
   applyDishSetActive,
+  applyDishDelete,
+  dishReferencedBySales,
   applyDishAutoLink,
   insertRecipeSubstitute,
+  applyRecipeImport,
   bomLines,
   upsertRecipe,
   seqRatio,

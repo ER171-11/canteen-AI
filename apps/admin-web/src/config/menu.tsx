@@ -100,6 +100,7 @@ export const MENU: MenuGroup[] = [
     label: '人员',
     icon: <TeamOutlined />,
     children: [
+      { path: '/hr/roster', title: '员工花名册' },
       { path: '/hr/staff', title: '排班总览' },
       { path: '/hr/schedule', title: '排班登记' },
       { path: '/hr/attendance', title: '打卡补录' },

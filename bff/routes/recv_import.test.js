@@ -6,6 +6,7 @@
  *   · GET → 405（预览只接受 POST）
  *   · CSV base64 → 200 + groups/totalAmount；能按「供应商+日期」拆单
  *   · 未匹配原料 → 200 + 计入明细并标 isNew（自动建档为待完善草稿，不阻断；2026-10-12 撤销不代建偏离）
+ *   · 手动指定列（旧版 openColMap 回归）：列名非标准 → 400 回传 head；override 重解析 → 200
  *   · 旧版二进制 .xls → 400 + 「另存为 .xlsx 或 CSV」提示（明确不支持的格式必须可见，红线⑥）
  *   · 缺 body / 文件超限 → 400 / 413
  *   · **红线：预览零写** —— data 目录文件数与 snapshot.json 字节内容在预览前后完全一致
@@ -141,6 +142,45 @@ async function main() {
   res = {};
   await inventory.handle({ method: 'POST', __body: '{}' }, res, mkctxTooLarge(), P);
   ok('上传体超限 → 413', res.code === 413, res.body);
+
+  /* 6.5) 手动指定列（旧版 openColMap 回归）：列名非标准 → 自动识别失败回传 head；override 重解析成功 */
+  const WEIRD_CSV = 'a,b,c\n娃娃菜,5,3\n猪里脊,2,30\n';
+  res = {};
+  await inventory.handle(
+    {
+      method: 'POST',
+      __body: JSON.stringify({ fileName: 'w.csv', contentBase64: Buffer.from(WEIRD_CSV, 'utf8').toString('base64') })
+    },
+    res, mkctx(), P,
+  );
+  ok('非标准列名自动识别 → 400', res.code === 400, res.body);
+  ok('失败时回传 head（供手动指定列面板）',
+    res.body && res.body.head && Array.isArray(res.body.head.rows) && res.body.head.rows.length >= 2, res.body);
+  ok('head 带 fields/labels/aliases',
+    res.body && res.body.head && Array.isArray(res.body.head.fields)
+      && res.body.head.fields.indexOf('ingName') >= 0
+      && res.body.head.labels && res.body.head.labels.ingName
+      && res.body.head.aliases && Array.isArray(res.body.head.aliases.ingName), res.body && res.body.head);
+
+  res = {};
+  await inventory.handle(
+    {
+      method: 'POST',
+      __body: JSON.stringify({
+        fileName: 'w.csv',
+        contentBase64: Buffer.from(WEIRD_CSV, 'utf8').toString('base64'),
+        override: { rowIndex: 0, map: { ingName: 0, qty: 1, price: 2 } }
+      })
+    },
+    res, mkctx(), P,
+  );
+  ok('手动指定列（a=品名 b=数量 c=单价）→ 200', res.code === 200, res.body);
+  ok('手动指定列解析出 2 行', res.body && res.body.totalLines === 2, res.body);
+  ok('手动指定列正确取数（娃娃菜 5×3）',
+    res.body && res.body.groups[0].lines[0].name === '娃娃菜'
+      && res.body.groups[0].lines[0].qty === 5
+      && res.body.groups[0].lines[0].price === 3, res.body && res.body.groups);
+  ok('手动指定列响应同样带 head', res.body && res.body.head && Array.isArray(res.body.head.rows), res.body);
 
   /* 7) 红线：预览零写 —— 目录文件数与 snapshot 内容都没变 */
   const filesAfter = fs.readdirSync(dir).sort();

@@ -9,6 +9,7 @@
  *   GET  /api/supply/overview           供应链看板汇总
  *   GET  /api/supply/config / POST      价差阈值/账龄分档/低评级线（BFF 本地配置，可配）
  *   POST /api/supply/vendor             供应商档案 upsert → vendor.upsert 入队
+ *   POST /api/supply/vendor/delete      供应商档案删除 → vendor.delete 入队（有往来账禁删）
  *   POST /api/supply/quote              供应商报价 → quote.upsert 入队
  *   POST /api/supply/po                 采购应付登记 → supply.po 入队
  *
@@ -112,7 +113,7 @@ function handle(req, res, ctx, pathname) {
 
   if (m !== 'POST') return false;
 
-  const write = ['/api/supply/config', '/api/supply/vendor', '/api/supply/quote', '/api/supply/po'];
+  const write = ['/api/supply/config', '/api/supply/vendor', '/api/supply/vendor/delete', '/api/supply/quote', '/api/supply/po'];
   if (write.indexOf(pathname) < 0) return false;
   if (!ctx.auth || !mayWriteActions(ctx.auth)) {
     ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: actions.write required' });
@@ -157,9 +158,27 @@ function handle(req, res, ctx, pathname) {
         level: body.level == null ? undefined : body.level,
         status: trim(body.status) || undefined,
         period: trim(body.period) || undefined,
-        note: trim(body.note) || undefined
+        note: trim(body.note) || undefined,
+        /* W3 产品超链接：资质证照（数组或 {类型:{...}} 映射，执行器 normalizeCerts 归一） */
+        certs: body.certs != null ? body.certs : undefined,
+        /* 编辑口径：显式空值也写回（清空联系人/电话/评级/备注）；old_name 供无编号档案改名时定位 */
+        edit: body.edit === true,
+        old_name: body.edit === true ? (trim(body.old_name) || undefined) : undefined
       }, operatorOf(ctx, body), ctx.traceId);
       ctx.sendJSON(res, 200, { ok: true, action_id: id, rev, note: '供应商档案已入队 → 审批中心确认' });
+      return;
+    }
+
+    /* 供应商档案删除（有往来账禁删，执行器 vendor.delete 二次校验） */
+    if (pathname === '/api/supply/vendor/delete') {
+      const vid = trim(body.vendor_id || body.id);
+      const name = trim(body.name);
+      if (!vid && !name) { ctx.sendJSON(res, 400, { ok: false, error: 'vendor_id 或 name 至少一项必填' }); return; }
+      const id = doEnqueue('vendor.delete', {
+        vendor_id: vid || undefined,
+        name: name || undefined
+      }, operatorOf(ctx, body), ctx.traceId);
+      ctx.sendJSON(res, 200, { ok: true, action_id: id, rev, note: '供应商删除已入队 → 审批中心确认' });
       return;
     }
 
@@ -172,6 +191,8 @@ function handle(req, res, ctx, pathname) {
       if (body.price == null || isNaN(parseFloat(body.price))) { ctx.sendJSON(res, 400, { ok: false, error: 'price 必填且为数值' }); return; }
       const id = doEnqueue('quote.upsert', {
         ing,
+        /* 原料名一并落快照：报价归属以 ing(原料 id) 为准，name 供「比价 / 原料比价」两表显示 */
+        name: trim(body.name || body.ing_name) || undefined,
         src,
         price: parseFloat(body.price),
         per: trim(body.per) || undefined,

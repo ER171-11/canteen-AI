@@ -157,6 +157,8 @@ function stripVolatile(v) {
     const out = {};
     for (const k of Object.keys(v)) {
       if (k === '_u') continue;
+      // W4 · ings[].type 为 Node 超集字段（食材/耗材语义分层），Python 参考实现尚未产出，平价比较前剥除（仅原料对象）
+      if (k === 'type' && typeof v.id === 'string' && /^I\d+$/.test(v.id)) continue;
       out[k] = stripVolatile(v[k]);
     }
     return out;

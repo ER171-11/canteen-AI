@@ -5,6 +5,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { condenseMethod } = require('./recipe_method');
 
 const MENU_PATHS = [
   path.join(__dirname, '../data/menu-wufu.json'),
@@ -116,6 +117,8 @@ function mergeRecipesWithMenu(recipes) {
       face_detail: faceDetail,
       brief: (mi && mi.brief) || null,
       params,
+      // 标准配方卡「制作方法」：逐条 SOP 归并为 和面/调馅/打水上劲/包制/熟制 5 段
+      method: condenseMethod(r.steps),
       source: mi ? 'snapshot+menu' : 'snapshot'
     }));
   }
@@ -134,6 +137,7 @@ function mergeRecipesWithMenu(recipes) {
       aux: [],
       seasoning: [],
       steps: [],
+      method: [],
       params: {
         面主料: lines,
         色源: mi.face || '',

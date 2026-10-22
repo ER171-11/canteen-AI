@@ -57,6 +57,8 @@ import type {
   QcMediaStatus,
   SopVideo,
   InspectionBoardResp,
+  IngTerm,
+  IngTermsResp,
   RecipeDetailResp,
   RecipesResp,
   RecvAcceptRecord,
@@ -76,6 +78,7 @@ import type {
   StaffScheduleResp,
   StaffClockResp,
   StaffPerfResp,
+  StaffRosterResp,
   StaffTrainResp,
   SwapResp,
   TraceResp,
@@ -241,6 +244,47 @@ export async function createSnapshotBackup(note?: string): Promise<{
   return data
 }
 
+/* ---------------- W2 受控词表 + 属性 Tag（双轨制） ---------------- */
+
+/** GET /api/inventory/ing-terms — 受控词表（只读；data.ing_terms 优先，缺失回退 seed） */
+export async function fetchIngTerms(): Promise<IngTermsResp> {
+  const { data } = await client.get<IngTermsResp>('/inventory/ing-terms')
+  return data
+}
+
+/** GET /api/inventory/ing-terms/match?q= — 词条 ID 精确命中原料（只读，别名归一） */
+export async function fetchIngTermsMatch(q: string): Promise<{
+  ok: boolean
+  q: string
+  count: number
+  terms: IngTerm[]
+  items: { id: string; name: string; cat?: string; tags: unknown[]; hitTermIds: string[] }[]
+}> {
+  const { data } = await client.get('/inventory/ing-terms/match', { params: { q } })
+  return data
+}
+
+/** term.upsert — 词条申请 / 审核 / 上架（走审批队列，非直写库） */
+export async function submitTermUpsert(payload: {
+  id?: string
+  name?: string
+  category?: string
+  aliases?: string[]
+  status?: string
+}): Promise<PostActionResult & { confirmed?: boolean }> {
+  return submitAndConfirmAction({ type: 'term.upsert', payload, operator: 'admin' })
+}
+
+/** ing.attr_set — 给原料关联受控词条 ID + 自定义营销 Tag（走审批队列，非直写库） */
+export async function submitIngAttrSet(payload: {
+  id?: string
+  ing_id?: string
+  name?: string
+  tags?: string[]
+}): Promise<PostActionResult & { confirmed?: boolean }> {
+  return submitAndConfirmAction({ type: 'ing.attr_set', payload, operator: 'admin' })
+}
+
 /**
  * 经营分析店参（只读测算层，不落库）。
  * 键名与 `bff/lib/menu_baoben.js` 的 PARAM_QUERY_MAP 一一对应；未给值的键由后端 DEFAULT_PARAMS 兜底。
@@ -327,6 +371,11 @@ export interface AnalysisSuggestion {
   title: string
   content: string
   priority: string
+  /** 可选的结构化动作（仅白名单类型，如 member.coupon）；有则前端可「采纳触达」 */
+  action?: {
+    type: string
+    params?: Record<string, unknown>
+  }
 }
 export interface AnalysisSuggestionsResp {
   suggestions: AnalysisSuggestion[]
@@ -379,7 +428,8 @@ export async function fetchAnalysisWeather(date?: string, city?: string): Promis
 
 /** POST /api/analysis/ai-suggestions */
 export async function postAnalysisSuggestions(): Promise<AnalysisSuggestionsResp | null> {
-  const { data } = await client.post('/analysis/ai-suggestions', {})
+  // 走 LLM 正向生成时推理模型"思考期"较长，单独放宽超时（BFF 侧 30s，这里留余量）
+  const { data } = await client.post('/analysis/ai-suggestions', {}, { timeout: 40000 })
   return unwrap<AnalysisSuggestionsResp>(data) ?? null
 }
 
@@ -436,6 +486,7 @@ export interface PostActionResult {
   created_at?: string
   dedup?: boolean
   trace_id?: string
+  error?: string
 }
 
 /** POST /api/actions — 写操作统一入队（不直连店内 sync） */
@@ -450,6 +501,15 @@ export async function confirmAction(
   body: { operator?: string; rev?: string | number },
 ): Promise<{ ok: boolean; id: string; status: string }> {
   const { data } = await client.post(`/actions/${encodeURIComponent(id)}/confirm`, body)
+  return data
+}
+
+/** POST /api/actions/{id}/apply — BFF 侧直接执行（作用于云端快照副本） */
+export async function applyAction(
+  id: string,
+  body: { operator?: string } = {},
+): Promise<{ ok: boolean; id: string; status?: string; error?: string }> {
+  const { data } = await client.post(`/actions/${encodeURIComponent(id)}/apply`, body)
   return data
 }
 
@@ -613,6 +673,12 @@ export async function fetchStaffPerf(): Promise<StaffPerfResp> {
 /** GET /api/staff/train */
 export async function fetchStaffTrain(): Promise<StaffTrainResp> {
   const { data } = await client.get<StaffTrainResp>('/staff/train')
+  return data
+}
+
+/** GET /api/staff/roster —— 员工花名册（staff 主数据 + 历史推断并集） */
+export async function fetchStaffRoster(): Promise<StaffRosterResp> {
+  const { data } = await client.get<StaffRosterResp>('/staff/roster')
   return data
 }
 
@@ -1152,18 +1218,35 @@ export async function upsertSupplyVendor(body: {
   contact?: string
   phone?: string
   category?: string
-  level?: number
+  /** null = 编辑时显式清空评级 */
+  level?: number | null
   status?: string
   period?: string
   note?: string
+  /** 资质证照（数组，执行器 normalizeCerts 归一为 [{type,cert_no,expire_at,url}]） */
+  certs?: { type: string; cert_no?: string; expire_at?: string; url?: string }[]
+  /** 编辑口径：显式空值也写回（清空联系人/电话/评级/备注） */
+  edit?: boolean
+  /** 编辑前的档案名：老档案无编号时靠它定位，避免改名变成新建 */
+  old_name?: string
 }): Promise<SupplyEnqueueResp> {
   const { data } = await client.post<SupplyEnqueueResp>('/supply/vendor', body)
   return data
 }
 
-/** POST /api/supply/quote — 供应商报价 → quote.upsert 入队 */
+/** POST /api/supply/vendor/delete — 供应商档案删除 → vendor.delete 入队（有往来账禁删） */
+export async function deleteSupplyVendor(body: {
+  vendor_id?: string
+  name?: string
+}): Promise<SupplyEnqueueResp> {
+  const { data } = await client.post<SupplyEnqueueResp>('/supply/vendor/delete', body)
+  return data
+}
+
+/** POST /api/supply/quote — 供应商报价 → quote.upsert 入队（ing = 原料 id；name 供比价两表显示） */
 export async function logSupplyQuote(body: {
   ing: string
+  name?: string
   src: string
   price: number
   per?: string

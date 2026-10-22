@@ -187,7 +187,57 @@ function buildYieldAlerts(ext, rmap, date) {
   return alerts;
 }
 
+/** 上传体上限：8MB（与 lib/recipe_import.js 内的上限同口径） */
+const MAX_REC_UPLOAD = 8 * 1024 * 1024;
+
+/**
+ * FP-DISH-16 食谱卡批量导入 · 预览（纯计算、零写）
+ * 支持 {contentBase64,fileName} 自动识别，或 {override:{rows,rowIndex,map,sheet}} 手动指定列。
+ * 失败一律 400 + 明确 error 文案（由前端展示），不静默吞掉任何一行。
+ */
+async function handleRecipeImportPreview(req, res, ctx) {
+  if (req.method !== 'POST') {
+    ctx.sendJSON(res, 405, { ok: false, error: 'method not allowed' });
+    return true;
+  }
+  const { buf, tooLarge } = await ctx.readBody(req, MAX_REC_UPLOAD);
+  if (tooLarge) {
+    ctx.sendJSON(res, 413, { ok: false, error: '文件过大：上限 8MB，请拆分后再导入' });
+    return true;
+  }
+  let body = null;
+  try {
+    body = JSON.parse(String(buf || '').toString('utf8'));
+  } catch (e) {
+    body = null;
+  }
+  if (!body || typeof body !== 'object' || (!body.contentBase64 && !body.text)) {
+    ctx.sendJSON(res, 400, { ok: false, error: '缺少 contentBase64（文件内容）' });
+    return true;
+  }
+  const snap = loadSnapshot();
+  const input = {
+    fileName: String(body.fileName || 'import.csv'),
+    contentBase64: body.contentBase64,
+    bytes: body.text ? Buffer.from(String(body.text), 'utf8') : null,
+    override: body.override || null
+  };
+  let out = null;
+  try {
+    out = require('../lib/recipe_import').previewRecImport(input, snap || {});
+  } catch (e) {
+    out = { ok: false, error: '预览失败：' + ((e && e.message) || e) };
+  }
+  ctx.sendJSON(res, out.ok ? 200 : 400, out);
+  return true;
+}
+
 async function handle(req, res, ctx, pathname) {
+  // FP-DISH-16 食谱卡批量导入 · 预览（纯计算、零写；唯一的非 GET 例外，见下）
+  if (pathname === '/api/kitchen/recipes/import/preview') {
+    return handleRecipeImportPreview(req, res, ctx);
+  }
+
   // 只读路由：非 GET 一律交外层 404（不暴露任何写路径）
   if (req.method !== 'GET') return false;
 
@@ -265,7 +315,7 @@ async function handle(req, res, ctx, pathname) {
     let costCard = null;
     try {
       const { buildCostCard } = require('../lib/recipe_cost');
-      costCard = buildCostCard(found.item, (snap && snap.data) || {});
+      costCard = buildCostCard(found.item, (snap && snap.data) || {}, (snap && snap.ext && snap.ext.recipes) || []);
     } catch (e) { costCard = null; }
     ctx.sendJSON(res, 200, {
       ok: true,

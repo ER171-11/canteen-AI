@@ -14,6 +14,7 @@ const inspection = require('./inspection');
 const safetyPoint = require('./safety_point');
 const safetyCheck = require('./safety_check');
 const sale = require('./sale');
+const terms = require('./terms');
 
 /* 库存算法：入库/盘点后重算 stock/qty/avg */
 registerAll({
@@ -56,6 +57,8 @@ registerAll({
   'restock.ignore': (ctx, data, payload) => inv.applyRestockIgnore(data, payload),
   'restock.adjust': (ctx, data, payload) => inv.applyRestockAdjust(data, payload),
   'vendor.upsert': (ctx, data, payload) => inv.upsertVendor(data, payload, ctx),
+  /* 供应商档案删除（错建/重复档案清理）：有往来账禁删，报价与单据历史不删 */
+  'vendor.delete': (ctx, data, payload) => inv.applyVendorDelete(data, payload, ctx),
   'supply.po': (ctx, data, payload) => (
     inv.applyRestock(data, payload) + ' + ' + inv.insertSupplyPo(ctx, payload)
   )
@@ -66,8 +69,12 @@ registerAll({
   'dish.upsert': (ctx, data, payload) => dish.applyDishUpsert(data, payload),
   'dish.price': (ctx, data, payload) => dish.applyDishPrice(data, payload),
   'dish.set_active': (ctx, data, payload) => dish.applyDishSetActive(data, payload),
+  /* FP-DISH-06 删除菜品：有销售记录禁删（旧版 delDish 同口径） */
+  'dish.delete': (ctx, data, payload) => dish.applyDishDelete(data, payload),
   'dish.auto_link': (ctx, data, payload) => dish.applyDishAutoLink(ctx, data, payload),
   'recipe.upsert': (ctx, data, payload) => dish.upsertRecipe(ctx, data, payload),
+  /* FP-DISH-16/18 食谱卡批量导入：预览在 lib/recipe_import.js（纯计算零写），这里只接「提交」 */
+  'recipe.import': (ctx, data, payload) => dish.applyRecipeImport(ctx, data, payload),
   'recipe.substitute': (ctx, data, payload) => dish.insertRecipeSubstitute(ctx, data, payload)
 });
 
@@ -94,7 +101,14 @@ registerAll({
 registerAll({
   'sale.create': (ctx, data, payload) => sale.applySaleCreate(data, payload, ctx),
   'sale.pay': (ctx, data, payload) => sale.applySalePay(data, payload, ctx),
-  'sale.void': (ctx, data, payload) => sale.applySaleVoid(data, payload, ctx)
+  'sale.void': (ctx, data, payload) => sale.applySaleVoid(data, payload, ctx),
+  'sale.update': (ctx, data, payload) => sale.applySaleUpdate(data, payload, ctx),
+  /* 平台销售导入链路（FP-SALE-03/04/05/06）：预览只读在 lib/sales_import.js，这里只接「提交」 */
+  'sale.import': (ctx, data, payload) => sale.applySaleImport(data, payload, ctx),
+  'sale.batch_void': (ctx, data, payload) => sale.applySaleBatchVoid(data, payload, ctx),
+  'sale.amt_recalc': (ctx, data, payload) => sale.applySaleAmtRecalc(data, payload),
+  'sale.alias_set': (ctx, data, payload) => sale.applyDishAliasSet(data, payload),
+  'sale.alias_delete': (ctx, data, payload) => sale.applyDishAliasDelete(data, payload)
 });
 
 /* 餐饮运营/人员/食安/会员/财务/设备：迁移自 queue_consumer.py 的 insert_* / apply_* / upsert_* */
@@ -117,6 +131,7 @@ registerAll({
   'queue.join': (ctx, data, payload) => ops.insertQueueJoin(ctx, data, payload),
   'staff.clock': (ctx, data, payload) => ops.insertStaffClock(ctx, data, payload),
   'staff.shift_upsert': (ctx, data, payload) => ops.upsertStaffShift(ctx, data, payload),
+  'staff.upsert': (ctx, data, payload) => ops.upsertStaff(ctx, data, payload),
   'uniform.log': (ctx, data, payload) => ops.insertUniformLog(ctx, data, payload),
   'fs.disinfect': (ctx, data, payload) => ops.insertDisinfect(ctx, data, payload),
   'fs.trace_scan': (ctx, data, payload) => ops.insertFsTrace(ctx, data, payload),
@@ -161,4 +176,12 @@ registerAll({
 
 /* loss.report 的 data 侧与 SQLite 旁路均已由 inv.applyLossReport 处理（内含 loss_reports 写入） */
 
-module.exports = { stock, inv, dish, pos, ops, inspection, safetyPoint, safetyCheck };
+/* W2 商品库受控词表 + 结构化属性 Tag（Node 超集，无 Python 对拍）：
+ *   term.upsert   词条申请/审核/上架（受控词表 term{id,name,category,aliases,status}）
+ *   ing.attr_set  给原料关联受控词条 ID + 自定义营销 Tag（只改 ings[].tags，不进成本口径） */
+registerAll({
+  'term.upsert': (ctx, data, payload) => terms.applyTermUpsert(data, payload),
+  'ing.attr_set': (ctx, data, payload) => terms.applyIngAttrSet(data, payload)
+});
+
+module.exports = { stock, inv, dish, pos, ops, inspection, safetyPoint, safetyCheck, terms };

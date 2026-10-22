@@ -19,6 +19,8 @@ build/
 *.apk
 *.ipa
 *.tsbuildinfo
+# 桌面端构建产物（electron-builder 输出，不入库）
+desktop/release/
 apps/android-app/.gradle/
 apps/android-app/**/build/
 apps/android-app/local.properties
@@ -49,6 +51,7 @@ store-inventory/_p1prof/
 # 系统 / 编辑器
 .DS_Store
 *.log
+_launch_log.txt
 .idea/
 .vscode/
 餐厅系统.zip

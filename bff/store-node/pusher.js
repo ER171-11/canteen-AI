@@ -51,6 +51,7 @@ const EXT_TABLES = {
   accept_standards: [],
   recv_accept: ['detail'],
   // Sprint 2 新增 10 模块（行直接序列化，无 JSON TEXT 列）
+  staff: [],
   staff_shifts: [],
   staff_clock: [],
   staff_perf: [],
@@ -62,6 +63,9 @@ const EXT_TABLES = {
   bookings: [],
   queue: [],
   queue_serves: [],
+  // 巡检统筹：闭店拍照登记与板块分工（写操作经 /api/actions 落业务库，须纳入快照推送）
+  inspection_records: [],
+  inspection_assignments: [],
   // 主数据补齐：会员/外卖/口碑/设备/财务/桌台
   vip_members: [],
   vip_balance: [],

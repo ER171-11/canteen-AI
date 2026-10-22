@@ -12,6 +12,8 @@
  *   阈值一律可配（BFF 本地 loss_config.json）。
  */
 
+const { isConsumable } = require('./ing_type'); // W4：耗材损耗单独统计，不进食材损耗率
+
 const LOSS_RATE_WARN = 1.0;
 const LOSS_RATE_REDLINE = 1.5;
 const BIG_AMOUNT = 500;
@@ -72,20 +74,31 @@ function lossReport(ext, data, cfg) {
   const revenue = r2(arr(data && data.sales).reduce((s, r) => s + salesAmount(r), 0));
   const rows = logs.map(normLossRecord);
 
-  const totalAmount = r2(rows.reduce((s, x) => s + x.amount, 0));
-  const totalQty = r2(rows.reduce((s, x) => s + x.qty, 0) + reports.reduce((s, r) => s + num(r && r.qty, 0), 0));
+  // W4：耗材损耗单独统计，不进食材损耗率（按原料名 → ings.type 判定；缺失 type 按食材处理）
+  const ingByName = {};
+  for (const g of arr(data && data.ings)) if (g && g.name) ingByName[str(g.name)] = g;
+  const isConsumableName = (n) => {
+    const g = ingByName[n];
+    return g ? isConsumable(g) : false;
+  };
+  const foodRows = rows.filter((x) => !isConsumableName(x.name));
+  const foodReports = reports.filter((r) => !isConsumableName(str(r && (r.ing_name || r.name))));
+
+  const totalAmount = r2(foodRows.reduce((s, x) => s + x.amount, 0));
+  const consumableAmount = r2(rows.reduce((s, x) => s + (isConsumableName(x.name) ? x.amount : 0), 0));
+  const totalQty = r2(foodRows.reduce((s, x) => s + x.qty, 0) + foodReports.reduce((s, r) => s + num(r && r.qty, 0), 0));
   const lossRate = revenue > 0 ? Math.round((totalAmount / revenue) * 10000) / 100 : null;
 
   const byReasonAmount = {};
-  rows.forEach((x) => { byReasonAmount[x.reason] = r2((byReasonAmount[x.reason] || 0) + x.amount); });
+  foodRows.forEach((x) => { byReasonAmount[x.reason] = r2((byReasonAmount[x.reason] || 0) + x.amount); });
   const byReasonQty = {};
-  reports.forEach((r) => {
+  foodReports.forEach((r) => {
     const k = str(r && r.reason) || '未分类';
     byReasonQty[k] = r2((byReasonQty[k] || 0) + num(r && r.qty, 0));
   });
 
   const byIng = {};
-  rows.forEach((x) => { byIng[x.name] = r2((byIng[x.name] || 0) + x.amount); });
+  foodRows.forEach((x) => { byIng[x.name] = r2((byIng[x.name] || 0) + x.amount); });
   const topIngredients = Object.keys(byIng).map((name) => ({ name, amount: byIng[name] })).sort((a, b) => b.amount - a.amount).slice(0, 6);
   const top = topIngredients[0];
   const topShare = (top && totalAmount > 0) ? Math.round((top.amount / totalAmount) * 1000) / 10 : null;
@@ -99,6 +112,7 @@ function lossReport(ext, data, cfg) {
   return {
     rows,
     total_amount: totalAmount,
+    consumable_amount: consumableAmount,
     total_qty: totalQty,
     revenue,
     loss_rate_pct: lossRate,

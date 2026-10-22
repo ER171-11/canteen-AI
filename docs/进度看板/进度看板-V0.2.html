@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>V0.2 发版进度看板 · 熊猫五福餐厅</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --ink: #1f2430;
+    --ink-2: #5b6472;
+    --line: #e6e9ef;
+    --brand: #2f6bff;
+    --brand-soft: #eaf0ff;
+    --green: #16a34a;
+    --green-soft: #e9f9ef;
+    --amber: #d97706;
+    --amber-soft: #fdf3e3;
+    --red: #dc2626;
+    --red-soft: #fdecec;
+    --orange: #ea580c;
+    --orange-soft: #fff0e5;
+    --gray: #8a94a6;
+    --gray-soft: #eef1f5;
+    --shadow: 0 1px 2px rgba(16,24,40,.05), 0 8px 24px rgba(16,24,40,.06);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    padding: 32px 24px 64px;
+  }
+  .wrap { max-width: 1160px; margin: 0 auto; }
+  header.top { margin-bottom: 24px; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; color: var(--brand);
+    background: var(--brand-soft); border-radius: 999px; padding: 5px 12px;
+  }
+  h1 { font-size: 26px; font-weight: 700; margin: 12px 0 6px; letter-spacing: -.3px; }
+  .sub { color: var(--ink-2); font-size: 14px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; border-radius: 8px; padding: 5px 10px;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink-2);
+  }
+  .chip b { color: var(--ink); font-weight: 700; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot.ok { background: var(--green); }
+  .dot.run { background: var(--amber); }
+  .dot.wait { background: var(--gray); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 20px; box-shadow: var(--shadow);
+  }
+  .stat .n { font-size: 30px; font-weight: 800; letter-spacing: -.5px; }
+  .stat .l { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+  .stat.accent .n { color: var(--brand); }
+  .stat.warn .n { color: var(--amber); }
+  .stat.ok .n { color: var(--green); }
+
+  .panel {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: var(--shadow); margin-bottom: 24px; overflow: hidden;
+  }
+  .panel-h { padding: 16px 22px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+  .panel-h h2 { font-size: 16px; font-weight: 700; }
+  .panel-h .hint { font-size: 12px; color: var(--ink-2); }
+
+  .overall { padding: 22px; }
+  .overall .bar-track { height: 12px; background: var(--gray-soft); border-radius: 999px; overflow: hidden; }
+  .overall .bar-fill { height: 100%; background: linear-gradient(90deg, var(--brand), #6b9aff); border-radius: 999px; width: 0; transition: width .5s ease; }
+  .overall .legend { display: flex; justify-content: space-between; margin-top: 10px; font-size: 12px; color: var(--ink-2); }
+
+  .batch { padding: 6px 22px 22px; }
+  .batch + .batch { border-top: 1px dashed var(--line); }
+  .batch-h { display: flex; align-items: center; gap: 10px; padding: 16px 0 12px; }
+  .badge {
+    font-size: 12px; font-weight: 700; border-radius: 6px; padding: 3px 9px; letter-spacing: .3px;
+  }
+  .badge.p0 { background: var(--red-soft); color: var(--red); }
+  .badge.p1 { background: var(--orange-soft); color: var(--orange); }
+  .badge.st-confirmed { background: var(--brand-soft); color: var(--brand); }
+  .badge.st-run { background: var(--amber-soft); color: var(--amber); }
+  .badge.st-wait { background: var(--gray-soft); color: var(--gray); }
+  .badge.st-done { background: var(--green-soft); color: var(--green); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+    background: linear-gradient(180deg, #fbfcfe, #fff); position: relative;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .card.run { border-color: #f4d8a8; }
+  .card.wait { opacity: .92; }
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .card-id { font-size: 12px; font-weight: 700; color: var(--brand); letter-spacing: .3px; }
+  .card h3 { font-size: 15px; font-weight: 700; margin: 2px 0 0; }
+  .card .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .card .sec { font-size: 13px; color: var(--ink-2); }
+  .card .sec b { color: var(--ink); font-weight: 600; }
+  .card ul { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  .card ul li { font-size: 12.5px; color: var(--ink-2); padding-left: 16px; position: relative; }
+  .card ul li::before { content: ""; position: absolute; left: 2px; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+  .card ul li.done { color: var(--green); }
+  .card ul li.done::before { background: var(--green); }
+  .card ul li.run { color: var(--amber); font-weight: 600; }
+  .card ul li.run::before { background: var(--amber); }
+  .dep { font-size: 12px; color: var(--ink-2); background: var(--gray-soft); border-radius: 6px; padding: 4px 8px; display: inline-block; }
+  .acc { font-size: 12.5px; color: var(--ink-2); border-left: 3px solid var(--brand-soft); padding-left: 10px; }
+
+  .note { background: var(--brand-soft); border: 1px solid #d5e2ff; border-radius: 12px; padding: 14px 18px; font-size: 13px; color: #274b9c; }
+  footer { text-align: center; font-size: 12px; color: var(--gray); margin-top: 28px; }
+  a { color: var(--brand); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <span class="kicker">熊猫五福餐厅 · 老板 AI App</span>
+    <h1>V0.2 发版进度看板</h1>
+    <p class="sub">下一版本工作项跟踪 · 主数据可信 / 检索可用 / 配方可简化 / 交易可还原</p>
+    <div class="meta">
+      <span class="chip">日期 <b>2026-10-20</b></span>
+      <span class="chip">状态 <b>已确认</b> <span class="dot ok"></span></span>
+      <span class="chip">基线 <b>V0.1（151 FP · ⬆️136 / ⬜11 / ⚰️4）</b></span>
+      <span class="chip">来源 <a href="发版计划-下一版本_2026-10-19.md">发版计划-下一版本_2026-10-19.md</a></span>
+    </div>
+  </header>
+
+  <section class="stats">
+    <div class="stat accent"><div class="n">6</div><div class="l">工作项总数</div></div>
+    <div class="stat"><div class="n">3</div><div class="l">P0 批次（W4 / W2 / W1）</div></div>
+    <div class="stat"><div class="n">3</div><div class="l">P1 批次（W6 / W3 / W5）</div></div>
+    <div class="stat ok"><div class="n">5</div><div class="l">已完成（W2 / W1 / W6 / W3 / W5）</div></div>
+    <div class="stat warn"><div class="n">1</div><div class="l">进行中（W4 存量归位）</div></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h"><h2>总体进度</h2><span class="hint">P0 + P1 全收口：W4/W2/W1（数据地基）+ W6/W3/W5（能力增强）已落地，npm test 全绿</span></div>
+    <div class="overall">
+      <div class="bar-track"><div class="bar-fill" id="overallBar" style="width:0"></div></div>
+      <div class="legend"><span>已确认 · 仅剩 W4 存量人工归位 + 三端 UI 对齐</span><span id="overallPct">—</span></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h"><h2>P0 批次 · 数据质量地基</h2><span class="hint">阻塞项优先，先 W4 后 W2/W1 并行</span></div>
+    <div class="batch">
+      <div class="cards" id="p0"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h"><h2>P1 批次 · 能力增强</h2><span class="hint">W6 / W3 / W5 后端已落地，仅剩前端 UI + 料水种子数据</span></div>
+    <div class="batch">
+      <div class="cards" id="p1"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h"><h2>关键依赖与风险</h2></div>
+    <div class="batch" style="display:flex; flex-direction:column; gap:10px;">
+      <div class="note">✅ <b>W5 依赖 W2 已解除</b>：检索域隔离已复用 W2 统一检索契约（W2=域内词条 ID、W5=域间隔离），<code>/api/search?domain=</code> 分发已落地。</div>
+      <div class="note">✅ <b>W6 改动面已收敛</b>：BOM 递归展开仅影响成本卡（buildCostCard），未动受保护函数 <code>rebuildStock</code> / <code>dishRecipeCost</code> / <code>seedDB</code>；防环 + 缩放单测覆盖。料水种子数据（店内端）列下一步。</div>
+      <div class="note">✅ <b>W3 与食安已对齐</b>：供应商资质复用 <code>foodsafety.certLevel/daysLeft</code> 唯一出口，不重复建字段；质检报告仅存 <code>qc_report_url</code> 引用。</div>
+      <div class="note">📱 <b>三端同步（待办）</b>：W3 供应商资质已 admin-web 落地，剩 Android/iOS 资质 UI + 原料详情「质检报告」入口；W5 分域 tab / W1-W2 UI 需 admin-web + Android/iOS 对齐，随 UI 批次推进。</div>
+    </div>
+  </section>
+
+  <footer>
+    数据源：<a href="发版计划-下一版本_2026-10-19.md">发版计划-下一版本_2026-10-19.md</a> ·
+    口径源：<code>bff/lib/ing_type.js</code>（W4）· <code>bff/lib/search.js</code>（W5）· <code>bff/lib/recipe_cost.js</code>（W6）· <code>bff/lib/supply.js</code>（W3） · 生成于 2026-10-20
+  </footer>
+</div>
+
+<script>
+const ITEMS = [
+  {
+    id: "W4", title: "原料库消耗品治理（食材 / 耗材分离）",
+    prio: "P0", status: "run", dep: "已决策（10 问拍板）✅",
+    tags: ["数据质量", "报表可信"],
+    sections: [
+      { t: "方案", v: "ings.type = 'food' | 'consumable' 语义分层；cat 收敛枚举（含「耗材包材」）；报表按 type 过滤" },
+      { t: "验收", v: "耗材 type='consumable'，不进菜品成本 / 损耗率分母 / 补货 / 比价；库存总值可拆食材 / 耗材展示" }
+    ],
+    steps: [
+      { s: "done", t: "新增 bff/lib/ing_type.js（resolveIngType / normalizeType / isFood / isConsumable 唯一口径源）" },
+      { s: "done", t: "createIng（配送单导入）+ applyIngUpsert（ing.upsert）新建原料自动打 type，支持人工纠偏" },
+      { s: "done", t: "平价测试 stripVolatile / normalize 剥除 ings[].type（Node 超集），算法 21/21 · seed 9/9 全绿" },
+      { s: "done", t: "五处口径过滤：成本 / 损耗 / 比价 / 补货 / 经营分析按 isFood 过滤，npm test 全绿" },
+      { s: "done", t: "存量回灌 type：新增清单.csv（68 行）写回（新建 67 + 更新 1，5 项耗材标 consumable）+ 95 项历史行 --normalize-history，rev 281 / 163 项 type 全显式" },
+      { s: "run", t: "人工归位 107 项 cat（建议值见归位工作单）+ 写回 cat/buy/conv/safe 四列（库管）" }
+    ]
+  },
+  {
+    id: "W2", title: "商品库结构化字段 + 受控词表 Tag（弃纯 Tag 模式）",
+    prio: "P0", status: "done", dep: "—",
+    tags: ["主数据地基", "双轨制", "W3/W5 前提"],
+    sections: [
+      { t: "方案", v: "双轨制：① 结构化字段（品类/单位/产地等固定下拉，禁自由文本）；② 受控词表 term{id,name,category,aliases} 多选关联；字段自动映射基础 Tag + 运营自定义营销 Tag；搜索按词条 ID 精确匹配" },
+      { t: "验收", v: "搜「东北/里脊/墨鱼」命中对应词条；「新疆/新疆产地/产自新疆」归一同一词条 ID；tag 不影响 recipe_cost 成本与 ing_alias 匹配" }
+    ],
+    steps: [
+      { s: "done", t: "ings[].tags（JSON 对象字段，无需 DDL，同 W4 type 手法）：新增 bff/lib/ing_terms.js（term 模型 / 别名归一 / 词条 ID 命中 / seed 受控词表）" },
+      { s: "done", t: "新增 bff/lib/algorithms/terms.js：term.upsert（词条申请→审核→上架）+ ing.attr_set（受控词条 ID + 自定义营销 Tag，未上架词条拒选）" },
+      { s: "done", t: "registry.js 注册 term.upsert / ing.attr_set；routes/inventory.js 加 GET /api/inventory/ing-terms（词表）+ /ing-terms/match（词条 ID 精确命中）" },
+      { s: "done", t: "前端 StockPage 多选词条录入（按维度分组 / 待审禁用）+ 词条管理入口 + 搜索命中高亮；terms.test.js 单测 + 算法层 22/22 全绿" }
+    ]
+  },
+  {
+    id: "W1", title: "供货单抹零 / 整单优惠（补 UI + 回归）",
+    prio: "P0", status: "done", dep: "口径已落地 ✅",
+    tags: ["交易还原", "三端同步"],
+    sections: [
+      { t: "方案", v: "gross 明细自动汇总、discount 手填、payable 只读联动；让利不摊入成本" },
+      { t: "验收", v: "可录入「总价 ≠ Σ 数量×单价」菜市场单；折扣不进成本 / 库存 / 损耗 / 毛利率口径" }
+    ],
+    steps: [
+      { s: "done", t: "admin-web RecvFormModal / OrderFormModal 已暴露 gross / discount 录入 + payable 只读联动（编辑预填 discount）" },
+      { s: "done", t: "Android / iOS 双端确认：走验收→入库 / 下单确认式流程，无金额明细录入表单，无抹零入口需对齐（不适用）" },
+      { s: "done", t: "回归全绿：resolveDocPayable 唯一出口，recv.inbound/update 抹零用例 + 新增 po.create/edit 抹零用例，avg 均价与行级 amount/unitCost 均不被折扣污染" }
+    ]
+  },
+  {
+    id: "W6", title: "菜谱 BOM 引入中间材料（半成品）",
+    prio: "P1", status: "done", dep: "能力已落地（料水种子数据列下一步）",
+    tags: ["配方简化", "改动面大"],
+    sections: [
+      { t: "方案", v: "新增中间材料库（或 recipes 加 type='semi'）；buildCostCard 由「配方→原料」改为递归展开，需防环；库存扣减递归到底层原料" },
+      { t: "验收", v: "配方引用「料水」等中间材料能递归展开到原料、成本正确、无环、库存扣减正确" }
+    ],
+    steps: [
+      { s: "done", t: "数据模型：collectSemiIndex（ext.recipes type='semi'）+ semiBaseGrams（一批出成_g 优先）" },
+      { s: "done", t: "BOM 展开：buildCostCard 递归 expand(rec, scale, stack) + 祖先链防环" },
+      { s: "done", t: "成本归集：batch_cost / unit_cost / portion_cost 口径不变（recipe_cost.test.js 验证）" },
+      { s: "done", t: "SKIP_NAMES 料水/清水从「跳过」改为「可选中间材料」（有库则展开、无库则跳过）" },
+      { s: "done", t: "九处 buildCostCard 调用点统一传 ext.recipes，能力即插即用" },
+      { s: "run", t: "料水中间材料种子（recipes type='semi' 行 + 同步 seed 平价对拍，店内端补充）" }
+    ]
+  },
+  {
+    id: "W3", title: "产品超链接（质检报告 / 资质）",
+    prio: "P1", status: "done", dep: "后端 + admin-web 已落地（原料详情质检报告入口 + Android/iOS 列下一步）",
+    tags: ["食安", "资质"],
+    sections: [
+      { t: "方案", v: "质检报告/资质独立存储（关联子表/对象存储），ings 仅存 qc_report_url 引用避免主表臃肿；sup_vendors 补资质字段（执照/经营许可/检验合格 + 有效期），复用 foodsafety certLevel/certReport" },
+      { t: "验收", v: "原料详情可点「质检报告」跳转；供应商资质展示有效期" }
+    ],
+    steps: [
+      { s: "done", t: "ings.qc_report_url（JSON 对象字段，显式传入才写，平价测试逐字段一致，无需 DDL）" },
+      { s: "done", t: "sup_vendors.certs 资质证照 [{type,cert_no,expire_at,url}] + normalizeCerts 归一（不加表，同 W4 手法）" },
+      { s: "done", t: "vendor.upsert 扩展 + supply 路由资质临期分级（certSummary 复用 foodsafety certLevel/daysLeft）" },
+      { s: "done", t: "编辑显式清空证照：upsertVendor hasCerts 判定（edit 显式传空数组写 null，缺省不清空）" },
+      { s: "done", t: "admin-web VendorsPage 资质 UI：登记/编辑证照子表（Form.List）+ 资质列分级 Tag + cert_expiring 临期提醒条（tsc 通过）" },
+      { s: "run", t: "原料详情「质检报告」入口 + Android/iOS 双端资质 UI（UI 批次）" }
+    ]
+  },
+  {
+    id: "W5", title: "检索域隔离 + 搜索索引字段管控",
+    prio: "P1", status: "done", dep: "后端落地（复用 W2 检索契约，前端分域 tab 列下一步）",
+    tags: ["检索", "域隔离", "敏感字段白名单"],
+    sections: [
+      { t: "方案", v: "业务域枚举（商品采购/财务税务/食安/员工/设备/销售）；/api/search?domain=&q= 按域切分 + 索引字段白名单（税号/供应商内部编码/成本价不入索引）；全局搜索分域 tab" },
+      { t: "验收", v: "搜「商品购买」仅返回商品/采购域，税号/发票/分账/供应商内部编码不出现；各 tab 互不串味" }
+    ],
+    steps: [
+      { s: "done", t: "业务域枚举 + lib/search.js 索引白名单 + SENSITIVE_FIELDS 敏感字段黑名单（双保险）" },
+      { s: "done", t: "routes/search.js（GET /api/search、/api/search/domains）按 domain 分发，已注册 server.js" },
+      { s: "done", t: "与 W2 检索契约合并（W2 域内词条 ID / W5 域间隔离），search.test.js 单测全绿" },
+      { s: "run", t: "前端全局搜索改分域 tab（UI 批次）" },
+      { s: "done", t: "按品类逐层拆表：与「慎建新表」红线冲突，本版不落（文档已标注）" }
+    ]
+  }
+];
+
+const STATUS = {
+  run: { cls: "st-run", label: "进行中" },
+  wait: { cls: "st-wait", label: "待启动" },
+  done: { cls: "st-done", label: "已完成" },
+  confirmed: { cls: "st-confirmed", label: "已确认" }
+};
+
+function cardHtml(item) {
+  const st = STATUS[item.status];
+  const dep = item.dep && item.dep !== "—" ? `<span class="dep">依赖 / 前提：${item.dep}</span>` : `<span class="dep">无前置依赖</span>`;
+  const secs = item.sections.map(s =>
+    `<div class="sec"><b>${s.t}：</b>${s.v}</div>`).join("");
+  const steps = item.steps.map(s => {
+    const mark = s.s === "done" ? "done" : (s.s === "run" ? "run" : "");
+    return `<li class="${mark}">${s.t}</li>`;
+  }).join("");
+  return `<div class="card ${item.status === 'run' ? 'run' : (item.status === 'wait' ? 'wait' : '')}">
+    <div class="card-top">
+      <div>
+        <span class="card-id">${item.id}</span>
+        <h3>${item.title}</h3>
+      </div>
+      <span class="badge ${st.cls}">${st.label}</span>
+    </div>
+    <div class="tags">
+      <span class="badge ${item.prio.toLowerCase()}">${item.prio}</span>
+      ${item.tags.map(t => `<span class="chip">${t}</span>`).join("")}
+    </div>
+    ${secs}
+    ${dep}
+    <ul>${steps}</ul>
+  </div>`;
+}
+
+document.getElementById("p0").innerHTML = ITEMS.filter(i => i.prio === "P0").map(cardHtml).join("");
+document.getElementById("p1").innerHTML = ITEMS.filter(i => i.prio === "P1").map(cardHtml).join("");
+
+// 总体进度：按已完成子任务 / 总子任务 粗略估算
+const totalSteps = ITEMS.reduce((n, i) => n + (i.steps ? i.steps.length : 0), 0);
+const doneSteps = ITEMS.reduce((n, i) => n + (i.steps ? i.steps.filter(s => s.s === "done").length : 0), 0);
+const runSteps = ITEMS.reduce((n, i) => n + (i.steps ? i.steps.filter(s => s.s === "run").length : 0), 0);
+const pct = Math.round(((doneSteps + runSteps * 0.5) / totalSteps) * 100);
+document.getElementById("overallBar").style.width = pct + "%";
+document.getElementById("overallPct").textContent = `${pct}%（完成 ${doneSteps} / 进行 ${runSteps} / 共 ${totalSteps} 子任务）`;
+</script>
+</body>
+</html>

@@ -32,6 +32,8 @@ COLL_KEY = {
     # 云端队列写入的采购/进货必须参与合并，否则入库单与库存重算会在冲突路径丢失
     "orders": "id",
     "recv": "id",
+    # 受控词表存 JSON 快照（data.ing_terms），按词条 id 合并
+    "ing_terms": "id",
 }
 
 
