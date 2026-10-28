@@ -65,6 +65,8 @@ function normalize(d) {
       if (k === '_u' || k === 'ts') { o[k] = '<TS>'; continue; }
       // W4 · ings[].type 为 Node 超集字段（食材/耗材语义分层），Python 参考实现尚未产出，平价比较前剥除（仅原料对象）
       if (k === 'type' && typeof o.id === 'string' && /^I\d+$/.test(o.id)) { delete o[k]; continue; }
+      // Phase 2 · vendors[].category 为 Node 超集口径（受控词条 ID，Python 参考实现仍是自由文本），两端一并剥除后比较
+      if (k === 'category' && typeof o.vendor_id === 'string' && o.vendor_id) { delete o[k]; continue; }
       if (k === 'id') {
         if (typeof o[k] === 'string' && /^[A-Z]+[0-9a-fA-F]{6,}$/.test(o[k])) o[k] = '<ID>';
         continue;

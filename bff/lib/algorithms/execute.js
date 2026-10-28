@@ -78,6 +78,39 @@ function makeExtStore(ext, opts) {
     },
     query(table) {
       return Array.isArray(e[table]) ? e[table].slice() : [];
+    },
+    /**
+     * 按主键取行：ext 表没有统一主键（sup_vendors 用 vendor_id、其余多用 id），
+     * 依次尝试 id / vendor_id / name —— 与 sqlite 适配器 get(table,id) 契约对齐。
+     */
+    get(table, id) {
+      const rows = Array.isArray(e[table]) ? e[table] : [];
+      const key = String(id == null ? '' : id);
+      if (!key) return null;
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        for (const k of ['id', 'vendor_id', 'name']) {
+          if (row[k] != null && String(row[k]) === key) return row;
+        }
+      }
+      return null;
+    },
+    /** DELETE：where 为空拒绝执行（防全表删），原地 splice 保持数组引用（算法层持有同一份） */
+    remove(table, where) {
+      const rows = tableRows(table);
+      const w = Object.assign({}, where || {});
+      const keys = Object.keys(w).filter((k) => w[k] !== undefined && w[k] !== null);
+      if (!keys.length) {
+        audit.push({ op: 'remove', table, where: w, count: 0, rejected: 'empty where' });
+        return { ok: false, table, rowcount: 0 };
+      }
+      let n = 0;
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i];
+        if (keys.every((k) => String(row && row[k]) === String(w[k]))) { rows.splice(i, 1); n += 1; }
+      }
+      audit.push({ op: 'remove', table, where: w, count: n });
+      return { ok: true, table, rowcount: n };
     }
   };
 }

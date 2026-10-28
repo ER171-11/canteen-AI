@@ -153,4 +153,40 @@ ok('编辑新增原料自动建档：name 行无 ing_id → 档案 +1、库存�
   assert.strictEqual(d.payable, 10);
 });
 
+/* 11) 事故回归：补付已结清后再编辑又全额填「实付」→ 实付+补付 合计超应付，必须拒绝
+      （2026-10-27 JH20261027-01 实付累积翻倍 328.4→656.8 的根因） */
+ok('编辑超付口径含补付：补付 300 结清后再编辑 paid=300 被拒', () => {
+  const data = mkData();
+  data.recv[0].payments = [
+    { amount: 300, date: '2026-09-30', method: '挂账转销', source: 'admin-web/inventory/inbound', ts: '2026-09-30T10:00:00Z' }
+  ];
+  assert.throws(
+    () => inv.applyRecvUpdate(data, Object.assign({}, BASE, { paid: 300 })),
+    /已登记补付/,
+    '错误信息应点明「已登记补付」'
+  );
+  const d = data.recv[0];
+  assert.strictEqual(d.payments.length, 1, '拒绝后 payments 不得被改动');
+  assert.strictEqual(d.payments[0].amount, 300);
+});
+
+/* 12) 边界：实付 + 补付 恰好等于应付 → 放行 */
+ok('边界：paid 200 + 补付 100 = 应付 300 → 放行且 payments 合计 300', () => {
+  const data = mkData();
+  data.recv[0].payments.push({ amount: 100, date: '2026-09-30', method: '微信', source: 'admin-web/inventory/inbound', ts: '2026-09-30T10:00:00Z' });
+  inv.applyRecvUpdate(data, Object.assign({}, BASE, { paid: 200, method: '现金/转账' }));
+  const d = data.recv[0];
+  const total = d.payments.reduce((s, p) => s + p.amount, 0);
+  assert.strictEqual(d.payments.length, 2);
+  assert.strictEqual(total, 300, '初始 200 + 补付 100');
+});
+
+/* 13) 实付填 0：初始付款清空、补付保留（对齐用户手工纠偏动作） */
+ok('编辑 paid=0：初始清空、仅保留补付', () => {
+  const data = mkData();
+  inv.applyRecvUpdate(data, Object.assign({}, BASE, { paid: 0 }));
+  const d = data.recv[0];
+  assert.strictEqual(d.payments.length, 0);
+});
+
 console.log('[recv_update.test] PASS ' + pass + ' cases');

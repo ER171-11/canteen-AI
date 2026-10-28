@@ -1,26 +1,26 @@
 'use strict';
 /*
- * lib/algorithms/terms.js — W2 受控词表写侧算法（Node 超集，无 Python 对拍）
+ * lib/algorithms/terms.js — 受控词表写侧算法（Node 超集，无 Python 对拍）
  *
- *   term.upsert → applyTermUpsert   词条申请 / 审核 / 上架 / 改名 / 改别名
- *   ing.attr_set → applyIngAttrSet  给原料关联受控词条 Tag（词条 ID）+ 自定义营销 Tag
+ *   term.upsert          → applyTermUpsert        词条申请 / 审核 / 上架 / 改名 / 改别名
+ *   ing.attr_set         → applyIngAttrSet        给原料关联受控词条 Tag（词条 ID）+ 自定义营销 Tag
+ *   supplier_term.upsert → applyVendorTermUpsert  供应商类目词条申请 / 审核 / 上架（Phase 2）
+ *   vendor.attr_set      → applyVendorAttrSet     给供应商设置受控类目（单选标量，禁自定义）
+ *   vendor_term.backfill → applyVendorTermBackfill 存量 vendor.category 自由文本 → 词条 ID 归一
+ *
+ * 重构说明：通用机制已抽到 lib/terms_core.js；本文件只保留领域知识，
+ *           校验规则与返回文案保持与改造前一致（既有测试以正则断言文案片段）。
  *
  * 红线对齐（发版计划 §1）：
  *   - 纯函数优先，原地 mutate data（与 inventory.js 同手法），写库统一走 ctx.store（此处不涉及旁路表）。
- *   - 词条 / tags 存 JSON 快照（data.ing_terms / ings[].tags），补字段优先、不建 SQLite 表。
- *   - tag 不进任何成本 / 库存 / 损耗 / 毛利率口径（仅检索与渲染）。
+ *   - 词条 / tags 存 JSON 快照（data.ing_terms / data.vendor_terms / ings[].tags / vendors[].category），
+ *     补字段优先、不建 SQLite 表。
+ *   - tag / 类目不进任何成本 / 库存 / 损耗 / 毛利率口径（仅检索与渲染）。
  *   - 词条 ID 精确匹配（resolveTermIds），别名归一到同一词条 ID。
  */
-const {
-  TERM_CATEGORIES,
-  TERM_STATUSES,
-  seedTerms,
-  isTermId,
-  isCustomTag,
-  termsOf,
-  nextTermId,
-  resolveTermIds,
-} = require('../ing_terms');
+const { seedTerms, termsOf, ING_CONFIG } = require('../ing_terms');
+const supTerms = require('../supplier_terms');
+const core = require('../terms_core');
 const { nowIso, arr } = require('./util');
 
 /** 确保 data.ing_terms 存在：首次写入时以 seed 初始化（写进快照成为持久化起点） */
@@ -53,57 +53,13 @@ function locateIng(data, payload) {
 function applyTermUpsert(data, payload) {
   if (!payload || typeof payload !== 'object') throw new Error('缺少词条载荷');
   const terms = ensureTerms(data);
+  const r = core.upsertTerm(terms, payload, ING_CONFIG);
 
-  const name = String(payload.name || '').trim();
-  const category = String(payload.category || '').trim();
-  const id = String(payload.id || '').trim();
-
-  if (!id && !name) throw new Error('缺少词条 id 或 name');
-  if (!id && !category) throw new Error('新建词条必须指定 category（受控维度）');
-  if (category && TERM_CATEGORIES.indexOf(category) < 0) {
-    throw new Error('category 不在受控维度白名单内：' + category + '（允许：' + TERM_CATEGORIES.join('/') + '）');
+  if (r.created) {
+    return '词条新建 ' + r.id + ' ' + r.name + '（' + r.category + '，'
+      + (r.status === 'active' ? '已上架' : '待审核') + '）';
   }
-  if (payload.status != null && TERM_STATUSES.indexOf(payload.status) < 0) {
-    throw new Error('status 非法：' + payload.status + '（允许：' + TERM_STATUSES.join('/') + '）');
-  }
-
-  // 别名归一化：去空、去重、剔除与标准名重复项
-  let aliases = null;
-  if (payload.aliases != null) {
-    const set = new Set();
-    for (const a of arr(payload.aliases)) {
-      const s = String(a == null ? '' : a).trim();
-      if (s && s !== name) set.add(s);
-    }
-    aliases = Array.from(set);
-  }
-
-  if (id) {
-    const t = terms.find((x) => x && String(x.id) === id);
-    if (!t) throw new Error('词条不存在：' + id);
-    if (name) t.name = name;
-    if (category) t.category = category;
-    if (aliases) t.aliases = aliases;
-    if (payload.status != null) t.status = payload.status;
-    t._u = nowIso();
-    return '词条更新 ' + t.id + ' ' + t.name + '（' + t.category + '）';
-  }
-
-  // 新建：name 唯一（归一后比较，避免「新疆」与「新疆产地」并存）
-  const nk = String(name);
-  const dup = terms.find((x) => x && String(x.name || '') === nk);
-  if (dup) throw new Error('词条已存在：' + nk + '（' + dup.id + '）');
-
-  const row = {
-    id: nextTermId(terms),
-    name: nk,
-    category,
-    aliases: aliases || [],
-    status: payload.status || 'pending',
-    _u: nowIso(),
-  };
-  terms.push(row);
-  return '词条新建 ' + row.id + ' ' + row.name + '（' + row.category + '，' + (row.status === 'active' ? '已上架' : '待审核') + '）';
+  return '词条更新 ' + r.id + ' ' + r.name + '（' + r.category + '）';
 }
 
 /**
@@ -118,28 +74,175 @@ function applyIngAttrSet(data, payload) {
   const ing = locateIng(data, payload);
   if (!ing) throw new Error('未找到原料：' + (payload.id || payload.ing_id || payload.name || ''));
 
-  const raw = payload.tags == null ? [] : (Array.isArray(payload.tags) ? payload.tags : [payload.tags]);
   const terms = termsOf(data);
-  const allIds = new Set(terms.map((t) => t && String(t.id)));
-  const activeIds = new Set(terms.filter((t) => t && String(t.status || 'active') === 'active').map((t) => String(t.id)));
+  const r = core.applyTags(ing, payload.tags, terms, {
+    mode: 'multiple',
+    allowCustom: true,
+    field: 'tags',
+    config: ING_CONFIG,
+  });
+
+  ing._u = nowIso();
+  return '原料属性已更新 ' + ing.id + ' ' + ing.name + '（tag ' + r.count + ' 项）';
+}
+
+/* ==================== Phase 2：供应商类目受控词表 ==================== */
+
+/** 确保 data.vendor_terms 存在：首次写入时以 seed 初始化（写进快照成为持久化起点） */
+function ensureVendorTerms(data) {
+  if (!Array.isArray(data.vendor_terms)) data.vendor_terms = supTerms.seedTerms();
+  return data.vendor_terms;
+}
+
+/**
+ * 供应商档案并集：data.vendors（旧口径） + ext.sup_vendors / store（新表口径）。
+ * 只用于定位与就地改字段；写库同步走 ctx.store.upsert（与 upsertVendor 同手法）。
+ */
+function vendorRowsOf(data, ctx) {
   const out = [];
-  for (const rawTag of raw) {
-    const s = String(rawTag == null ? '' : rawTag).trim();
-    if (!s) continue;
-    if (isTermId(s)) {
-      if (!allIds.has(s)) throw new Error('引用了不存在的词条 ID：' + s + '（请先在词条库申请）');
-      if (!activeIds.has(s)) throw new Error('词条未上架，不能选用：' + s + '（请先在词条库审核上架）');
-      out.push(s);
-    } else if (isCustomTag(s)) {
-      out.push(s);
+  const push = (v) => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return;
+    if (out.indexOf(v) < 0) out.push(v);
+  };
+  for (const v of arr(data && data.vendors)) push(v);
+  const ext = (ctx && ctx.store && ctx.store.ext) || null;
+  for (const v of arr(ext && ext.sup_vendors)) push(v);
+  return out;
+}
+
+/** 按 vendor_id / id / name 定位供应商档案（与列表口径同源并集） */
+function locateVendor(data, payload, ctx) {
+  const keys = [];
+  for (const k of [payload && payload.vendor_id, payload && payload.id, payload && payload.name]) {
+    const s = String(k == null ? '' : k).trim();
+    if (s && keys.indexOf(s) < 0) keys.push(s);
+  }
+  if (!keys.length) return null;
+  for (const v of vendorRowsOf(data, ctx)) {
+    for (const k of [v.vendor_id, v.id, v.name]) {
+      const s = String(k == null ? '' : k).trim();
+      if (s && keys.indexOf(s) >= 0) return v;
+    }
+  }
+  return null;
+}
+
+/**
+ * supplier_term.upsert：供应商类目词条申请-审核-上架。
+ *   payload: { id?, name, category?, aliases?: string[], status? }
+ *   - category 缺省按供应商域唯一维度「供应商类目」补齐，前端只需传 name。
+ */
+function applyVendorTermUpsert(data, payload) {
+  if (!payload || typeof payload !== 'object') throw new Error('缺少词条载荷');
+  const terms = ensureVendorTerms(data);
+  const body = Object.assign({}, payload);
+  if (!body.id && !body.category) body.category = supTerms.SUP_TERM_CATEGORIES[0];
+  const r = core.upsertTerm(terms, body, supTerms.SUP_CONFIG);
+
+  if (r.created) {
+    return '供应商类目词条新建 ' + r.id + ' ' + r.name + '（'
+      + (r.status === 'active' ? '已上架' : '待审核') + '）';
+  }
+  return '供应商类目词条更新 ' + r.id + ' ' + r.name;
+}
+
+/**
+ * vendor.attr_set：给供应商设置受控类目（单选标量）。
+ *   payload: { vendor_id|id|name, category }
+ *   - category 接受词条 ID / 标准名 / 别名（别名归一）；不允许自定义文本（落「其他」兜底）；
+ *   - 空字符串 / null → 清空类目；
+ *   - 只改 vendors[].category（词条 ID 标量），不动成本 / 库存 / 往来账。
+ */
+function applyVendorAttrSet(data, payload, ctx) {
+  if (!payload || typeof payload !== 'object') throw new Error('缺少属性载荷');
+  const v = locateVendor(data, payload, ctx);
+  if (!v) {
+    throw new Error('未找到供应商：'
+      + (payload.vendor_id || payload.id || payload.name || ''));
+  }
+
+  const terms = ensureVendorTerms(data);
+  const raw = payload.category != null ? payload.category
+    : (payload.cat != null ? payload.cat
+      : (payload.category_id != null ? payload.category_id : payload.term));
+  const resolved = raw == null || String(raw).trim() === ''
+    ? { id: null, name: null, matched: false }
+    : supTerms.resolveCategory(raw, terms);
+
+  const r = core.applyTags(v, resolved.id ? [resolved.id] : [], terms, {
+    mode: 'single',
+    allowCustom: false,
+    scalar: true,       // vendor.category 是标量字段（不是数组）
+    field: 'category',
+    config: supTerms.SUP_CONFIG,
+  });
+
+  const vid = String(v.vendor_id || v.id || '').trim();
+  v._u = nowIso();
+  /* 新表口径同步（ext 源时同一数组引用已改；sqlite 源需 upsert 落库） */
+  if (vid && ctx && ctx.store && typeof ctx.store.upsert === 'function') {
+    ctx.store.upsert('sup_vendors', {
+      vendor_id: vid,
+      category: r.ids.length ? r.ids[0] : null,
+      updated_at: v._u,
+    }, ['vendor_id']);
+  }
+
+  if (!r.ids.length) return '供应商类目已清空 ' + (vid || v.name);
+  const label = supTerms.resolveCategory(r.ids[0], terms);
+  /* 未命中词条的自由文本落「其他」：回执里留原文，避免脏数据被静默吞掉 */
+  const note = resolved.matched === false
+    ? '，原文「' + resolved.input + '」未匹配词条已归入「其他」'
+    : '';
+  return '供应商类目已更新 ' + (vid || v.name) + '（' + r.ids[0] + ' '
+    + (label.name || r.ids[0]) + note + '）';
+}
+
+/**
+ * vendor_term.backfill：存量 vendor.category 自由文本 → 词条 ID 归一（幂等）。
+ *   - 已归一（值即词条 ID）→ 跳过，可反复执行；
+ *   - 命中标准名 / 别名 → 写词条 ID；
+ *   - 未命中 → 落兜底词条「其他」并在回执里计数（不静默吞掉脏数据）。
+ * 只改档案类目字段，不动价格 / 库存 / 往来账。
+ */
+function applyVendorTermBackfill(data, ctx) {
+  const terms = ensureVendorTerms(data);
+  let changed = 0;
+  let fallback = 0;
+  let skipped = 0;
+
+  for (const v of vendorRowsOf(data, ctx)) {
+    const raw = String(v.category == null ? '' : v.category).trim();
+    if (!raw) { skipped += 1; continue; }
+    const r = supTerms.resolveCategory(raw, terms);
+    if (!r.id) { skipped += 1; continue; }
+    if (raw === r.id) { skipped += 1; continue; }
+
+    v.category = r.id;
+    v._u = nowIso();
+    changed += 1;
+    if (!r.matched) fallback += 1;
+
+    const vid = String(v.vendor_id || v.id || '').trim();
+    if (vid && ctx && ctx.store && typeof ctx.store.upsert === 'function') {
+      ctx.store.upsert('sup_vendors', { vendor_id: vid, category: r.id, updated_at: v._u }, ['vendor_id']);
     }
   }
 
-  const uniq = Array.from(new Set(out));
-  if (uniq.length) ing.tags = uniq;
-  else delete ing.tags;
-  ing._u = nowIso();
-  return '原料属性已更新 ' + ing.id + ' ' + ing.name + '（tag ' + uniq.length + ' 项）';
+  return '供应商类目归一完成：更新 ' + changed + ' 家（其中未匹配归入「其他」'
+    + fallback + ' 家，已归一/空值跳过 ' + skipped + ' 家）';
 }
 
-module.exports = { applyTermUpsert, applyIngAttrSet, ensureTerms, locateIng };
+module.exports = {
+  applyTermUpsert,
+  applyIngAttrSet,
+  ensureTerms,
+  locateIng,
+  /* Phase 2：供应商类目受控词表 */
+  ensureVendorTerms,
+  vendorRowsOf,
+  locateVendor,
+  applyVendorTermUpsert,
+  applyVendorAttrSet,
+  applyVendorTermBackfill,
+};

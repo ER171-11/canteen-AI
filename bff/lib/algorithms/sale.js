@@ -20,6 +20,20 @@ const crypto = require('crypto');
 const { today, nowIso, num, r2, arr } = require('./util');
 const model = require('../sales_model');
 const salesImport = require('../sales_import');
+const pos = require('./pos');
+
+/* ---------- 特性开关：真实出餐销售统一走 POS 扣料 ----------
+ * 进销存-真实出餐销售统一走pos扣料+特性开关
+ *   · 开关 key：data.config.saleRealDeduct（默认关闭，保护现有数据）
+ *   · 开关开启后，admin-web 手工录入(sale.create)的真实出餐单也按配方 BOM 扣减库存
+ *   · pos.pay 维持必扣（已是 POS 路径），sale.import 不扣（避免与平台自有 POS 重复扣）
+ *   · 扣料复用 pos.deductBomForSaleItems —— 与移动端结账同一套逻辑，口径唯一
+ *   · 开关经 POST /api/admin/config（config.update 动作）后台可切
+ */
+function saleRealDeductEnabled(data) {
+  const cfg = (data && data.config && typeof data.config === 'object') ? data.config : null;
+  return !!(cfg && cfg.saleRealDeduct);
+}
 
 /* ---------- 通用辅助 ---------- */
 
@@ -84,7 +98,7 @@ function normalizeLines(payload) {
  *
  * 失败一律 throw（消费器置 failed），绝不静默截断（红线⑥）。
  */
-function applySaleCreate(data, payload) {
+function applySaleCreate(data, payload, ctx) {
   if (data.sales === undefined || data.sales === null) data.sales = [];
   if (!Array.isArray(data.sales)) throw new Error('data.sales 不是数组');
 
@@ -158,10 +172,24 @@ function applySaleCreate(data, payload) {
 
   data.sales.push(row);
 
+  // 特性开关：真实出餐销售统一走 POS 扣料（进销存-真实出餐销售统一走pos扣料+特性开关）。
+  // 开关关闭（默认）→ 仅记销售单/应收，不扣料（与历史行为一致，保护现有数据）。
+  // 开关开启 → 手工录入的真实出餐单复用 pos.deductBomForSaleItems 按配方 BOM 扣减库存。
+  // 扣料异常绝不阻断销售单落库：记「跳过」回执，交由人工/日志排查（对齐 pos.pay 容错）。
+  let bomMsg = '';
+  if (ctx && lines.length && saleRealDeductEnabled(data)) {
+    try {
+      const bom = pos.deductBomForSaleItems(ctx, data, lines, '销售单#' + row.no, payload.table_id);
+      if (bom) bomMsg = '；' + bom;
+    } catch (e) {
+      bomMsg = '；BOM扣料跳过(' + e.message + ')';
+    }
+  }
+
   const debt = Math.max(0, r2(receivable - paid));
   return 'sale.create ' + row.no + ' ' + date + ' 售价合计 ' + sub
     + ' · 折扣 ' + discount + ' · 应收 ' + receivable + ' · 首付 ' + paid
-    + ' · 欠款 ' + debt + '（派生，未落库）';
+    + ' · 欠款 ' + debt + '（派生，未落库）' + bomMsg;
 }
 
 /* ---------- sale.pay ---------- */
@@ -577,5 +605,6 @@ module.exports = {
   applySaleAmtRecalc,
   applyDishAliasSet,
   applyDishAliasDelete,
+  saleRealDeductEnabled,
   nextSaleNo,
 };

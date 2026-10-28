@@ -33,6 +33,7 @@ const crypto = require('crypto');
 const { today, nowIso, num, r2, r3, arr } = require('./util');
 const { rebuildStock } = require('./stock');
 const { resolveIngType, normalizeType } = require('../ing_type');
+const supTerms = require('../supplier_terms');
 
 /* ---------- 通用辅助 ---------- */
 
@@ -1175,11 +1176,17 @@ function applyRecvUpdate(data, payload) {
   const prior = Array.isArray(doc.payments)
     ? doc.payments.filter((p) => p && (p.source || p.ts))
     : [];
+  const priorSum = Math.round(prior.reduce((s, p) => s + (toFloat(p.amount) || 0), 0) * 100) / 100;
   if (payload.paid !== undefined && payload.paid !== null && payload.paid !== '') {
     const paid = Math.round(toFloat(payload.paid) * 100) / 100;
     if (paid < 0) throw new Error('recv.update paid 不能为负数');
-    if (paid > num(doc.payable, 0) + 0.01) {
-      throw new Error('recv.update 实付超过应付 ' + num(doc.payable, 0) + '（超付请核对后重填）');
+    /* 超付口径 = 本次初始实付 + 已登记补付 合计不得超过应付
+       （否则像「补付已结清后再编辑又全额填实付」会把实付累积翻倍） */
+    if (paid + priorSum > num(doc.payable, 0) + 0.01) {
+      throw new Error(
+        'recv.update 实付 ' + paid + ' + 已登记补付 ' + priorSum +
+        ' 超过应付 ' + num(doc.payable, 0) + '（超付请核对后重填）',
+      );
     }
     const method = pt(payload.method) || doc.method || '现金/转账';
     const initial = paid > 0 ? [{ amount: paid, date: doc.date || today(), method: method }] : [];
@@ -1744,6 +1751,71 @@ function normalizeCerts(raw) {
   return out.length ? out : null;
 }
 
+/* ---------- vendor 档案取数（与列表口径同源） ---------- */
+
+/**
+ * Phase 2 供应商类目归一：自由文本 / 别名 / 词条 ID → 受控词条 ID（S 前缀）。
+ *   - 空值原样返回（保留旧行为：新建缺省不写类目）；
+ *   - 未命中词条 → 兜底「其他」（S005），由 vendor_term.backfill 可重复收口；
+ *   - 只读 data.vendor_terms（缺失回退 seed），本函数不写词表、不建表。
+ */
+function vendorCategoryOf(data, raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return raw;
+  const r = supTerms.resolveCategory(s, supTerms.termsOf(data));
+  return r.id || raw;
+}
+
+/** 新表 sup_vendors 行：优先快照 ext（BFF apply），其次 sqlite（店内 consumer）；表不存在 → 空数组 */
+function vendorStoreRows(ctx) {
+  if (!(ctx && ctx.store)) return [];
+  const e = ctx.store.ext;
+  if (e && Array.isArray(e.sup_vendors)) return e.sup_vendors;
+  if (typeof ctx.store.query === 'function') {
+    try {
+      const rows = ctx.store.query('SELECT * FROM sup_vendors');
+      if (Array.isArray(rows)) return rows;
+    } catch (err) { /* 表不存在 / 查询失败 → 空 */ }
+  }
+  return [];
+}
+
+/**
+ * 供应商档案写回源：
+ *   data.vendors **是数组**（含空数组）→ 旧口径（档案随主数据快照走，与 Python 参考实现平价）；
+ *   data.vendors 缺失（undefined/null）→ 新表 sup_vendors（ext / sqlite）。
+ * 返回 {rows, from}；rows 是**可原地修改**的引用（ext 数组改完由执行器回写快照）。
+ *
+ * 注意「列表口径」是 data.vendors 非空优先、空则回落 ext.sup_vendors（lib/supply.js），
+ * 所以**校验**必须把两源并起来看（vendorAllRows），否则会出现
+ * 「列表看得见（ext.sup_vendors）、编辑说找不到」→ 动作被置已驳回。
+ */
+function vendorSource(data, ctx) {
+  if (data && Array.isArray(data.vendors)) return { rows: data.vendors, from: 'data' };
+  return { rows: vendorStoreRows(ctx), from: 'store' };
+}
+
+/** 定位用并集：data.vendors + 新表 sup_vendors（判重/编辑定位，不用于写回） */
+function vendorAllRows(data, ctx) {
+  const out = [];
+  for (const v of arr(data && data.vendors)) out.push(v);
+  for (const v of vendorStoreRows(ctx)) {
+    if (out.indexOf(v) < 0) out.push(v);
+  }
+  return out;
+}
+
+/** 档案行可用于定位的键（vendor_id / id / name） */
+function vendorKeysOf(v) {
+  const out = [];
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  for (const k of [v.vendor_id, v.id, v.name]) {
+    const s = String(k == null ? '' : k).trim();
+    if (s && out.indexOf(s) < 0) out.push(s);
+  }
+  return out;
+}
+
 /**
  * vendor.upsert：供应商档案新建 / 覆盖（按 vendor_id 或 name 幂等）。
  *
@@ -1767,7 +1839,8 @@ function upsertVendor(data, payload, ctx) {
 
   const contact = payload.contact;
   const phone = payload.phone;
-  const category = payload.category || payload.cat;
+  /* Phase 2：类目落受控词条 ID（别名归一，未命中落「其他」），展示侧再还原标准名 */
+  const category = vendorCategoryOf(data, payload.category || payload.cat);
   const level = payload.level === undefined ? payload.rating : payload.level;
   const status = payload.status || '合作中';
   const period = payload.period || payload.settle || '月结30天';
@@ -1777,18 +1850,24 @@ function upsertVendor(data, payload, ctx) {
   const certs = normalizeCerts(payload.certs || payload.licenses);
   const now = nowIso();
 
+  /* 档案当前生效源：与列表同源（data.vendors 优先，否则 sup_vendors 新表） */
+  const src = vendorSource(data, ctx);
+  const keys = [];
+  for (const k of [vid, name, payload.old_name]) {
+    const s = String(k == null ? '' : k).trim();
+    if (s && keys.indexOf(s) < 0) keys.push(s);
+  }
+
   /**
    * 编辑模式必须先定位到原档案：定位不到就报错，**绝不静默新建**。
    * （否则前端回显失效时用户手填一遍，就会多出一条 id=旧名 的重复档案）
+   * 定位范围＝列表同源，避免「列表看得见（ext.sup_vendors）、编辑说没有」。
    */
   if (edit) {
-    const dv = arr(data.vendors);
-    const oldName0 = String(payload.old_name || '').trim();
-    const inData = dv.some((v) => v && typeof v === 'object' && !Array.isArray(v)
-      && (String(v.id || v.vendor_id || '') === vid
-        || String(v.name || '') === name
-        || (oldName0 && String(v.name || '') === oldName0)));
-    if (!inData) {
+    const inSource = vendorAllRows(data, ctx)
+      .some((v) => vendorKeysOf(v).some((k) => keys.indexOf(k) >= 0));
+    if (!inSource) {
+      /* 兜底：源数组未含（如快照 ext 尚未推送）时按主键列直查 sqlite */
       let inStore = null;
       if (ctx && ctx.store && typeof ctx.store.get === 'function' && vid) {
         try { inStore = ctx.store.get('sup_vendors', vid); } catch (e) { inStore = null; }
@@ -1801,7 +1880,7 @@ function upsertVendor(data, payload, ctx) {
 
   let action = '新建';
   if (ctx && ctx.store && typeof ctx.store.upsert === 'function') {
-    // 由 store 层按 vendor_id/name 幂等 upsert；返回值可携带命中信息
+    // 由 store 层按 vendor_id 幂等 upsert；返回值可携带命中信息
     const storeRow = {
       vendor_id: vid, name: name, contact: contact, phone: phone,
       category: category, level: level != null ? String(level) : null,
@@ -1809,12 +1888,15 @@ function upsertVendor(data, payload, ctx) {
     };
     /* 【Node 超集】W3 资质证照：非空写数组；编辑显式清空写 null；缺省不写键（不清空） */
     if (certs != null || (edit && hasCerts)) storeRow.certs = certs;
-    const r = ctx.store.upsert('sup_vendors', storeRow);
+    /* sup_vendors 主键是 vendor_id：必须显式传 keys，缺省 ['id'] 会插出重复行（主键冲突 → 整行未更新） */
+    const r = ctx.store.upsert('sup_vendors', storeRow, ['vendor_id']);
     if (r && r.matched) {
       vid = r.vendor_id || vid;
       action = '更新';
     }
   }
+  /* 编辑命中新表档案：即便 store 未回 matched（ext 源），语义也是「更新」 */
+  if (edit && src.from === 'store') action = '更新';
 
   const row = {
     id: vid,
@@ -1840,11 +1922,13 @@ function upsertVendor(data, payload, ctx) {
     }
   } catch (e) { /* ignore */ }
 
-  let vendors = data.vendors;
-  if (!Array.isArray(vendors)) {
-    vendors = [];
-    data.vendors = vendors;
-  }
+  /*
+   * 写回**同源**档案数组：
+   *   data.vendors 口径 → 就地合并 / 追加（旧行为）；
+   *   sup_vendors 口径 → 上面 store.upsert 已落库（ext 源时同一数组引用已被改），
+   *                     这里只做内存合并，**绝不新建 data.vendors**（否则档案分裂成两条）。
+   */
+  const vendors = src.rows;
   let hit = false;
   let oldName = '';
   /* 编辑改名兜底：老档案可能没有编号，靠 old_name 仍能定位到原行（否则改名会变成新建一条） */
@@ -1853,7 +1937,7 @@ function upsertVendor(data, payload, ctx) {
     const v = vendors[i];
     if (!(v && typeof v === 'object' && !Array.isArray(v))) continue;
     const vname0 = String(v.name || '');
-    if (String(v.id || v.vendor_id || '') === vid || vname0 === name || (oldKey && vname0 === oldKey)) {
+    if (String(v.vendor_id || v.id || '') === vid || vname0 === name || (oldKey && vname0 === oldKey)) {
       oldName = String(v.name || '');
       const merged = Object.assign({}, v);
       for (const [k, val] of Object.entries(row)) {
@@ -1866,10 +1950,10 @@ function upsertVendor(data, payload, ctx) {
       break;
     }
   }
-  if (!hit) vendors.push(row);
+  if (!hit && src.from === 'data') vendors.push(row);
 
   const names = [];
-  for (const v of vendors) {
+  for (const v of (src.from === 'data' ? vendors : [])) {
     if (v && typeof v === 'object' && !Array.isArray(v) && v.name) names.push(String(v.name));
     else if (typeof v === 'string' && v.trim()) names.push(v.trim());
   }
@@ -1915,7 +1999,8 @@ function countStoreRows(ctx, table, col, keys) {
 function applyVendorDelete(data, payload, ctx) {
   const key = String((payload && (payload.vendor_id || payload.id || payload.name)) || '').trim();
   if (!key) throw new Error('vendor.delete 缺 vendor_id/name');
-  const vendors = Array.isArray(data.vendors) ? data.vendors : [];
+  /* 与列表/编辑同源：data.vendors 为空时档案在 sup_vendors 新表，不能只看 data.vendors */
+  const vendors = vendorSource(data, ctx).rows;
   const idx = vendors.findIndex((v) => v && typeof v === 'object' && !Array.isArray(v)
     && (String(v.vendor_id || v.id || '') === key || String(v.name || '') === key));
   const target = idx >= 0 ? vendors[idx] : null;

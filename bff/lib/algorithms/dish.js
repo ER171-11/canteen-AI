@@ -901,6 +901,26 @@ function upsertRecipe(ctx, data, payload) {
   const now = nowIso();
   cur.updated_at = now;
 
+  // 缺料拦截：原料须先在产品库建档（单向原则，禁止反向自动建档）
+  // 在写库前校验，避免菜谱已写而原料缺失的半成品状态。
+  {
+    const ingsArr = Array.isArray(data.ings) ? data.ings : [];
+    const known = new Set();
+    for (const g of ingsArr) if (g && typeof g === 'object' && g.name) known.add(String(g.name));
+    const missing = [];
+    for (const key of ['main', 'aux', 'seasoning']) {
+      for (const line of (cur[key] || [])) {
+        let n = String(line).replace(/[\d./]+\s*[a-zA-Z一-鿿]*\s*$/, '').trim();
+        n = n.replace(/[（(].*?[）)]/g, '').trim() || String(line).trim();
+        if (!n || n === '清水' || n === '水' || n === '料水') continue;
+        if (!known.has(n) && missing.indexOf(n) < 0) missing.push(n);
+      }
+    }
+    if (missing.length) {
+      throw new Error('缺料未建档：' + missing.join('、') + '（请先在原料仓建档后再保存菜谱）');
+    }
+  }
+
   if (store) {
     if (typeof store.upsert === 'function') {
       store.upsert('recipes', serializeRecipe(cur));
@@ -924,46 +944,6 @@ function upsertRecipe(ctx, data, payload) {
   }
 
   const parts = ['recipe ' + cur.sku_id + ' v' + cur.version];
-
-  // 缺料原料建档（产品库）
-  const ensure = truthyOn(payload.ensure_ings, ['yes']);
-  if (ensure) {
-    const names = [];
-    for (const key of ['main', 'aux', 'seasoning']) {
-      for (const line of (cur[key] || [])) {
-        let n = String(line).replace(/[\d./]+\s*[a-zA-Z\u4e00-\u9fff]*\s*$/, '').trim();
-        n = n.replace(/[（(].*?[）)]/g, '').trim() || String(line).trim();
-        if (n && names.indexOf(n) < 0) names.push(n);
-      }
-    }
-    if (data.ings === undefined || data.ings === null) data.ings = [];
-    const ings = data.ings;
-    const existing = new Set();
-    for (const g of ings) if (g && typeof g === 'object') existing.add(String(g.name || ''));
-    let createdN = 0;
-    for (const n of names) {
-      if (existing.has(n) || n === '清水' || n === '水') continue;
-      let unit = 'g';
-      for (const line of (cur.main || []).concat(cur.aux || [], cur.seasoning || [])) {
-        if (String(line).indexOf(n) === 0 || String(line).indexOf(n) >= 0) {
-          const m = String(line).match(/(\d+(?:\.\d+)?)(g|kg|斤|ml|L|个|只|把|袋)$/);
-          if (m) unit = m[2];
-          break;
-        }
-      }
-      applyIngUpsert(data, {
-        name: n,
-        unit: unit,
-        cat: '菜谱挂钩',
-        qty: 0,
-        safe: 0,
-        on: true
-      });
-      existing.add(n);
-      createdN += 1;
-    }
-    if (createdN) parts.push('建原料' + createdN);
-  }
 
   // 同步堂食菜品壳（可卖）
   let syncDish = payload.sync_dish;

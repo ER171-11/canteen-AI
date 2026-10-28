@@ -143,6 +143,24 @@ const CASES = [
     mine: { ing_terms: [{ id: 'T001', name: '面粉', status: 'active', _u: 't1' }, { id: 'T016', name: '云南', status: 'pending', _u: 't2' }] },
     theirs: { ing_terms: [{ id: 'T001', name: '面粉', status: 'active', _u: 't1' }, { id: 'T017', name: '北京', status: 'pending', _u: 't3' }] },
   },
+  {
+    name: 'vendor_terms-本机新增词条',
+    base: { vendor_terms: [{ id: 'S001', name: '食材', status: 'active', _u: 't1' }] },
+    mine: { vendor_terms: [{ id: 'S001', name: '食材', status: 'active', _u: 't1' }, { id: 'S6', name: '半成品', status: 'pending', _u: 't2' }] },
+    theirs: { vendor_terms: [{ id: 'S001', name: '食材', status: 'active', _u: 't1' }] },
+  },
+  {
+    name: 'vendor_terms-本机改状态对端未改',
+    base: { vendor_terms: [{ id: 'S6', name: '半成品', status: 'pending', _u: 't1' }] },
+    mine: { vendor_terms: [{ id: 'S6', name: '半成品', status: 'active', _u: 't2' }] },
+    theirs: { vendor_terms: [{ id: 'S6', name: '半成品', status: 'pending', _u: 't1' }] },
+  },
+  {
+    name: 'vendor_terms-两端各自新增',
+    base: { vendor_terms: [{ id: 'S001', name: '食材', status: 'active', _u: 't1' }] },
+    mine: { vendor_terms: [{ id: 'S001', name: '食材', status: 'active', _u: 't1' }, { id: 'S6', name: '半成品', status: 'pending', _u: 't2' }] },
+    theirs: { vendor_terms: [{ id: 'S001', name: '食材', status: 'active', _u: 't1' }, { id: 'S7', name: '饮品原料', status: 'pending', _u: 't3' }] },
+  },
 ];
 
 // ---------- Python 参考实现 ----------

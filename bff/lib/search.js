@@ -11,7 +11,9 @@
  * 红线对齐：
  *   · 纯函数、零第三方依赖、不写库；数据只读自快照 data/ext。
  *   · 与 W2 检索契约合并：W2 = 域内词条 ID 精确匹配（ing_terms），W5 = 域间隔离 + 敏感字段管控。
+ *   · 供应商类目（vendor_terms，Phase 2）在进索引前还原标准名，保证按「食材/冷链」都能搜到。
  */
+const supTerms = require('./supplier_terms');
 
 /* 敏感字段黑名单：无论白名单如何配置，这些字段永不进入搜索索引（双重保险）。
  * 覆盖：税号、供应商内部编码、成本价/均价、采购/应付/应收金额、薪资、身份证、银行账号、余额。 */
@@ -38,17 +40,39 @@ const DOMAIN_LABEL = {
 };
 
 /**
+ * 供应商档案检索前归一（Phase 2）：vendor.category 存受控词条 ID（S001…），
+ * 直接索引会让「食材」搜不到供应商，故先用 vendor_terms 还原标准名再进索引。
+ * 只读、不改原记录；未命中的存量自由文本原样参与检索。
+ */
+function withVendorCategory(rec, data) {
+  if (!rec || typeof rec !== 'object') return rec;
+  const raw = String(rec.category == null ? '' : rec.category).trim();
+  if (!raw) return rec;
+  const terms = supTerms.termsOf(data);
+  const label = supTerms.categoryLabel(raw, terms);
+  if (!label || label === raw) return rec;
+  /* category_kw：别名一并进索引（搜「冷链」也能命中「食材」供应商），但不参与展示 */
+  const term = terms.filter((t) => t && String(t.id) === raw)[0];
+  return Object.assign({}, rec, {
+    category: label,
+    category_id: raw,
+    category_kw: term && Array.isArray(term.aliases) ? term.aliases.join(' ') : '',
+  });
+}
+
+/**
  * 每个域的索引定义：sources = 数据源集合 + 白名单字段。
  *   key     集合在 data/ext 里的键名；dataKey 优先、extKey 兜底（与 supply.js 同口径）
  *   kind    结果类型标签（原料/菜谱/供应商/…）
  *   fields  白名单（仅这些字段可被检索，敏感字段不在此列）
  *   id/title/subtitle  命中结果渲染字段
+ *   map     可选：记录进索引前的只读归一（如供应商类目 ID → 标准名）
  */
 const DOMAIN_SOURCES = {
   procurement: [
     { dataKey: 'ings', extKey: null, kind: '原料', fields: ['name', 'cat', 'spec', 'sup', 'buy', 'pack', 'unit'], id: 'id', title: 'name', subtitle: ['cat', 'spec', 'sup'] },
     { dataKey: null, extKey: 'recipes', kind: '菜谱', fields: ['name', 'sku_id'], id: 'sku_id', title: 'name', subtitle: ['sku_id'] },
-    { dataKey: 'vendors', extKey: 'sup_vendors', kind: '供应商', fields: ['name', 'category', 'contact', 'phone'], id: 'id', title: 'name', subtitle: ['category', 'contact'] },
+    { dataKey: 'vendors', extKey: 'sup_vendors', kind: '供应商', fields: ['name', 'category', 'category_kw', 'contact', 'phone'], id: 'id', title: 'name', subtitle: ['category', 'contact'], map: withVendorCategory },
     { dataKey: 'quotes', extKey: 'sup_prices', kind: '报价', fields: ['name', 'src', 'ing'], id: 'id', title: 'name', subtitle: ['src', 'ing'] }
   ],
   finance: [
@@ -101,7 +125,8 @@ function searchDomain(domain, q, ext, data) {
   const qq = qnorm(q);
   const hits = [];
   for (const src of sources) {
-    for (const rec of collect(src, data, ext)) {
+    for (const raw of collect(src, data, ext)) {
+      const rec = typeof src.map === 'function' ? src.map(raw, data) : raw;
       const matched = matchRow(rec, src.fields, qq);
       if (!matched) continue;
       hits.push({

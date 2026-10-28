@@ -330,4 +330,81 @@ ok('缺 id/找不到单 被拒', () => {
   assert.throws(() => sale.applySaleUpdate({ sales: [mkSale()] }, { sale_id: 'NOPE' }), /未找到销售单/);
 });
 
+/* ---------------- 特性开关：真实出餐销售统一走 POS 扣料 ---------------- */
+
+function mkBomData(over) {
+  return Object.assign({
+    sales: [],
+    ings: [
+      { id: 'I1', name: '面粉', initStock: 100, initAvg: 5, stock: 100 },
+      { id: 'I2', name: '猪肉', initStock: 50, initAvg: 20, stock: 50 },
+    ],
+    recv: [],
+    logs: [],
+    dishes: [{ id: 'D1', name: '五福饺子', sku_id: 'SKU001' }],
+    recipes: [{
+      sku_id: 'SKU001', name: '五福饺子',
+      main: JSON.stringify([{ name: '面粉', qty: 500, unit: 'g' }, { name: '猪肉', qty: 300, unit: 'g' }]),
+      aux: '[]', seasoning: '[]',
+    }],
+    config: { saleRealDeduct: true },
+  }, over || {});
+}
+
+ok('开关默认关闭：无 config 时 sale.create 不触发扣料（保护现有数据）', () => {
+  const data = mkBomData({ config: undefined });
+  sale.applySaleCreate(data, {
+    date: '2026-10-13',
+    channel: '堂食',
+    items: [{ name: '五福饺子', qty: 2, price: 30 }],
+  }, { store: null });
+  assert.strictEqual(data.sales.length, 1);
+  assert.strictEqual(data.logs.length, 0, '未开启开关不应写盘点调整流水');
+  assert.strictEqual(data.ings[0].stock, 100, '面粉库存不受影响');
+  assert.strictEqual(data.ings[1].stock, 50, '猪肉库存不受影响');
+});
+
+ok('开关开启：sale.create 按配方 BOM 扣料，与 POS 同一套逻辑', () => {
+  const data = mkBomData();
+  const msg = sale.applySaleCreate(data, {
+    date: '2026-10-13',
+    channel: '堂食',
+    items: [{ name: '五福饺子', qty: 2, price: 30 }],
+  }, { store: null });
+  assert.strictEqual(data.sales.length, 1);
+  // 五福饺子 ×2 → scale=2/20=0.1 → 面粉 500×0.1=50g、猪肉 300×0.1=30g 出库
+  const adj = data.logs.filter((l) => l.type === '盘点调整' && l.qty < 0);
+  assert.strictEqual(adj.length, 2, '应生成 2 条原料出库流水');
+  assert.ok(adj.some((l) => l.ing === 'I1' && Math.abs(l.qty + 50) < 1e-6), '面粉扣 50g');
+  assert.ok(adj.some((l) => l.ing === 'I2' && Math.abs(l.qty + 30) < 1e-6), '猪肉扣 30g');
+  assert.strictEqual(data.ings[0].stock, 50, '面粉库存重算 100−50=50');
+  assert.strictEqual(data.ings[1].stock, 20, '猪肉库存重算 50−30=20');
+  assert.ok(/扣/.test(msg), '回执应含扣料信息: ' + msg);
+});
+
+ok('开关开启但菜品无配方：不扣料、不崩溃，销售单照常落库', () => {
+  const data = mkBomData();
+  const msg = sale.applySaleCreate(data, {
+    date: '2026-10-13',
+    channel: '堂食',
+    items: [{ name: '未知菜', qty: 1, price: 30 }],
+  }, { store: null });
+  assert.strictEqual(data.sales.length, 1, '销售单仍创建');
+  assert.strictEqual(data.logs.length, 0, '无配方不应写流水');
+  assert.ok(/跳过|BOM|无菜谱/.test(msg) || /扣/.test(msg), '回执应说明未扣料: ' + msg);
+});
+
+ok('开关开启：无明细(amount 模式)的 sale.create 不扣料', () => {
+  const data = mkBomData();
+  sale.applySaleCreate(data, { date: '2026-10-13', amount: 10, paid: 10 }, { store: null });
+  assert.strictEqual(data.logs.length, 0, '无明细无法映射到配方，不应扣料');
+});
+
+ok('saleRealDeductEnabled：默认/显式开关判定正确', () => {
+  assert.strictEqual(sale.saleRealDeductEnabled({}), false);
+  assert.strictEqual(sale.saleRealDeductEnabled({ config: {} }), false);
+  assert.strictEqual(sale.saleRealDeductEnabled({ config: { saleRealDeduct: true } }), true);
+  assert.strictEqual(sale.saleRealDeductEnabled({ config: { saleRealDeduct: false } }), false);
+});
+
 console.log('[sale.test] PASS ' + pass + ' cases');

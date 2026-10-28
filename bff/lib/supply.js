@@ -17,6 +17,8 @@
 const priceLib = require('./price');
 /* W3 产品超链接：供应商资质临期分级复用食安 certLevel/daysLeft（唯一出口，不各算一套） */
 const foodSafety = require('./foodsafety');
+/* Phase 2 供应商类目受控词表：category 存词条 ID，展示层统一经 categoryLabel 还原标准名 */
+const supTerms = require('./supplier_terms');
 
 const DAY_MS = 86400000;
 const SPREAD_WARN_PCT = 10;
@@ -87,12 +89,23 @@ function certSummary(certs, now) {
   return { level, days_left: days, next_expire_at: nextExpire, expired_count: expiredCount };
 }
 
-function normVendor(v) {
-  if (typeof v === 'string') return { id: null, name: v, category: '未分类', status: '合作中', period: '未标', level: null, contact: null, phone: null, note: '', certs: null };
+/**
+ * 档案行归一。Phase 2：vendor.category 存受控词条 ID（S 前缀），
+ * 展示口径仍回标准名（category），另透出 category_id 供前端做受控下拉回填；
+ * 未命中的存量自由文本原样回显，等下次编辑 / vendor_term.backfill 收口。
+ * @param {object} v 档案行
+ * @param {Array} [terms] 供应商词表（缺省按 data.vendor_terms → seed）
+ */
+function normVendor(v, terms) {
+  if (typeof v === 'string') {
+    return { id: null, name: v, category: '未分类', category_id: null, status: '合作中', period: '未标', level: null, contact: null, phone: null, note: '', certs: null };
+  }
+  const rawCat = str(v && v.category);
   return {
     id: (v && (v.vendor_id || v.id)) || null,
     name: str(v && v.name) || String(v || ''),
-    category: str(v && v.category) || '未分类',
+    category: rawCat ? (supTerms.categoryLabel(rawCat, terms) || '未分类') : '未分类',
+    category_id: supTerms.isTermId(rawCat) ? rawCat : null,
     status: str(v && v.status) || '合作中',
     period: str(v && (v.period || v.settle)) || '未标',
     level: v && (v.level != null || v.rating != null) ? num(v.level != null ? v.level : v.rating) : null,
@@ -112,7 +125,8 @@ function vendorsReport(ext, data, cfg, now) {
   const byCategory = {};
   const byStatus = {};
   const byPeriod = {};
-  const rows = raw.map(normVendor);
+  const terms = supTerms.termsOf(data);
+  const rows = raw.map((v) => normVendor(v, terms));
   rows.forEach((v) => {
     byCategory[v.category] = (byCategory[v.category] || 0) + 1;
     byStatus[v.status] = (byStatus[v.status] || 0) + 1;

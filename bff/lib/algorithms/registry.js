@@ -15,6 +15,7 @@ const safetyPoint = require('./safety_point');
 const safetyCheck = require('./safety_check');
 const sale = require('./sale');
 const terms = require('./terms');
+const maint = require('./maint');
 
 /* 库存算法：入库/盘点后重算 stock/qty/avg */
 registerAll({
@@ -184,4 +185,21 @@ registerAll({
   'ing.attr_set': (ctx, data, payload) => terms.applyIngAttrSet(data, payload)
 });
 
-module.exports = { stock, inv, dish, pos, ops, inspection, safetyPoint, safetyCheck, terms };
+/* Phase 2 供应商类目受控词表（最小侵入：data.vendor_terms 独立数组，不升 schema）：
+ *   supplier_term.upsert   供应商类目词条申请/审核/上架（S 前缀 + 「供应商类目」维度）
+ *   vendor.attr_set        给供应商设置受控类目（单选标量 vendor.category，禁自定义标签）
+ *   vendor_term.backfill   存量 vendor.category 自由文本 → 词条 ID 归一（幂等） */
+registerAll({
+  'supplier_term.upsert': (ctx, data, payload) => terms.applyVendorTermUpsert(data, payload),
+  'vendor.attr_set': (ctx, data, payload) => terms.applyVendorAttrSet(data, payload, ctx),
+  'vendor_term.backfill': (ctx, data, payload) => terms.applyVendorTermBackfill(data, ctx)
+});
+
+/* 测试期维护清理（隐藏能力，正式版无前端入口）：
+ *   maint.row_delete  按白名单表 + 非空 where 物理删行（ext/店内表 + data.ext 兜底），
+ *                     入口走审批队列，审批中心可见、可驳回、全程留痕 */
+registerAll({
+  'maint.row_delete': (ctx, data, payload) => maint.applyRowDelete(ctx, data, payload)
+});
+
+module.exports = { stock, inv, dish, pos, ops, inspection, safetyPoint, safetyCheck, terms, maint };

@@ -151,6 +151,63 @@ ok('编辑不存在的供应商 → 抛错且不新增', () => {
   assert.strictEqual(data.vendors.length, 2, '编辑失败不得新增档案');
 });
 
+/* ------------------------------------------------------------------ */
+/* 新表口径（W3 事故回归）：档案只在 sup_vendors / ext.sup_vendors 时   */
+/* ------------------------------------------------------------------ */
+
+const { executeAction, makeExtStore } = require('./execute');
+
+/* ②f data.vendors 为空、档案只在 ext.sup_vendors → 编辑必须命中并就地更新（不分裂档案） */
+ok('编辑新表档案（data.vendors 为空）→ 更新 ext.sup_vendors，不新建 data.vendors', () => {
+  const data = { suppliers: ['海南菜篮子实业有限公司'] };
+  const ext = {
+    sup_vendors: [{
+      vendor_id: 'V673E3D26', name: '金丰冷链配送', contact: '王经理', phone: '13800001111',
+      category: '冷链', level: null, status: '合作中', period: '月结15天', note: ''
+    }]
+  };
+  const store = makeExtStore(ext);
+  const msg = inv.upsertVendor(data, {
+    edit: true, vendor_id: 'V673E3D26', name: '金丰冷链配送', contact: '王经理', phone: '13900009999',
+    category: '冷链', status: '合作中', period: '月结15天',
+    certs: [{ type: '营业执照', cert_no: 'X1', expire_at: '2027-01-01', url: '' }]
+  }, { store });
+
+  assert.ok(!Array.isArray(data.vendors), '不得凭空创建 data.vendors（会造成同一供应商两条档案）');
+  assert.strictEqual(ext.sup_vendors.length, 1, '新表不得多出重复行');
+  const v = ext.sup_vendors[0];
+  assert.strictEqual(v.phone, '13900009999');
+  assert.ok(Array.isArray(v.certs) && v.certs.length === 1, '证照应写入');
+  assert.ok(/更新/.test(msg), msg);
+  assert.ok(data.suppliers.indexOf('金丰冷链配送') >= 0, 'suppliers 应补入该供应商名');
+});
+
+/* ②g 端到端：executeAction 走 makeExtStore（BFF apply 路径）不再抛「找不到」 */
+ok('executeAction vendor.upsert(edit) 走 ext 源 → ok:true 且快照已更新', () => {
+  const snap = {
+    rev: 371,
+    data: { suppliers: [] },
+    ext: { sup_vendors: [{ vendor_id: 'V673E3D26', name: '金丰冷链配送', phone: '13800001111' }] }
+  };
+  const r = executeAction(snap, {
+    type: 'vendor.upsert', trace_id: 't-vendor',
+    payload: { edit: true, vendor_id: 'V673E3D26', name: '金丰冷链配送', phone: '13800001234' }
+  });
+  assert.strictEqual(r.ok, true, r.error);
+  assert.strictEqual(r.snapshot.ext.sup_vendors[0].phone, '13800001234');
+  assert.ok(!Array.isArray(r.snapshot.data.vendors), '快照 data 不应被凭空塞入 vendors');
+});
+
+/* ②h 删除新表档案：仅在 ext.sup_vendors 时也能删（原先索引不到 → 报「找不到」） */
+ok('删除仅存在于 ext.sup_vendors 的档案 → 行被移除', () => {
+  const data = { suppliers: ['金丰冷链配送'] };
+  const ext = { sup_vendors: [{ vendor_id: 'V673E3D26', name: '金丰冷链配送' }] };
+  const store = makeExtStore(ext);
+  const msg = inv.applyVendorDelete(data, { vendor_id: 'V673E3D26' }, { store });
+  assert.strictEqual(ext.sup_vendors.length, 0);
+  assert.ok(/已删除/.test(msg), msg);
+});
+
 /* ③ 删除：档案消失 + 原料默认供应商解绑 + suppliers 摘名 + 删 sup_vendors 行 */
 ok('删除供应商：移除档案、解绑 ing.sup、摘 suppliers、删新表行', () => {
   const data = mkData();

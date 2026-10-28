@@ -1,20 +1,21 @@
 'use strict';
 /*
- * lib/ing_terms.js — 受控词表（W2 商品库结构化字段 + 受控词表 Tag 双轨制）
+ * lib/ing_terms.js — 原料域受控词表适配层（薄壳）
  *
- * 依据 docs/发版计划-下一版本_2026-10-19.md W2「固定词条 Tag（受控词表，灵活层）」：
- *   term{ id, name, category, aliases[], status }
- *   - name      词条标准名（唯一）
- *   - category  受控维度：产地 / 颜色 / 部位 / 等级 / 品种 / 规格 / 包装 / 口味
- *   - aliases[] 别名归一（「新疆 / 新疆产地 / 产自新疆」→ 同一词条 ID）
- *   - status    pending（申请）→ active（上架）/ rejected（驳回）
+ * 历史：本文件是 W2「受控词表 Tag（两轨制）」的原始实现。现已把与领域无关的纯函数
+ *       抽到 lib/terms_core.js；本文件只保留两点领域知识：
+ *         1) 原料域配置 ING_CONFIG（受控维度白名单 = 产地/颜色/部位/等级/品种/规格/包装/口味，
+ *            ID 前缀 T，允许自定义标签）；
+ *         2) 数据取值 data.ing_terms 缺失时回退 seedTerms()。
  *
- * 红线对齐：
- *   - 纯函数、零第三方依赖、不写库；词条本体存 data.ing_terms（JSON 快照，补字段优先慎建表）。
- *   - 检索基于**词条 ID 精确匹配**（resolveTermIds 把用户输入归一为标准词条 ID），
- *     不靠 name/spec 模糊碰运气（发版计划 W2 方案 4）。
- *   - tag 不影响 recipe_cost 成本与 ing_alias 匹配：tags 只读渲染 / 检索，不进任何成本口径。
+ * 兼容契约：下列导出名与签名保持不变，供 routes/inventory.js、lib/algorithms/terms.js、
+ *           lib/algorithms/terms.test.js 直接调用，原料域行为零变化。
+ *
+ * 红线（沿用 W2）：
+ *   - 纯函数、零第三方依赖、不写库；tags 只读渲染 / 检索，不进任何成本 / 库存 / 损耗 / 毛利率口径。
+ *   - 词条 ID 精确匹配，别名归一到同一词条 ID。
  */
+const core = require('./terms_core');
 
 /** 受控维度白名单（词条 category 只能取这些值，防自由文本污染） */
 const TERM_CATEGORIES = ['产地', '颜色', '部位', '等级', '品种', '规格', '包装', '口味'];
@@ -24,6 +25,15 @@ const TERM_STATUSES = ['pending', 'active', 'rejected'];
 
 /** 词条 ID 形态：T + 数字（与原料 I 前缀区分） */
 const TERM_ID_RE = /^T\d+$/;
+
+/** 原料域配置：传给内核的唯一领域知识 */
+const ING_CONFIG = {
+  scope: 'ingredient',
+  categories: TERM_CATEGORIES,
+  statuses: TERM_STATUSES,
+  idPrefix: 'T',
+  customCategory: '自定义',
+};
 
 /** 初始种子词条（开箱即用；运营可经 term.upsert 增删改，或重新申请新词条） */
 function seedTerms() {
@@ -48,107 +58,54 @@ function seedTerms() {
 
 /** 归一词条名 / 别名：去首尾空白 + 折叠内部连续空白（不自动变换语义，别名靠受控 aliases 维护） */
 function normalizeTermName(s) {
-  return String(s == null ? '' : s).replace(/\s+/g, '').trim();
+  return core.normalizeName(s);
 }
 
 /** 是否为词条 ID 形态（T + 数字） */
 function isTermId(v) {
-  return typeof v === 'string' && TERM_ID_RE.test(v.trim());
+  return core.isTermId(v, ING_CONFIG);
 }
 
 /** 是否自定义营销 Tag（非词条 ID 的普通字符串，如「夏季清仓」） */
 function isCustomTag(v) {
-  return typeof v === 'string' && v.trim() !== '' && !TERM_ID_RE.test(v.trim());
+  return core.isCustomTag(v, ING_CONFIG);
 }
 
 /** 取词表（data.ing_terms 缺失/非数组时回退 seed，只读兜底不写库） */
 function termsOf(data) {
-  const t = (data && Array.isArray(data.ing_terms)) ? data.ing_terms : [];
-  return t.length ? t : seedTerms();
+  return core.listTerms(data && data.ing_terms, seedTerms);
 }
 
 /** 下一个词条 ID：现有最大 T 数字 + 1，无则 T001 起 */
 function nextTermId(terms) {
-  const nums = [];
-  for (const t of Array.isArray(terms) ? terms : []) {
-    const s = String((t && t.id) || '');
-    if (TERM_ID_RE.test(s)) nums.push(parseInt(s.slice(1), 10));
-  }
-  return 'T' + (nums.length ? Math.max(...nums) + 1 : 1);
+  return core.nextId(terms, ING_CONFIG);
 }
 
 /** 构建 name / alias → id 索引（受控维度内精确匹配，别名归一到同一词条 ID） */
 function buildTermIndex(terms) {
-  const idx = new Map();
-  for (const t of Array.isArray(terms) ? terms : []) {
-    if (!t || !t.id) continue;
-    const keys = [String(t.name || '')];
-    if (Array.isArray(t.aliases)) for (const a of t.aliases) keys.push(String(a));
-    for (const k of keys) {
-      const nk = normalizeTermName(k);
-      if (nk) idx.set(nk, String(t.id));
-    }
-  }
-  return idx;
+  return core.buildIndex(terms);
 }
 
-/**
- * 把用户输入（字符串或数组）归一为标准词条 ID 数组（去重、丢弃未命中项）。
- * 精确匹配顺序：词条 ID → 标准名 → 别名（均先 normalizeTermName）。
- * 未命中（普通营销 Tag / 不存在的词）返回原样字符串，交由调用方按「自定义 Tag」处理。
- */
+/** 把用户输入（字符串或数组）归一为标准词条 ID 数组（去重、丢弃未命中项） */
 function resolveTermIds(input, terms) {
-  const list = Array.isArray(input) ? input : [input];
-  const idx = buildTermIndex(terms);
-  const out = [];
-  for (const raw of list) {
-    const s = String(raw == null ? '' : raw);
-    if (!s) continue;
-    const t = s.trim();
-    if (TERM_ID_RE.test(t)) {
-      out.push(t);
-      continue;
-    }
-    const hit = idx.get(normalizeTermName(t));
-    if (hit) out.push(hit);
-    else out.push(t); // 未命中 → 视为自定义 Tag 原样保留
-  }
-  return Array.from(new Set(out));
+  return core.resolveIds(input, terms, ING_CONFIG);
 }
 
 /** 词条 ID 精确命中：query 归一出的词条 ID 是否落在 ing.tags 里（含别名归一） */
 function matchIngTags(query, ing, terms) {
-  const tags = Array.isArray(ing && ing.tags) ? ing.tags : [];
-  const wanted = resolveTermIds(query, terms).filter(isTermId);
-  if (!wanted.length) return [];
-  const hitIds = new Set();
-  for (const tag of tags) {
-    const id = resolveTermIds(tag, terms)[0];
-    if (wanted.indexOf(id) >= 0) hitIds.add(id);
-  }
-  return Array.from(hitIds);
+  return core.matchTags(query, ing && ing.tags, terms, ING_CONFIG);
 }
 
 /** 把 tags 数组（词条 ID + 自定义 Tag）展开为可展示对象（供前端渲染 / 高亮） */
 function flattenTags(tags, terms) {
-  const idx = new Map();
-  for (const t of Array.isArray(terms) ? terms : []) {
-    if (t && t.id) idx.set(String(t.id), t);
-  }
-  return (Array.isArray(tags) ? tags : []).map((raw) => {
-    const s = String(raw == null ? '' : raw).trim();
-    if (!s) return null;
-    const term = TERM_ID_RE.test(s) ? idx.get(s) : null;
-    return term
-      ? { id: term.id, name: term.name, category: term.category, aliases: term.aliases || [], isTerm: true }
-      : { id: s, name: s, category: '自定义', aliases: [], isTerm: false };
-  }).filter(Boolean);
+  return core.flattenTags(tags, terms, ING_CONFIG);
 }
 
 module.exports = {
   TERM_CATEGORIES,
   TERM_STATUSES,
   TERM_ID_RE,
+  ING_CONFIG,
   seedTerms,
   normalizeTermName,
   isTermId,

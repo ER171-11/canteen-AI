@@ -29,6 +29,7 @@ const { isConsumable } = require('./ing_type'); // W4：耗材不进菜品成本
 const {
   parseBomLine,
   gramsPerUnit,
+  packInBase,
   resolveIngName,
   PORTION_PIECES,
   SKIP_NAMES
@@ -147,7 +148,7 @@ function buildCostCard(recipe, data, semiLib) {
           const { ing } = resolve(e.name);
           // W4：耗材（type='consumable'）不进菜品成本——误配进 BOM 也不计价、不报 missing
           if (ing && isConsumable(ing)) continue;
-          const gpu = ing ? gramsPerUnit(ing) : null;
+          const gpu = ing ? packInBase(ing) : null; // 结构化 pack_in_base 优先，缺失回退旧 gramsPerUnit
           const avg = ing ? (parseFloat(ing.avg) || 0) : 0;
           const last = ing ? (parseFloat(ing.last) || 0) : 0;
           const perUnit = avg > 0 ? avg : last; // 均价优先，最近采购价兜底

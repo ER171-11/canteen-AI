@@ -97,9 +97,21 @@ function makeSqliteStore(dbPath) {
       catch (e) { return []; }
     },
 
+    /**
+     * 按主键取行：新表主键并不统一（sup_vendors = vendor_id，多数表 = id）。
+     * 写死 `WHERE id=?` 会让没有 id 列的表查询报错 → 被 catch 吞成 null → 误判「行不存在」。
+     * 故先探测表列，再按 id / vendor_id / name 顺序选主键列。
+     */
     get(table, id) {
       try {
-        const rows = db.prepare('SELECT * FROM "' + table + '" WHERE id=? LIMIT 1').all(id);
+        const cols = db.prepare('PRAGMA table_info("' + table + '")').all().map((c) => c.name);
+        if (!cols.length) return null;
+        let key = null;
+        for (const k of ['id', 'vendor_id', 'name']) {
+          if (cols.indexOf(k) >= 0) { key = k; break; }
+        }
+        if (!key) key = cols[0];
+        const rows = db.prepare('SELECT * FROM "' + table + '" WHERE "' + key + '"=? LIMIT 1').all(id);
         return rows[0] || null;
       } catch (e) { return null; }
     },
@@ -122,8 +134,9 @@ function makeSqliteStore(dbPath) {
       if (whereKeys.length) {
         const whereSql = whereKeys.map((k) => '"' + k + '"=?').join(' AND ');
         try {
+          /* 参数必须展开传（.all(array) 绑定失败 → 异常被吞 → existing=null → 每次编辑都 INSERT 撞主键） */
           existing = db.prepare('SELECT rowid AS _rid FROM "' + table + '" WHERE ' + whereSql + ' LIMIT 1')
-            .all(whereKeys.map((k) => ser(row[k])))[0] || null;
+            .all(...whereKeys.map((k) => ser(row[k])))[0] || null;
         } catch (e) { existing = null; }
       }
       if (existing) {

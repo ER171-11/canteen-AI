@@ -34,6 +34,8 @@ COLL_KEY = {
     "recv": "id",
     # 受控词表存 JSON 快照（data.ing_terms），按词条 id 合并
     "ing_terms": "id",
+    # 供应商类目受控词表（data.vendor_terms，Phase 2），同样按词条 id 合并，防冲突路径丢词条
+    "vendor_terms": "id",
 }
 
 
