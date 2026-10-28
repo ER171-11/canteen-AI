@@ -93,16 +93,18 @@ const GROUPS = [{
   ]
 }];
 
-/* --- 无 store（降级写 data.ext.recipes）：自动建菜品壳 + 自动建原料 --- */
-data = { ings: [{ id: 'I1', name: '文昌鸡', unit: '斤' }], dishes: [], ext: { recipes: [] } };
+/* --- 无 store（降级写 data.ext.recipes）：自动建菜品壳；原料须已建档（单向原则） --- */
+data = {
+  ings: [{ id: 'I1', name: '文昌鸡', unit: '斤' }, { id: 'I2', name: '生姜', cat: '蔬菜类', unit: 'g' }],
+  dishes: [], ext: { recipes: [] }
+};
 msg = dish.applyRecipeImport(null, data, { groups: GROUPS });
 ok('降级路径：配方写入 ext.recipes', data.ext.recipes.length === 1
   && data.ext.recipes[0].name === '白切文昌鸡', data.ext.recipes);
 ok('主料按「名+用量+单位」落库', JSON.parse(data.ext.recipes[0].main).join(',') === '文昌鸡600g,生姜20g',
   data.ext.recipes[0].main);
 ok('自动建菜品壳（sync_dish）', data.dishes.some((d) => d.name === '白切文昌鸡'), data.dishes);
-ok('自动建未匹配原料（ensure_ings）', data.ings.some((g) => g.name === '生姜'), data.ings.map((g) => g.name));
-ok('新建原料带上文件里的「库存单位/原料分类」',
+ok('已建档原料不被反向改写',
   (data.ings.find((g) => g.name === '生姜') || {}).cat === '蔬菜类'
   && (data.ings.find((g) => g.name === '生姜') || {}).unit === 'g',
   data.ings.find((g) => g.name === '生姜'));
@@ -115,7 +117,10 @@ const existing = {
   steps: '[]', params: '{}', blessing: null, diet_tags: '[]', version: 1
 };
 let store = fixStore(existing);
-data = { ings: [{ id: 'I1', name: '文昌鸡', unit: '斤' }], dishes: [] };
+data = {
+  ings: [{ id: 'I1', name: '文昌鸡', unit: '斤' }, { id: 'I2', name: '生姜', unit: 'g' }],
+  dishes: []
+};
 msg = dish.applyRecipeImport({ store: store }, data, { groups: GROUPS, mode: 'replace' });
 let row = store.written[0].row;
 ok('replace：写入 recipes 表', store.written[0].table === 'recipes', store.written[0].table);
@@ -125,9 +130,18 @@ ok('replace：辅料/调味被清空（旧版覆盖语义）',
 ok('版本号自增', row.version === 2, row.version);
 ok('消息标注覆盖', /覆盖/.test(msg), msg);
 
-/* --- 有 store：merge 按原料名合并，未出现的旧行保留 --- */
+/* --- 有 store：merge 按原料名合并，未出现的旧行保留（旧行原料同样须已建档） --- */
 store = fixStore(existing);
-data = { ings: [{ id: 'I1', name: '文昌鸡', unit: '斤' }], dishes: [] };
+data = {
+  ings: [
+    { id: 'I1', name: '文昌鸡', unit: '斤' },
+    { id: 'I2', name: '食盐', unit: 'g' },
+    { id: 'I3', name: '生姜', unit: 'g' },
+    { id: 'I4', name: '姜', unit: 'g' },
+    { id: 'I5', name: '香油', unit: 'g' }
+  ],
+  dishes: []
+};
 msg = dish.applyRecipeImport({ store: store }, data, { groups: GROUPS, mode: 'merge' });
 row = store.written[0].row;
 ok('merge：命中原料覆盖用量、新原料追加、旧行保留',
@@ -141,11 +155,17 @@ throws('整批无有效行报错', () => dish.applyRecipeImport(null, { ext: {} 
   groups: [{ dish: '老虎菜', rows: [{ name: '青椒', qty: 0, unit: 'g' }] }]
 }), '没有可导入的菜');
 
-/* ensure_ings=false 时不应建原料 */
+/* 单向原则：缺料拦截——ensure_ings 已废弃，任何取值都不再反向建档 */
 store = fixStore(existing);
 data = { ings: [{ id: 'I1', name: '文昌鸡', unit: '斤' }], dishes: [] };
-dish.applyRecipeImport({ store: store }, data, { groups: GROUPS, ensure_ings: false });
-ok('ensure_ings=false 不建原料', !data.ings.some((g) => g.name === '生姜'), data.ings.map((g) => g.name));
+throws('缺料未建档 → 拦截不写库', () => dish.applyRecipeImport({ store: store }, data, {
+  groups: GROUPS, ensure_ings: true
+}), '缺料未建档');
+ok('缺料拦截：原料未被反向建档', !data.ings.some((g) => g.name === '生姜'), data.ings.map((g) => g.name));
+ok('缺料拦截：配方未落库', store.written.length === 0, store.written.length);
+throws('ensure_ings=false 同样拦截（参数已废弃）', () => dish.applyRecipeImport({ store: store }, data, {
+  groups: GROUPS, ensure_ings: false
+}), '缺料未建档');
 
 if (failed) {
   console.error('\ndish_import_delete 测试失败 ' + failed + ' 项');

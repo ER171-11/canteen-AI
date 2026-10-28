@@ -20,7 +20,6 @@
 
 const crypto = require('crypto');
 const { nowIso, num, arr, normMenuName } = require('./util');
-const { applyIngUpsert } = require('./inventory');
 
 /* ---------- 通用辅助 ---------- */
 
@@ -725,8 +724,9 @@ function mergeMainRows(cur, rows) {
 /**
  * recipe.import：食谱卡批量导入「提交」（整批一个动作，走审批队列；与 recv.import 同型）。
  *
- * 逐道菜复用**唯一写入口** upsertRecipe（ensure_ings 缺料建档 + sync_dish 同步菜品壳），
- * 因此「未匹配原料/菜品自动建档」的口径与手工「新增菜谱」完全一致，不另起一套写路径。
+ * 逐道菜复用**唯一写入口** upsertRecipe（sync_dish 同步菜品壳）。
+ * **单向原则**：原料仓只提供「原料列」，导入不再反向自动建档；缺料由 upsertRecipe 拦截报错
+ * （请先在原料仓建档后再导入）。`ensure_ings` 入参仅为向后兼容保留，已不产生写库副作用。
  *
  * mode='replace'（默认）：视为该菜配方的完整定义 —— 覆盖主料，并清空辅料/调味旧行（旧版覆盖语义）；
  * mode='merge'：按原料名合并用量，未出现的旧行保留。
@@ -736,35 +736,8 @@ function applyRecipeImport(ctx, data, payload) {
   const groups = (payload && Array.isArray(payload.groups)) ? payload.groups : [];
   if (!groups.length) throw new Error('recipe.import 缺 groups（请先预览再提交）');
   const mode = String((payload && payload.mode) || 'replace') === 'merge' ? 'merge' : 'replace';
-  const ensure = (payload && payload.ensure_ings !== undefined)
-    ? truthyOn(payload.ensure_ings, ['yes']) : true;
   const syncDish = (payload && payload.sync_dish !== undefined)
     ? truthyOn(payload.sync_dish, ['yes']) : true;
-
-  /* 未匹配原料建档：对齐旧版 createIngFromImport（HTML:2806）——带文件里的「库存单位/原料分类」，
-     建完再进 upsertRecipe（其 ensure_ings 会发现已存在而跳过），避免分类一律落成「菜谱挂钩」。 */
-  let createdIngs = 0;
-  if (ensure) {
-    const have = new Set();
-    for (const g0 of (Array.isArray(data.ings) ? data.ings : [])) {
-      if (g0 && g0.name) have.add(String(g0.name));
-    }
-    for (const g of groups) {
-      for (const r of (Array.isArray(g && g.rows) ? g.rows : []).map(importRowOf).filter(Boolean)) {
-        if (have.has(r.name) || r.name === '清水' || r.name === '水') continue;
-        applyIngUpsert(data, {
-          name: r.name,
-          unit: r.unit || '斤',
-          cat: r.cat || '菜谱挂钩',
-          qty: 0,
-          safe: 0,
-          on: true
-        });
-        have.add(r.name);
-        createdIngs += 1;
-      }
-    }
-  }
 
   let saved = 0;
   let lines = 0;
@@ -783,7 +756,6 @@ function applyRecipeImport(ctx, data, payload) {
       main: rows,
       aux: mode === 'replace' ? [] : undefined,
       seasoning: mode === 'replace' ? [] : undefined,
-      ensure_ings: ensure,
       sync_dish: syncDish,
       on: true
     });
@@ -792,7 +764,6 @@ function applyRecipeImport(ctx, data, payload) {
   }
   if (!saved) throw new Error('recipe.import 没有可导入的菜（菜品名称需非空、净料用量需 >0）');
   return 'recipe.import ' + saved + ' 道菜 / ' + lines + ' 行'
-    + (createdIngs ? ' · 建原料' + createdIngs : '')
     + ' · ' + (mode === 'merge' ? '按原料合并' : '覆盖');
 }
 

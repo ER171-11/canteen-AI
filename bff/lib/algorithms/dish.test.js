@@ -213,9 +213,10 @@ const DB_FIXTURES = {
     data: { dishes: [{ id: 'D1', name: '红饺', sku_id: 'OLD' }] },
     payload: { force: true, create_missing: false }
   },
+  /* 单向原则：原料先建档再引用（缺料由 upsertRecipe 拦截，不再反向建档） */
   recipeUpsertNew: {
     recipes: [],
-    data: { dishes: [], ings: [] },
+    data: { dishes: [], ings: [{ id: 'I1', name: '面粉', unit: '袋' }, { id: 'I2', name: '盐', unit: '袋' }] },
     payload: {
       name: '新配方', color: '红',
       main: [{ name: '面粉', qty: 1.9, unit: 'L' }, { name: '盐' }],
@@ -226,7 +227,7 @@ const DB_FIXTURES = {
     recipes: [
       ['SKU-R1', '旧名', '黄', null, null, '["旧"]', '[]', '[]', '[]', '{}', null, '[]', 3, 'old']
     ],
-    data: { dishes: [], ings: [] },
+    data: { dishes: [], ings: [{ id: 'I1', name: '面粉', unit: '袋' }] },
     payload: {
       sku_id: 'SKU-R1', name: '改名',
       main: [{ name: '面粉', qty: 500, unit: 'g' }],
@@ -445,6 +446,30 @@ print(json.dumps({"data": d, "msg": msg, "rows": rows}, ensure_ascii=False))
     db.close();
     pass++;
     console.log('  PASS ' + name);
+  }
+
+  /* 6.5) Node 超集：缺料拦截（单向原则）—— Python 参考实现仍会自动建档，故只做 Node 侧断言 */
+  {
+    const nd = { dishes: [], ings: [] };
+    const mdb = new DatabaseSync(':memory:');
+    seedRecipeDb(mdb, []);
+    let wrote = 0;
+    const mstore = makeStore(() => mdb);
+    const rawUpsert = mstore.upsert;
+    mstore.upsert = (t, r) => { wrote += 1; return rawUpsert(t, r); };
+    let err = null;
+    try {
+      dish.upsertRecipe({ store: mstore }, nd, {
+        name: '缺料配方', main: [{ name: '未建档料', qty: 100, unit: 'g' }], sync_dish: false
+      });
+    } catch (e) { err = e.message; }
+    assert.ok(err !== null && err.indexOf('缺料未建档') >= 0, '缺料应被拦截：' + err);
+    assert.ok(err.indexOf('未建档料') >= 0, '错误信息应列出缺失原料：' + err);
+    assert.deepStrictEqual(nd.ings, [], '缺料拦截不得反向建档');
+    assert.strictEqual(wrote, 0, '缺料拦截不得写库');
+    mdb.close();
+    pass++;
+    console.log('  PASS 缺料拦截（单向原则）');
   }
 
   /* 7) 错误语义平价 */
