@@ -93,3 +93,27 @@
 - 平台导入职责边界（阶段 21 定案，阶段 22 落地骨架）：**平台销售数据以店内 POS/收银端为主导入端**，admin-web 提供管理端辅助入口（导入预览→映射→提交、批次撤回/重算、菜名映射配置页）；同时预留美团收银系统数据导入接口（美团方数据格式尚不清楚，导入端做成 `SALE_SRC` 可扩展适配器，美团占位）。
 - FP-SALE-13 决策（阶段 22 定案）：**作废不回补库存**——菜品视为已消费，作废仅留痕（`status='已作废'` + `void_operator/void_at/void_reason`），不物理删除、不回补 BOM 料，避免库存虚增；`sale.batch_void`（整批撤回）同样只留痕不回补。
 - 平价测试全绿属另一条门禁，不能替代本页面级清单。
+
+---
+
+## 进销存-真实出餐销售统一走 POS 扣料 + 特性开关（阶段 23+，本页补充协议）
+
+> 背景：扣料逻辑此前只在移动端 `pos.pay`（`lib/algorithms/pos.js` `applyPosPay` → `deductBomForSaleItems`）生效；admin-web `sale.create` 与平台导入 `sale.import` 只记销售单/应收，**不扣库存**，导致「以 admin-web 手工录入为主」的门店库存不会随出餐减少。
+
+**方案（总闸 + 非 POS 补扣）**：
+- `pos.pay` 维持必扣（已是 POS 路径，不受开关影响）。
+- 新增特性开关 `data.config.saleRealDeduct`（**默认关闭**，保护现有数据）。开启后，`sale.create`（admin-web 手工录入的真实出餐单）在审批确认落库时，**复用 `pos.deductBomForSaleItems` 同一套逻辑**按配方 BOM 扣减库存——口径唯一，不另写扣料分支。
+- `sale.import`（平台导入）**不扣**（平台数据来自平台自有 POS，再扣会重复）；`sale.update`/`sale.void` 不扣（编辑/作废不重扣，避免双扣与虚增，与 FP-SALE-13 作废不回补口径一致）。
+- 扣料异常（如缺配方）绝不阻断销售单落库：记「跳过」回执（对齐 `pos.pay` 容错），交由人工/日志排查。
+
+**改动点**：
+- `bff/lib/algorithms/sale.js`（及桌面端 `desktop/app/bff/lib/algorithms/sale.js` 同步副本）：`applySaleCreate(data, payload, ctx)` 接入开关判定 `saleRealDeductEnabled(data)` + `pos.deductBomForSaleItems`；导出 `saleRealDeductEnabled`。
+- 开关经既有 `POST /api/admin/config`（`config.update` 动作）写入 `data.config.saleRealDeduct`，**后台可切**（无新增动作类型）。
+- 前端 `apps/admin-web/src/pages/dinein/SalesPage.tsx`：顶部新增开关「真实出餐扣料(POS)」+ 说明 Tooltip，经 `fetchAdminConfig`/`saveAdminConfig` 读写。
+
+**验收（单测 `bff/lib/algorithms/sale.test.js` 新增 5 例全绿）**：
+- 默认/无 config → `sale.create` 不写盘点调整流水、库存不变；
+- 开关开启 + 菜品有配方 → 按 `qty/20` 缩放扣 BOM、`data.logs` 生成对应出库流水、`rebuildStock` 重算库存（如 五福饺子×2 → 面粉−50g / 猪肉−30g，期初 100/50 → 50/20）；
+- 开关开启 + 菜品无配方 → 不扣料、不崩溃、销售单照常落库；
+- 无明细（amount 模式）→ 不扣料；`saleRealDeductEnabled` 默认/显式判定正确。
+- 红线：GET 只读不变；写仅经 `actions` 队列；未触碰 `db.js`/`merge.js`。
