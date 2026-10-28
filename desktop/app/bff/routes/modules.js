@@ -21,6 +21,8 @@
  */
 const { loadSnapshot } = require('./snapshot');
 const { buildBoard } = require('../lib/inspection_board');
+/* Phase 2：供应商类目存受控词条 ID，看板归集/展示统一还原标准名 */
+const supTerms = require('../lib/supplier_terms');
 
 const NO_SNAP_HINT = 'no_snapshot';
 const NO_SNAP_MSG = '店内快照未接通 · 本页可空开浏览，推送快照后刷新看真数';
@@ -183,7 +185,7 @@ function realAnalysis(snap, paramOverrides) {
       const sku = d && d.sku_id != null ? String(d.sku_id) : null;
       if (costLib && sku && extRecipes[sku]) {
         try {
-          const card = costLib.buildCostCard(extRecipes[sku], data);
+          const card = costLib.buildCostCard(extRecipes[sku], data, arr(extOf(snap).recipes));
           if (card && card.gross_margin != null) margin = card.gross_margin / 100;
         } catch (e) { /* 回落静态 */ }
       }
@@ -1305,8 +1307,10 @@ function supplyInsight(ext, data) {
   const today = todayStr();
 
   const byCategory = {}, byStatus = {}, byPeriod = {};
+  const terms = supTerms.termsOf(data);
   const vendors = vendorsRaw.map((v) => {
-    const cat = String((v && v.category) || '未分类');
+    const rawCat = String((v && v.category) || '').trim();
+    const cat = rawCat ? (supTerms.categoryLabel(rawCat, terms) || '未分类') : '未分类';
     const st = String((v && v.status) || '合作中');
     const period = String((v && v.period) || '未标');
     byCategory[cat] = (byCategory[cat] || 0) + 1;
@@ -1315,7 +1319,9 @@ function supplyInsight(ext, data) {
     return {
       id: (v && (v.vendor_id || v.id)) || null,
       name: (v && v.name) || String(v || ''),
-      category: cat, status: st, period,
+      category: cat,
+      category_id: supTerms.isTermId(rawCat) ? rawCat : null,
+      status: st, period,
       level: (v && v.level) != null ? n(v.level) : null
     };
   });

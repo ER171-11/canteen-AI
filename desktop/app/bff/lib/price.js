@@ -15,6 +15,8 @@
  *   · 差价 diff：最低折价 − 本店均价；节省% savePct：|diff|/avg
  */
 
+const { isFood } = require('./ing_type'); // W4：耗材不参与比价（决策 #4）
+
 const arr = (v) => (Array.isArray(v) ? v : []);
 const num = (v, d) => { const n = Number(v); return isFinite(n) ? n : (d == null ? 0 : d); };
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -77,7 +79,7 @@ function quoteKeyword(g) {
 /** FP-PRICE-03/14 比价主表 + 顶部统计（旧版 renderPrice :4935 / quoteTaskText :5082）。 */
 function priceReport(snap) {
   const data = (snap && snap.data) || {};
-  const ings = arr(data.ings).filter((g) => g && g.on);
+  const ings = arr(data.ings).filter((g) => g && g.on && isFood(g)); // W4：耗材不参与比价
   const quotes = arr(data.quotes);
   const rows = ings.map((g) => {
     const b = bestQuote(g, quotes);
@@ -115,7 +117,7 @@ function priceReport(snap) {
 /** FP-PRICE-13 待比价清单（旧版 openQuotePlan :5091）。 */
 function pricePlan(snap) {
   const data = (snap && snap.data) || {};
-  const ings = arr(data.ings).filter((g) => g && g.on);
+  const ings = arr(data.ings).filter((g) => g && g.on && isFood(g)); // W4：耗材不参与比价
   const quotes = arr(data.quotes);
   const items = ings.map((g) => ({
     ingId: String(g.id),

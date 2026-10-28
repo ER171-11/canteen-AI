@@ -152,7 +152,7 @@ function specialists(snap) {
     const rs = arr(ext.recipes);
     recipes = rs.length;
     for (const r of rs) {
-      const card = buildCostCard(r, data);
+      const card = buildCostCard(r, data, rs);
       if (card && card.gross_margin != null) {
         withCost += 1;
         if (card.gross_margin < 40) lowMargin.push({ name: r.name || r.sku_id, margin: card.gross_margin });

@@ -1,14 +1,19 @@
 {
   "name": "canteenai-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "熊猫五福餐厅 · 电脑版（Electron 封装 admin-web + 零依赖 BFF）",
   "private": true,
   "main": "electron-main.js",
   "author": "canteenAI",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "pack": "node scripts/sync-assets.js && electron-builder --dir",
+    "dist": "node scripts/sync-assets.js && electron-builder",
+    "sync:assets": "node scripts/sync-assets.js",
+    "release": "node scripts/release.js --patch",
+    "release:patch": "node scripts/release.js --patch",
+    "release:minor": "node scripts/release.js --minor",
+    "release:major": "node scripts/release.js --major"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
@@ -24,8 +29,9 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "YOUR_GITHUB_OWNER",
-        "repo": "YOUR_GITHUB_REPO"
+        "owner": "ER171-11",
+        "repo": "canteen-AI",
+        "releaseType": "release"
       }
     ],
     "directories": {
@@ -38,6 +44,7 @@
       "package.json",
       "app/dist/**/*",
       "app/bff/**/*",
+      "app/shared/**/*",
       "!app/bff/data/**",
       "!app/bff/.env",
       "!app/bff/**/*.test.js",
@@ -46,7 +53,8 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "**/bff/**"
+      "**/bff/**",
+      "**/shared/**"
     ],
     "win": {
       "sign": "noop-sign.js",

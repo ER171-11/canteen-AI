@@ -15,6 +15,10 @@
 
 /* 折算口径唯一出口：比价候选与「原料比价」主表必须同源（quotePerStock），不得各算一套 */
 const priceLib = require('./price');
+/* W3 产品超链接：供应商资质临期分级复用食安 certLevel/daysLeft（唯一出口，不各算一套） */
+const foodSafety = require('./foodsafety');
+/* Phase 2 供应商类目受控词表：category 存词条 ID，展示层统一经 categoryLabel 还原标准名 */
+const supTerms = require('./supplier_terms');
 
 const DAY_MS = 86400000;
 const SPREAD_WARN_PCT = 10;
@@ -47,37 +51,99 @@ function configOf(cfg) {
 
 /* ---------------- 供应商档案 ---------------- */
 
-function normVendor(v) {
-  if (typeof v === 'string') return { id: null, name: v, category: '未分类', status: '合作中', period: '未标', level: null, contact: null, phone: null };
+/** W3 供应商资质归一（数组） */
+function normCerts(v) {
+  const raw = (v && v.certs) || (v && v.licenses);
+  if (!Array.isArray(raw)) return raw ? [raw] : null;
+  const list = raw.map((c) => {
+    if (c == null) return null;
+    if (typeof c === 'string') return { type: '证照', cert_no: c, expire_at: '', url: '' };
+    return {
+      type: str(c.type) || '证照',
+      cert_no: str(c.cert_no || c.no) || '',
+      expire_at: str(c.expire_at || c.expires || c.expire) || '',
+      url: str(c.url || c.cert_url) || ''
+    };
+  }).filter(Boolean);
+  return list.length ? list : null;
+}
+
+/** W3 供应商资质临期汇总：复用食安 certLevel/daysLeft，取最紧迫级别 */
+function certSummary(certs, now) {
+  const at = now == null ? Date.now() : now;
+  const list = Array.isArray(certs) ? certs : [];
+  const rank = { expired: 0, red: 1, orange: 2, yellow: 3, green: 4, unknown: 5 };
+  let level = 'unknown';
+  let days = null;
+  let nextExpire = null;
+  let expiredCount = 0;
+  for (const c of list) {
+    if (!c) continue;
+    const dl = foodSafety.daysLeft(c.expire_at, at);
+    if (dl == null) continue;
+    const lv = foodSafety.certLevel(dl);
+    if (rank[lv] < rank[level]) level = lv;
+    if (lv === 'expired') expiredCount++;
+    if (days == null || dl < days) { days = dl; nextExpire = c.expire_at; }
+  }
+  return { level, days_left: days, next_expire_at: nextExpire, expired_count: expiredCount };
+}
+
+/**
+ * 档案行归一。Phase 2：vendor.category 存受控词条 ID（S 前缀），
+ * 展示口径仍回标准名（category），另透出 category_id 供前端做受控下拉回填；
+ * 未命中的存量自由文本原样回显，等下次编辑 / vendor_term.backfill 收口。
+ * @param {object} v 档案行
+ * @param {Array} [terms] 供应商词表（缺省按 data.vendor_terms → seed）
+ */
+function normVendor(v, terms) {
+  if (typeof v === 'string') {
+    return { id: null, name: v, category: '未分类', category_id: null, status: '合作中', period: '未标', level: null, contact: null, phone: null, note: '', certs: null };
+  }
+  const rawCat = str(v && v.category);
   return {
     id: (v && (v.vendor_id || v.id)) || null,
     name: str(v && v.name) || String(v || ''),
-    category: str(v && v.category) || '未分类',
+    category: rawCat ? (supTerms.categoryLabel(rawCat, terms) || '未分类') : '未分类',
+    category_id: supTerms.isTermId(rawCat) ? rawCat : null,
     status: str(v && v.status) || '合作中',
     period: str(v && (v.period || v.settle)) || '未标',
     level: v && (v.level != null || v.rating != null) ? num(v.level != null ? v.level : v.rating) : null,
     contact: str(v && v.contact) || null,
-    phone: str(v && v.phone) || null
+    phone: str(v && v.phone) || null,
+    /* 备注回传给前端「编辑」弹窗预填（缺省空串，不改变既有字段口径） */
+    note: str(v && v.note) || '',
+    certs: normCerts(v)
   };
 }
 
-/** 供应商档案：按品类/状态/账期归集 + 低评级清单 */
-function vendorsReport(ext, data, cfg) {
+/** 供应商档案：按品类/状态/账期归集 + 低评级清单 + 资质临期（W3） */
+function vendorsReport(ext, data, cfg, now) {
   const conf = configOf(cfg);
+  const at = now == null ? Date.now() : now;
   const raw = arr(data && data.vendors).length ? arr(data.vendors) : arr(ext && ext.sup_vendors);
   const byCategory = {};
   const byStatus = {};
   const byPeriod = {};
-  const rows = raw.map(normVendor);
+  const terms = supTerms.termsOf(data);
+  const rows = raw.map((v) => normVendor(v, terms));
   rows.forEach((v) => {
     byCategory[v.category] = (byCategory[v.category] || 0) + 1;
     byStatus[v.status] = (byStatus[v.status] || 0) + 1;
     byPeriod[v.period] = (byPeriod[v.period] || 0) + 1;
+    v.cert = certSummary(v.certs, at);   // W3 资质分级挂到每行
   });
   const lowRated = rows.filter((v) => v.level != null && v.level > 0 && v.level < conf.low_level);
+  /* W3 资质临期清单：expired / red / orange 三档需关注 */
+  const certExpiring = rows
+    .filter((v) => v.cert && (v.cert.level === 'expired' || v.cert.level === 'red' || v.cert.level === 'orange'))
+    .map((v) => ({ name: v.name, level: v.cert.level, days_left: v.cert.days_left, next_expire_at: v.cert.next_expire_at, expired_count: v.cert.expired_count }));
 
   const advice = [];
   if (lowRated.length) advice.push(`供应商低于 ${conf.low_level} 星 ${lowRated.length} 家，建议考察替代`);
+  const expiredCnt = certExpiring.filter((c) => c.level === 'expired').length;
+  if (expiredCnt) advice.push(`供应商资质已逾期 ${expiredCnt} 家，需立即更新证照`);
+  else if (certExpiring.length) advice.push(`供应商资质临期 ${certExpiring.length} 家，建议提前更新证照`);
   if (!rows.length) advice.push('暂无供应商档案');
   if (!advice.length) advice.push('供应商档案正常');
 
@@ -88,6 +154,7 @@ function vendorsReport(ext, data, cfg) {
     by_status: byStatus,
     by_period: byPeriod,
     low_rated: lowRated.map((v) => v.name),
+    cert_expiring: certExpiring,
     advice
   };
 }
@@ -246,7 +313,7 @@ function accountsReport(ext, cfg, now) {
 /* ---------------- 汇总 ---------------- */
 
 function overviewReport(ext, data, cfg, now) {
-  const vendors = vendorsReport(ext, data, cfg);
+  const vendors = vendorsReport(ext, data, cfg, now);
   const compare = compareReport(ext, data, cfg);
   const accounts = accountsReport(ext, cfg, now);
   const alerts = [];
@@ -258,8 +325,20 @@ function overviewReport(ext, data, cfg, now) {
   if (accounts.aging.overdue > 0) alerts.push({ level: 'red', text: `供应商逾期应付 ¥${accounts.aging.overdue.toFixed(0)}` });
   if (accounts.aging.over60 > 0) alerts.push({ level: 'orange', text: `应付超 60 天 ¥${accounts.aging.over60.toFixed(0)}` });
   if (vendors.low_rated.length) alerts.push({ level: 'yellow', text: `低评级供应商 ${vendors.low_rated.length} 家` });
+  /* W3 资质临期告警：与 vendors.cert_expiring 同源同数（逾期优先，其次临期） */
+  const certExpiring = vendors.cert_expiring;
+  const certExpiredCnt = certExpiring.filter((c) => c.level === 'expired').length;
+  if (certExpiredCnt) alerts.push({ level: 'red', text: `供应商资质已逾期 ${certExpiredCnt} 家` });
+  else if (certExpiring.length) alerts.push({ level: 'orange', text: `供应商资质临期 ${certExpiring.length} 家` });
   return {
-    vendors: { count: vendors.count, by_category: vendors.by_category, low_rated: vendors.low_rated.length },
+    vendors: {
+      count: vendors.count,
+      by_category: vendors.by_category,
+      low_rated: vendors.low_rated.length,
+      cert_expiring_count: certExpiring.length
+    },
+    /* W3：看板直接透出临期清单（与 /api/supply/vendors 同一份，只含 expired/red/orange） */
+    cert_expiring: certExpiring,
     compare: { available: compare.available, top: top ? { name: top.name, spread_pct: top.spread_pct, best: top.best } : null },
     accounts: { count: accounts.count, payable: accounts.payable, aging: accounts.aging, need_settle: accounts.need_settle },
     alerts,
@@ -276,6 +355,8 @@ module.exports = {
   DEFAULT_CONFIG,
   configOf,
   normVendor,
+  normCerts,
+  certSummary,
   vendorsReport,
   normQuote,
   resolveIng,

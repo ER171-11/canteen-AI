@@ -108,7 +108,7 @@ function dishCostMap(snap) {
     let price = d.price != null ? num(d.price) : null;
     if (recipe && costLib) {
       try {
-        const card = costLib.buildCostCard(recipe, data);
+        const card = costLib.buildCostCard(recipe, data, arr(extOf(snap).recipes));
         if (card && card.portion_cost != null) {
           cost = num(card.portion_cost, cost);
           costType = '配方';

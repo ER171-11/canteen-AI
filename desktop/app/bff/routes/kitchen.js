@@ -315,7 +315,7 @@ async function handle(req, res, ctx, pathname) {
     let costCard = null;
     try {
       const { buildCostCard } = require('../lib/recipe_cost');
-      costCard = buildCostCard(found.item, (snap && snap.data) || {});
+      costCard = buildCostCard(found.item, (snap && snap.data) || {}, (snap && snap.ext && snap.ext.recipes) || []);
     } catch (e) { costCard = null; }
     ctx.sendJSON(res, 200, {
       ok: true,

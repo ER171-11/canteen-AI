@@ -118,16 +118,115 @@ export function resolveIngName(name, aliasMap, byName) {
 }
 
 /**
- * 单行成本：毛料 = qty / yld；行成本 = 毛料 / gramsPerUnit(ing) × avg。
- * @returns {{gross:number, lineCost:number|null}|null} qty≤0 或无 ing 返回 null；lineCost 在无均价/无法换算单位时为 null。
+ * 维度：重量 / 体积 / 计数。同一维度内可换算，跨维度（重量↔体积）不可自动换算。
  */
-export function calcLineCost(qty, ing) {
+export const DIM_OF_UNIT = {
+  g: 'weight', 克: 'weight', kg: 'weight', 公斤: 'weight', 斤: 'weight', 两: 'weight',
+  ml: 'volume', l: 'volume', L: 'volume', 升: 'volume',
+  个: 'count', 只: 'count', 把: 'count', 袋: 'count', 根: 'count', 片: 'count', 枚: 'count', 份: 'count',
+};
+
+/** base_unit 取值（g/ml/个）到维度的映射 */
+const DIM_OF_BASE = { g: 'weight', ml: 'volume', 个: 'count' };
+
+/** 各维度「1 个单位 = 多少基础单位」：重量以 g、体积以 ml、计数以 1 为基准 */
+const UNIT_TO_BASE = {
+  weight: { g: 1, 克: 1, kg: 1000, 公斤: 1000, 斤: 500, 两: 50 },
+  volume: { ml: 1, l: 1000, L: 1000, 升: 1000 },
+  count: { 个: 1, 只: 1, 把: 1, 袋: 1, 根: 1, 片: 1, 枚: 1, 份: 1 },
+};
+
+/** 返回「1 个该单位 = 多少基础单位」系数；未知单位返回 null */
+export function unitToBase(dim, unit) {
+  const t = UNIT_TO_BASE[dim];
+  if (!t) return null;
+  const v = t[String(unit == null ? '' : unit).trim()];
+  return v == null ? null : v;
+}
+
+/**
+ * 原料的「基础单位信息」：每 1 个库存单位含多少基础单位 + 维度。
+ * 优先用结构化字段 pack_in_base（配合 base_unit）；缺失时回退旧 gramsPerUnit（重量口径）。
+ * @returns {{dim:'weight'|'volume'|'count', amount:number}|null}
+ */
+export function ingBaseInfo(ing) {
+  const name = String((ing && ing.name) || '');
+  if (ing && typeof ing.pack_in_base === 'number' && ing.pack_in_base > 0) {
+    let dim = ing.base_unit ? DIM_OF_BASE[ing.base_unit] : null;
+    if (!dim) {
+      const m = SPEC_RE.exec(name);
+      dim = m && (m[2] === 'kg' || m[2] === 'g') ? 'weight' : 'volume';
+    }
+    return { dim, amount: ing.pack_in_base };
+  }
+  const g = gramsPerUnit(ing); // 旧逻辑：仅重量口径
+  if (g != null) return { dim: 'weight', amount: g };
+  return null;
+}
+
+/** 每 1 个库存单位含多少基础单位（数值）；无则 null。向后兼容别名。 */
+export function packInBase(ing) {
+  const info = ingBaseInfo(ing);
+  return info ? info.amount : null;
+}
+
+/** 原料换算维度（weight/volume/count）；无法确定返回 null */
+export function ingDim(ing) {
+  const info = ingBaseInfo(ing);
+  return info ? info.dim : null;
+}
+
+/**
+ * 从原料名（SPEC_RE 抠 1.9L/500g）+ unit 推导结构化换算字段，用于旧数据兜底/一次性补全。
+ * @returns {{base_unit?:'g'|'ml'|'个', pack_in_base?:number}}
+ */
+export function inferBaseUnit(ing) {
+  const name = String((ing && ing.name) || '');
+  const m = SPEC_RE.exec(name);
+  if (m) {
+    const v = parseFloat(m[1]);
+    const u = m[2];
+    if (u === 'kg' || u === 'L' || u === 'l' || u === '升') {
+      return { base_unit: u === 'kg' ? 'g' : 'ml', pack_in_base: v * 1000 };
+    }
+    return { base_unit: u === 'g' ? 'g' : 'ml', pack_in_base: v };
+  }
+  return { base_unit: undefined, pack_in_base: undefined };
+}
+
+/**
+ * 单行成本。
+ * - 不传 unit：旧行为，qty 视为已按原料基础单位（克重口径）填写，{gross, lineCost}。
+ * - 传 unit：维度感知路径，qty 按该菜谱单位折算成库存包数 × 均价 ÷ 出成率。
+ *   维度不兼容（重量↔体积）或缺失换算系数时返回 {gross, lineCost:null, dimMismatch:true}。
+ * @returns {{gross:number, lineCost:number|null, dimMismatch?:boolean}|null} qty≤0 或无 ing 返回 null。
+ */
+export function calcLineCost(qty, ing, unit) {
   const q = Number(qty);
   if (!(q > 0) || !ing) return null;
   const yld = parseFloat(ing.yld) > 0 ? parseFloat(ing.yld) : 1;
-  const gross = q / yld;
-  const gpu = gramsPerUnit(ing);
   const avg = parseFloat(ing.avg);
-  const lineCost = (gpu != null && gpu > 0 && avg > 0) ? (gross / gpu) * avg : null;
-  return { gross, lineCost };
+  const base = ingBaseInfo(ing);
+
+  if (unit == null || String(unit).trim() === '') {
+    // 旧行为：qty 已是基础单位量（克重口径）
+    const gross = q / yld;
+    const lineCost = base && base.amount > 0 && avg > 0 ? (gross / base.amount) * avg : null;
+    return { gross, lineCost };
+  }
+
+  // 新行为：带菜谱单位，维度必须一致
+  const u = String(unit).trim();
+  const recipeDim = DIM_OF_UNIT[u];
+  const dim = base ? base.dim : (ing.base_unit ? DIM_OF_BASE[ing.base_unit] : null);
+  if (!recipeDim || !dim || recipeDim !== dim || !base || !(base.amount > 0)) {
+    return { gross: q / yld, lineCost: null, dimMismatch: true };
+  }
+  const perUnit = unitToBase(recipeDim, u); // 1 个菜谱单位 = 多少基础单位
+  if (perUnit == null) return { gross: q / yld, lineCost: null, dimMismatch: true };
+  const recipeBase = q * perUnit;
+  const gross = recipeBase / yld; // 出成率：毛料 = 净料 ÷ 出成率
+  const numPacks = gross / base.amount; // 毛料基础量 ÷ 每包基础量 = 包数
+  const lineCost = avg > 0 ? numPacks * avg : null;
+  return { gross, lineCost, dimMismatch: lineCost == null };
 }

@@ -1,0 +1,62 @@
+name: release
+
+# 全自动发版：本地 push 一个 v* tag 即触发，云端 windows 构建 NSIS 并上传 GitHub Releases。
+#   用法：git tag v0.1.1 && git push origin v0.1.1
+#   版本号取自 tag（v0.1.1 → 0.1.1），无需改 package.json，也无需本机安装任何构建依赖。
+#
+#   token 说明：上传 Releases 用的是 GitHub 自动注入的内置 GITHUB_TOKEN（见 permissions: contents: write），
+#   无需你生成或配置任何 PAT。仅本地一键发版（scripts/release.js）才需要自备 GH_TOKEN 环境变量。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # electron-builder 需要完整 git 元数据生成 latest.yml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      # 1) 构建前端产物（桌面端打包需要 apps/admin-web/dist）
+      - name: 构建 admin-web
+        run: |
+          cd apps/admin-web
+          npm ci
+          npm run build
+
+      # 2) 安装桌面端依赖（electron / electron-builder / electron-updater）
+      - name: 安装 desktop 依赖
+        run: |
+          cd desktop
+          npm ci
+
+      # 3) 把 tag 版本写入 package.json（v0.1.1 → 0.1.1）；用 node 改写避免 PowerShell JSON 中文转义
+      - name: 写入版本号
+        run: |
+          node -e "const fs=require('fs');const p='desktop/package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version=process.env.GITHUB_REF_NAME.replace(/^v/,'');fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');console.log('version = '+j.version);"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      # 4) 同步资源（bff/shared/dist → desktop/app）+ 构建 NSIS + 上传 Releases
+      - name: 构建并发布
+        shell: pwsh
+        run: |
+          cd desktop
+          node scripts/sync-assets.js
+          npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 无代码签名证书，禁自动发现，交由 noop-sign.js 空签名
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'

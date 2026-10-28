@@ -33,6 +33,11 @@ const COLL_KEY = {
   // 云端队列写入的采购/进货必须参与合并，否则入库单与库存重算会在冲突路径丢失
   orders: 'id',
   recv: 'id',
+  // 受控词表存 JSON 快照（data.ing_terms），按词条 id 合并，
+  // 否则三向合并冲突路径会整体取 theirs，消费者刚写入的新词条/审核状态会被丢弃。
+  ing_terms: 'id',
+  // Phase 2 供应商类目受控词表（data.vendor_terms），同样按词条 id 合并，防冲突路径丢词条
+  vendor_terms: 'id',
 };
 
 // ---------- Python json.dumps 兼容实现 ----------

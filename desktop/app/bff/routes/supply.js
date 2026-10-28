@@ -4,11 +4,15 @@
  *   数据源：店内快照 data.vendors | ext.sup_vendors / data.quotes | ext.sup_prices / ext.sup_accounts
  *
  *   GET  /api/supply/vendors            供应商档案（品类/状态/账期/评级）
+ *   GET  /api/supply/vendor-terms       供应商类目受控词表（Phase 2，data.vendor_terms 优先）
  *   GET  /api/supply/compare            比价（同原料多供应商 + 价差）
  *   GET  /api/supply/accounts           往来账龄（0-30/31-60/>60/逾期）
  *   GET  /api/supply/overview           供应链看板汇总
  *   GET  /api/supply/config / POST      价差阈值/账龄分档/低评级线（BFF 本地配置，可配）
  *   POST /api/supply/vendor             供应商档案 upsert → vendor.upsert 入队
+ *   POST /api/supply/vendor/delete      供应商档案删除 → vendor.delete 入队（有往来账禁删）
+ *   POST /api/supply/vendor/term        类目词条申请/审核 → supplier_term.upsert 入队
+ *   POST /api/supply/vendor/category    供应商类目设置 → vendor.attr_set 入队（受控单选）
  *   POST /api/supply/quote              供应商报价 → quote.upsert 入队
  *   POST /api/supply/po                 采购应付登记 → supply.po 入队
  *
@@ -19,6 +23,7 @@ const { enqueue } = require('./actions');
 const { mayWriteActions } = require('../lib/auth');
 const { loadSnapshot } = require('./snapshot');
 const supply = require('../lib/supply');
+const supTerms = require('../lib/supplier_terms');
 
 const CONFIG_FILE = 'supply_config.json';
 
@@ -66,6 +71,28 @@ function overviewPayload() {
   return rep;
 }
 
+/** 供应商类目词表（Phase 2）：data.vendor_terms 优先，缺失回退 seed；只读 */
+function vendorTermsPayload() {
+  const { data, snap } = loadExt();
+  const terms = supTerms.termsOf(data);
+  return {
+    ok: true,
+    scope: supTerms.SUP_CONFIG.scope,
+    categories: supTerms.SUP_TERM_CATEGORIES,
+    count: terms.length,
+    terms: terms.map((t) => ({
+      id: t.id,
+      name: t.name,
+      category: t.category,
+      aliases: Array.isArray(t.aliases) ? t.aliases : [],
+      status: t.status || 'active',
+    })),
+    fallback_id: supTerms.SUP_FALLBACK_ID,
+    source: (data && Array.isArray(data.vendor_terms) && data.vendor_terms.length) ? 'data' : 'seed',
+    rev: snap ? snap.rev : null,
+  };
+}
+
 /* ---------------- 写操作 ---------------- */
 
 async function readJson(ctx, req) {
@@ -94,6 +121,7 @@ function handle(req, res, ctx, pathname) {
   /* ---------- 只读 ---------- */
   if (m === 'GET' || m === 'HEAD') {
     if (pathname === '/api/supply/vendors') { ctx.sendJSON(res, 200, vendorsPayload()); return true; }
+    if (pathname === '/api/supply/vendor-terms') { ctx.sendJSON(res, 200, vendorTermsPayload()); return true; }
     if (pathname === '/api/supply/compare') { ctx.sendJSON(res, 200, comparePayload()); return true; }
     if (pathname === '/api/supply/accounts') { ctx.sendJSON(res, 200, accountsPayload()); return true; }
     if (pathname === '/api/supply/overview') { ctx.sendJSON(res, 200, overviewPayload()); return true; }
@@ -112,7 +140,11 @@ function handle(req, res, ctx, pathname) {
 
   if (m !== 'POST') return false;
 
-  const write = ['/api/supply/config', '/api/supply/vendor', '/api/supply/quote', '/api/supply/po'];
+  const write = [
+    '/api/supply/config', '/api/supply/vendor', '/api/supply/vendor/delete',
+    '/api/supply/vendor/term', '/api/supply/vendor/category',
+    '/api/supply/quote', '/api/supply/po',
+  ];
   if (write.indexOf(pathname) < 0) return false;
   if (!ctx.auth || !mayWriteActions(ctx.auth)) {
     ctx.sendJSON(res, 403, { ok: false, error: 'forbidden: actions.write required' });
@@ -157,9 +189,60 @@ function handle(req, res, ctx, pathname) {
         level: body.level == null ? undefined : body.level,
         status: trim(body.status) || undefined,
         period: trim(body.period) || undefined,
-        note: trim(body.note) || undefined
+        note: trim(body.note) || undefined,
+        /* W3 产品超链接：资质证照（数组或 {类型:{...}} 映射，执行器 normalizeCerts 归一） */
+        certs: body.certs != null ? body.certs : undefined,
+        /* 编辑口径：显式空值也写回（清空联系人/电话/评级/备注）；old_name 供无编号档案改名时定位 */
+        edit: body.edit === true,
+        old_name: body.edit === true ? (trim(body.old_name) || undefined) : undefined
       }, operatorOf(ctx, body), ctx.traceId);
       ctx.sendJSON(res, 200, { ok: true, action_id: id, rev, note: '供应商档案已入队 → 审批中心确认' });
+      return;
+    }
+
+    /* 供应商档案删除（有往来账禁删，执行器 vendor.delete 二次校验） */
+    if (pathname === '/api/supply/vendor/delete') {
+      const vid = trim(body.vendor_id || body.id);
+      const name = trim(body.name);
+      if (!vid && !name) { ctx.sendJSON(res, 400, { ok: false, error: 'vendor_id 或 name 至少一项必填' }); return; }
+      const id = doEnqueue('vendor.delete', {
+        vendor_id: vid || undefined,
+        name: name || undefined
+      }, operatorOf(ctx, body), ctx.traceId);
+      ctx.sendJSON(res, 200, { ok: true, action_id: id, rev, note: '供应商删除已入队 → 审批中心确认' });
+      return;
+    }
+
+    /* 供应商类目词条申请/审核/上架（Phase 2，→ supplier_term.upsert 入队） */
+    if (pathname === '/api/supply/vendor/term') {
+      const name = trim(body.name);
+      const id = trim(body.id);
+      if (!name && !id) { ctx.sendJSON(res, 400, { ok: false, error: 'name 或 id 至少一项必填' }); return; }
+      const aliases = body.aliases == null
+        ? undefined
+        : (Array.isArray(body.aliases) ? body.aliases : String(body.aliases).split(/[,，/]/));
+      const aid = doEnqueue('supplier_term.upsert', {
+        id: id || undefined,
+        name: name || undefined,
+        category: trim(body.category) || undefined,
+        aliases: aliases ? aliases.map(trim).filter(Boolean) : undefined,
+        status: trim(body.status) || undefined,
+      }, operatorOf(ctx, body), ctx.traceId);
+      ctx.sendJSON(res, 200, { ok: true, action_id: aid, rev, note: '供应商类目词条已入队 → 审批中心确认' });
+      return;
+    }
+
+    /* 供应商类目设置（受控单选：词条 ID / 标准名 / 别名 → vendor.attr_set 入队） */
+    if (pathname === '/api/supply/vendor/category') {
+      const vid = trim(body.vendor_id || body.id);
+      const name = trim(body.name);
+      if (!vid && !name) { ctx.sendJSON(res, 400, { ok: false, error: 'vendor_id 或 name 至少一项必填' }); return; }
+      const aid = doEnqueue('vendor.attr_set', {
+        vendor_id: vid || undefined,
+        name: vid ? undefined : name,
+        category: body.category == null ? '' : trim(body.category),
+      }, operatorOf(ctx, body), ctx.traceId);
+      ctx.sendJSON(res, 200, { ok: true, action_id: aid, rev, note: '供应商类目已入队 → 审批中心确认' });
       return;
     }
 

@@ -123,7 +123,7 @@ const TOOLS = {
       const rows = [];
       for (const r of recipes) {
         try {
-          const card = buildCostCard(r, snap.data || {});
+          const card = buildCostCard(r, snap.data || {}, recipes);
           if (card && card.gross_margin != null) {
             rows.push({
               name: r.name || r.sku_id, color: r.color || '',

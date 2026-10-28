@@ -58,7 +58,7 @@ function derive(snap) {
     }
     const rows = [];
     for (const rec of recipes) {
-      const card = buildCostCard(rec, data);
+      const card = buildCostCard(rec, data, recipes);
       if (!card || card.gross_margin == null) continue;
       const vol = byName[rec.name] || byName[String(rec.name || '').replace(/（.*/, '')] || 0;
       rows.push({ name: rec.name, margin: card.gross_margin, vol, price: card.price });

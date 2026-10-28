@@ -85,7 +85,7 @@ const EXT_TABLES = {
   fin_split: [],
   pos_tables: [],
   loss_reports: [],
-  sup_vendors: [],
+  sup_vendors: ['certs'],
   sup_prices: [],
   sup_accounts: []
 };

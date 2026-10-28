@@ -18,6 +18,7 @@ const { loadSnapshot } = require('./snapshot');
 // FP-DASH-05/15：复用导出层既有成本解析（dishCostMap/dishResolver/costOfDish/near30Agg），
 // 单一公式源，不另写第二份成本口径
 const { dishCostMap, dishResolver, costOfDish, near30Agg } = require('./export');
+const { isFood } = require('../lib/ing_type'); // W4：耗材不进经营分析口径（库存总值/断货补货）
 
 function todayStr() {
   const d = new Date();
@@ -97,6 +98,7 @@ function lowStockItems(ings) {
   for (const it of ings) {
     if (!it || typeof it !== 'object') continue;
     if (it.on === false) continue; // 旧版 lowStocks() 只算在售原料（HTML:1279 `g.on&&`）
+    if (!isFood(it)) continue; // W4：耗材不参与断货补货（走耗材标签页阈值提醒 + 人工下单）
     const qty = parseFloat(it.qty != null ? it.qty : (it.stock != null ? it.stock : it.amount));
     const safe = parseFloat(it.safe != null ? it.safe : (it.safety != null ? it.safety : it.safe_stock));
     if (isNaN(qty) || isNaN(safe)) continue;
@@ -161,15 +163,20 @@ function isInboundEffective(r) {
   return /已入库|done|入库/i.test(st);
 }
 
-/** FP-DASH-07 库存总值：对齐旧版 stockValue()（HTML:1244/1251）= Σ 库存 × 均价（时点值，不随周期变） */
+/** FP-DASH-07 库存总值：对齐旧版 stockValue()（HTML:1244/1251）= Σ 库存 × 均价（时点值，不随周期变）。
+ *  W4：默认口径只统计食材（food），耗材（consumable）单独展示，见决策 #9。 */
 function stockValueOf(ings) {
-  const sum = ings.reduce((a, it) => {
-    if (!it || typeof it !== 'object') return a;
+  let food = 0;
+  let consumable = 0;
+  for (const it of ings) {
+    if (!it || typeof it !== 'object') continue;
     const q = parseFloat(it.stock != null ? it.stock : (it.qty != null ? it.qty : it.amount));
     const p = parseFloat(it.avg);
-    return a + ((isNaN(q) ? 0 : q) * (isNaN(p) ? 0 : p));
-  }, 0);
-  return Math.round((sum + Number.EPSILON) * 100) / 100;
+    const v = (isNaN(q) ? 0 : q) * (isNaN(p) ? 0 : p);
+    if (isFood(it)) food += v;
+    else consumable += v;
+  }
+  return { total: r2(food), food: r2(food), consumable: r2(consumable) };
 }
 
 // 证照到期天数（字段容错：expire/expiry/valid_until/until）
@@ -531,8 +538,8 @@ function deriveReport(snap, date, rangeRaw) {
       { label: '销售记录总数', value: String(sales.length), delta: null },
       // FP-DASH-06 采购应付（本期）：区间内有效进货单应付合计（旧版 HTML:1243/1250）
       { label: '采购应付（本期）', value: '¥' + payableIn.toFixed(2), delta: null },
-      // FP-DASH-07 库存总值：Σ 库存 × 均价（时点值，不随周期变；旧版 HTML:1244/1251）
-      { label: '库存总值', value: '¥' + stockVal.toFixed(2), delta: null }
+      // FP-DASH-07 库存总值：默认食材口径，耗材单独展示（时点值，不随周期变；旧版 HTML:1244/1251）
+      { label: '库存总值', value: '¥' + stockVal.total.toFixed(2), sub: stockVal.consumable > 0 ? '其中耗材 ¥' + stockVal.consumable.toFixed(2) : null, delta: null }
     ],
     heat_mini,
     todos,

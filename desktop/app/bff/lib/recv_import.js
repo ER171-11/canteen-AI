@@ -434,6 +434,30 @@ const IMP_PO_DEFS = {
   date: { alts: ['日期', '采购日期', '配送日期', '送货日期', '入库日期', '单据日期'] }
 };
 
+/** 人工可读列名（预览面板 / 手动指定列用，对齐旧版 IMP_LABELS.po :3383） */
+const IMP_PO_LABELS = {
+  ingName: '品名 / 原料名称',
+  qtyRecv: '实收数',
+  qtyOrder: '下单数',
+  qty: '数量',
+  price: '单价',
+  unit: '单位',
+  cat: '原料分类',
+  note: '备注',
+  supplier: '供应商',
+  date: '日期'
+};
+
+/** 手动指定列面板的候选字段顺序（对齐 IMP_PO_DEFS 定义顺序） */
+const PO_FIELDS = ['ingName', 'qtyRecv', 'qtyOrder', 'qty', 'price', 'unit', 'cat', 'note', 'supplier', 'date'];
+
+/** 供界面展示「支持的列名别名」 */
+function aliasPreview() {
+  const out = {};
+  PO_FIELDS.forEach((k) => { out[k] = IMP_PO_DEFS[k].alts.slice(); });
+  return out;
+}
+
 /** 表头归一（:2974） */
 function normHeader(s) {
   return String(s == null ? '' : s)
@@ -582,13 +606,25 @@ function pickFirst(o, keys) {
 /** 表「未收货」的显式标记（× / 未收 / 缺货 / 已划掉）——这类行数一般是业务原因不收货，不计为数据错误 */
 const NOT_RECEIVED_RE = /^[×x✗✘❌—\-]|未收|未送|缺货|不送|已划|划掉/;
 
-function parseRecvTable(src) {
-  const f = pickTable(src, IMP_PO_DEFS, [['qtyRecv', 'qtyOrder', 'qty']]);
+function parseRecvTable(src, ov) {
+  let f = null;
+  if (ov && ov.map && Object.keys(ov.map).length) {
+    /* 手动指定列：直接用用户给的映射，跳过表头自动探测（旧版 parseRecTable(src,ov) 同款） */
+    const rows = ov.rows || (src && src.rows) || [];
+    f = {
+      rows: rows,
+      hit: { rowIndex: (ov.rowIndex == null ? -1 : ov.rowIndex), map: ov.map },
+      sheet: ov.sheet
+    };
+  } else {
+    f = pickTable(src, IMP_PO_DEFS, [['qtyRecv', 'qtyOrder', 'qty']]);
+  }
   if (!f) {
     return {
       docs: [],
       err: '未识别到进货单表头。需含「品名/原料名称」+「数量(或实收数/下单数)」+「单价」三列'
         + '（支持列名别名：' + Object.keys(IMP_PO_DEFS).length + ' 个字段、见界面说明）'
+        + '；也可点「手动指定列」自行对应'
     };
   }
   const objs = rowsToObjs(f.rows, IMP_PO_DEFS, f.hit);
@@ -623,7 +659,15 @@ function parseRecvTable(src) {
     });
   });
   if (!lines.length) {
-    return { docs: [], skipped: skipped, bad: bad, err: '已识别到表头，但没有解析出有效明细行（请检查数量、单价是否为数字）' };
+    return {
+      docs: [],
+      skipped: skipped,
+      bad: bad,
+      err: '已识别到表头，但没有解析出有效明细行（请检查数量、单价是否为数字）',
+      sheet: f.sheet,
+      headerRowIndex: f.hit.rowIndex,
+      colMap: f.hit.map
+    };
   }
   const docs = [];
   if (lines.some((l) => l._sup || l._date)) {
@@ -645,7 +689,15 @@ function parseRecvTable(src) {
       lines: lines.map((l) => ({ ingName: l.ingName, qty: l.qty, price: l.price, unit: l.unit, cat: l.cat }))
     });
   }
-  return { docs: docs, meta: meta, skipped: skipped, bad: bad, sheet: f.sheet };
+  return {
+    docs: docs,
+    meta: meta,
+    skipped: skipped,
+    bad: bad,
+    sheet: f.sheet,
+    headerRowIndex: f.hit.rowIndex,
+    colMap: f.hit.map
+  };
 }
 
 /**
@@ -654,18 +706,26 @@ function parseRecvTable(src) {
  * @param {string} fileName
  * @returns {{docs:Array, skipped:number, meta:object, format:string, sheet?:string, err?:string}}
  */
-function parseImportFile(bytes, fileName) {
+function parseImportFile(bytes, fileName, ov) {
   const src = loadRowSource(bytes, fileName);
   if (src.err) return { docs: [], skipped: 0, bad: 0, meta: {}, format: src.format, err: src.err };
-  const r = src.json ? parseRecvJson(src.text) : parseRecvTable(src);
+  const r = src.json ? parseRecvJson(src.text) : parseRecvTable(src, ov);
+  const sheets = src.sheets || [];
+  let grid = src.rows || [];
+  if (ov && Array.isArray(ov.rows) && ov.rows.length) grid = ov.rows;
+  else if (sheets.length) grid = sheets[0].rows || [];
   return {
     docs: r.docs || [],
     skipped: r.skipped || 0,
     bad: r.bad || 0,
     meta: r.meta || {},
     format: src.format,
-    sheet: r.sheet,
-    sheetCount: (src.sheets || []).length,
+    sheet: r.sheet || (sheets[0] && sheets[0].name) || '',
+    sheetCount: sheets.length || 1,
+    /* 手动指定列用：前 25 行 × 前 30 列 */
+    headRows: grid.slice(0, 25).map((row) => (row || []).slice(0, 30)),
+    headerRowIndex: r.headerRowIndex != null ? r.headerRowIndex : -1,
+    colMap: r.colMap || null,
     err: r.err
   };
 }
@@ -775,19 +835,34 @@ function previewImport(input, ings) {
     return { ok: false, error: '文件过大（上限 8MB，实到 ' + Math.round(bytes.length / 1048576) + 'MB）' };
   }
   const fileName = String(inp.fileName || 'import.csv');
+  const override = (inp.override && typeof inp.override === 'object' && !Array.isArray(inp.override))
+    ? inp.override : null;
   let parsed = null;
   try {
-    parsed = parseImportFile(bytes, fileName);
+    parsed = parseImportFile(bytes, fileName, override);
   } catch (e) {
     return { ok: false, error: '文件解析失败：' + ((e && e.message) || e) };
   }
-  if (parsed.err) return { ok: false, error: parsed.err, format: parsed.format };
+  /* 手动指定列面板用：原始网格 + 字段定义 + 别名（识别失败时一并回传，前端据此展开面板） */
+  const head = {
+    format: parsed.format,
+    sheet: parsed.sheet,
+    sheetCount: parsed.sheetCount,
+    rows: parsed.headRows || [],
+    headerRowIndex: parsed.headerRowIndex,
+    colMap: parsed.colMap,
+    labels: IMP_PO_LABELS,
+    fields: PO_FIELDS.slice(),
+    aliases: aliasPreview()
+  };
+  if (parsed.err) return { ok: false, error: parsed.err, format: parsed.format, head: head };
   const pv = buildPreview(parsed.docs, ings);
   if (!pv.groups.length) {
     return {
       ok: false,
       error: '未解析出可导入的明细行（数量需 >0、单价需 ≥0）',
       format: parsed.format,
+      head: head,
       unmatched: pv.unmatched,
       newIngs: pv.newIngs
     };
@@ -807,7 +882,8 @@ function previewImport(input, ings) {
     single: pv.single,
     totalLines: pv.totalLines,
     totalAmount: pv.totalAmount,
-    groups: pv.groups
+    groups: pv.groups,
+    head: head
   };
 }
 
@@ -831,6 +907,9 @@ module.exports = {
   sniffFormat,
   /* 识别层 */
   IMP_PO_DEFS,
+  IMP_PO_LABELS,
+  PO_FIELDS,
+  aliasPreview,
   findHeaderRow,
   rowsToObjs,
   pickTable,

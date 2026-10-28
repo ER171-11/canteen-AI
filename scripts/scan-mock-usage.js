@@ -46,13 +46,6 @@ const EXCLUDE_DIRS = new Set([
   'old', 'canteenAI-handoff-20261009', 'canteenAI other',
 ]);
 
-/* 过渡期临时工具自身（不计入淘汰命中，淘汰完成时需整体删除） */
-const TOOL_FILES = new Set([
-  'apps/admin-web/src/store/demo.ts',
-  'apps/admin-web/src/utils/demoGate.ts',
-  'apps/admin-web/src/components/DemoSwitch.tsx',
-])
-
 /*
  * 受控残留：数据来源标记、UI 文案、脚本工具自身的字符串。
  * 它们不构成「界面上的假数据」，因此不参与 --check 阻断，但仍列在清单中供复核。
@@ -181,7 +174,6 @@ function scanCode() {
     walk(path.join(ROOT, t.rel), t.exts, files);
     for (const f of files) {
       const rel = toRel(f);
-      if (TOOL_FILES.has(rel)) continue; /* 过渡期工具自身单列，不计入命中 */
       let text;
       try {
         text = fs.readFileSync(f, 'utf8');
@@ -295,10 +287,6 @@ function buildMarkdown(hits, db) {
   L.push('|---|---:|---:|');
   for (const r of sum.byCat) L.push('| ' + r.cat + ' | ' + r.lines + ' | ' + r.files + ' |');
   L.push('| **合计** | **' + sum.total + '** | **' + sum.fileCount + '** |');
-  L.push('');
-  L.push('### 过渡期工具文件（不参与淘汰计数，淘汰完成时整体删除）');
-  L.push('');
-  for (const t of TOOL_FILES) L.push('- `' + t + '`');
   L.push('');
 
   if (db && db.ok) {
@@ -430,7 +418,6 @@ function main() {
   }
   if (OPT.check) {
     console.log('✓ 无模拟数据残留。');
-    console.log('提醒：过渡期工具文件（store/demo.ts、utils/demoGate.ts、components/DemoSwitch.tsx）仍需一并删除。');
   }
 }
 

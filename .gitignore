@@ -3,6 +3,7 @@
 bff/.env
 *.env
 !.env.example
+.gh_token
 
 # 依赖
 node_modules/

@@ -77,6 +77,8 @@ const ROUTES = [
   require('./routes/equipment'),
   require('./routes/finance'),
   require('./routes/supply'),
+  // 检索域隔离 + 搜索索引字段白名单（W5，只读）
+  require('./routes/search'),
   require('./routes/loss'),
   require('./routes/analysis'),
   require('./routes/reserved'),

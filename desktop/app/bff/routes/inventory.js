@@ -16,6 +16,9 @@
 const { loadSnapshot } = require('./snapshot');
 const { listStandards, specReqFor } = require('../lib/accept_standards');
 const { previewImport } = require('../lib/recv_import');
+const { isFood } = require('../lib/ing_type'); // W4：耗材不参与补货预测（决策 #5）
+// W2：受控词表 + 词条 ID 精确命中（只读；写侧走 term.upsert / ing.attr_set 审批队列）
+const { TERM_CATEGORIES, termsOf, resolveTermIds, matchIngTags, flattenTags, isTermId } = require('../lib/ing_terms');
 
 function num(v, d) {
   const n = parseFloat(v);
@@ -68,6 +71,7 @@ function buildSuggestions(snap) {
     const cur = num(line.cur, 0);
     const planName = line.name || line.ing_name || id;
     const planIng = ingById.get(id);
+    if (planIng && !isFood(planIng)) continue; // W4：耗材不参与补货预测
     const planAnomaly = cur < 0;
     byIng.set(id, {
       ingredientId: id,
@@ -94,6 +98,7 @@ function buildSuggestions(snap) {
 
   for (const ing of ings) {
     if (!ing || !ing.id) continue;
+    if (!isFood(ing)) continue; // W4：耗材不参与补货预测（走安全库存阈值提醒 + 人工下单）
     if (byIng.has(ing.id)) continue;
     const qty = qtyOf(ing);
     const safety = safetyOf(ing);
@@ -216,11 +221,59 @@ function buildRecvAccept(snap, date) {
   return items;
 }
 
+/* ---------- W2 受控词表（只读） ---------- */
+
+/** GET /api/inventory/ing-terms → 受控词表列表（data.ing_terms 优先，缺失回退 seed） */
+function buildIngTerms(snap) {
+  const data = (snap && snap.data) || {};
+  const terms = termsOf(data);
+  return {
+    ok: true,
+    categories: TERM_CATEGORIES,
+    count: terms.length,
+    terms: terms.map((t) => ({
+      id: t.id,
+      name: t.name,
+      category: t.category,
+      aliases: Array.isArray(t.aliases) ? t.aliases : [],
+      status: t.status || 'active',
+    })),
+    source: (data && Array.isArray(data.ing_terms) && data.ing_terms.length) ? 'data' : 'seed',
+  };
+}
+
+/** GET /api/inventory/ing-terms/match?q= → 词条 ID 精确命中原料（只读，别名归一） */
+function buildTermMatch(snap, q) {
+  const data = (snap && snap.data) || {};
+  const ings = Array.isArray(data.ings) ? data.ings : [];
+  const terms = termsOf(data);
+  const kw = String(q || '').trim();
+  if (!kw) return { ok: true, q: kw, count: 0, terms: [], items: [] };
+  const wanted = resolveTermIds(kw, terms).filter(isTermId);
+  const hitTerms = terms.filter((t) => t && wanted.indexOf(String(t.id)) >= 0);
+  const items = [];
+  for (const ing of ings) {
+    if (!ing) continue;
+    const hit = matchIngTags(kw, ing, terms);
+    if (hit.length) {
+      items.push({
+        id: ing.id,
+        name: ing.name,
+        cat: ing.cat,
+        tags: flattenTags(ing.tags, terms),
+        hitTermIds: hit,
+      });
+    }
+  }
+  return { ok: true, q: kw, count: items.length, terms: hitTerms, items };
+}
+
 /** 上传体上限：8MB（与 lib/recv_import.js previewImport 内的上限同口径） */
 const MAX_UPLOAD = 8 * 1024 * 1024;
 
 /**
  * FP-RECV-02 进货单批量导入 · 预览（纯计算、零写）
+ * 支持 {contentBase64,fileName} 自动识别，或 {override:{rowIndex,map}} 手动指定列。
  * 失败一律走 400 + 明确 error 文案（由前端展示），不静默吞掉任何一行。
  */
 async function handleRecvImportPreview(req, res, ctx) {
@@ -251,7 +304,8 @@ async function handleRecvImportPreview(req, res, ctx) {
   const input = {
     fileName: String(body.fileName || 'import.csv'),
     contentBase64: body.contentBase64,
-    bytes: body.text ? Buffer.from(String(body.text), 'utf8') : null
+    bytes: body.text ? Buffer.from(String(body.text), 'utf8') : null,
+    override: body.override || null
   };
   const out = previewImport(input, ings);
   ctx.sendJSON(res, out.ok ? 200 : 400, out);
@@ -309,7 +363,20 @@ async function handle(req, res, ctx, pathname) {
     return true;
   }
 
+  if (pathname === '/api/inventory/ing-terms') {
+    const snap = loadSnapshot();
+    ctx.sendJSON(res, 200, buildIngTerms(snap));
+    return true;
+  }
+
+  if (pathname === '/api/inventory/ing-terms/match') {
+    const snap = loadSnapshot();
+    const q = (ctx.query.get('q') || '').trim();
+    ctx.sendJSON(res, 200, buildTermMatch(snap, q));
+    return true;
+  }
+
   return false;
 }
 
-module.exports = { handle, buildSuggestions, buildRecvAccept };
+module.exports = { handle, buildSuggestions, buildRecvAccept, buildIngTerms, buildTermMatch };
