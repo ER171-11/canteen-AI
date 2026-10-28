@@ -1,8 +1,8 @@
 # 计划文档：BOM 餐谱 × 原料仓「单向联动 + 结构化换算」改造
 
-> 状态：方案已确认（3 项决策已拍板），待分对话执行。
+> 状态：**已落地**（2026-10-23 执行完毕，随 `0.1.1` 发布；2026-10-28 补齐测试与文档回填）。
 > 关联：当前 bug —— BOM 编辑器选原料后「单位（包规）被强制覆盖」，但实际不影响计算，属误导。
-> 生成日期：2026-10-22
+> 生成日期：2026-10-22 ｜ 落地日期：2026-10-23
 
 ---
 
@@ -123,12 +123,12 @@
 
 | ID | 任务 | 依赖 | 状态 |
 |---|---|---|---|
-| core-convert | 扩展 `shared/recipe-cost` 为维度感知换算核心（base_unit/pack_in_base + inferBaseUnit 兜底） | — | ⬜ |
-| types-editor | `IngItem` 加 base_unit/pack_in_base；`StockPage` 原料表单增加录入 | core-convert | ⬜ |
-| recipes-ui | 改造 `RecipesPage`：移除单位覆盖、接入带单位换算、不兼容行标红 | core-convert | ⬜ |
-| unknown-block | `dish.js` 移除自动建档改为缺料拦截；前端提交前校验并提示 | recipes-ui | ⬜ |
-| backend-align | `bff/recipe_cost.js` 接入新换算（保留旧解析兜底） | core-convert | ⬜ |
-| verify | 单测 + `tsc --noEmit` + 浏览器 E2E（选料不改单位 / 不兼容报警 / 缺料拦截） | 全部前置 | ⬜ |
+| core-convert | 扩展 `shared/recipe-cost` 为维度感知换算核心（base_unit/pack_in_base + inferBaseUnit 兜底） | — | ✅ |
+| types-editor | `IngItem` 加 base_unit/pack_in_base；`StockPage` 原料表单增加录入 | core-convert | ✅ |
+| recipes-ui | 改造 `RecipesPage`：移除单位覆盖、接入带单位换算、不兼容行标红 | core-convert | ✅ |
+| unknown-block | `dish.js` 移除自动建档改为缺料拦截；前端提交前校验并提示 | recipes-ui | ✅ |
+| backend-align | `bff/recipe_cost.js` 接入新换算（保留旧解析兜底） | core-convert | ✅ |
+| verify | 单测 + `tsc --noEmit` + 浏览器 E2E（选料不改单位 / 不兼容报警 / 缺料拦截） | 全部前置 | ✅（单测 9/9 + 算法层 26/26 + `tsc` 通过） |
 
 ### 执行注意
 - **禁止改动** `serializeRecipe`（dish.js:1073）与 BOM 行 `{name,qty,unit}` JSON 存储结构，单位早已落库，仅消费方式变化。
@@ -155,3 +155,37 @@
 - 原料 `base_unit` 的录入是否强制（新建原料必须填），还是允许留空走 `inferBaseUnit` 兜底？建议新建强制、旧数据兜底。
 - 计数维度（个/只/把）的「每包基础量」如何定义（如 1 袋=30 枚）？是否纳入换算还是仅展示？
 - 是否需要一次性脚本把现有 `data.ings` 的 `pack_in_base` 按 `inferBaseUnit` 预填，降低运行期兜底压力？
+
+---
+
+## 八、落地记录（2026-10-23 执行 / 2026-10-28 测试与文档回填）
+
+**换算核心**（`shared/recipe-cost/index.mjs`，前后端唯一事实来源）
+- 新增 `DIM_OF_UNIT` / `DIM_OF_BASE` / `unitToBase(dim,unit)` / `packInBase(ing)` / `inferBaseUnit(ing)`；
+  `calcLineCost(qty, ing, unit?)` 改为维度感知：`numPacks = qty × unitToBase / packInBase`，`lineCost = numPacks × avg / yld`。
+- 维度不兼容或 `packInBase` 缺失 → `{ gross, lineCost: null, dimMismatch: true }`（UI 标红 + 显示「—」，不阻断保存）；
+  不传 `unit` 保持旧行为（既有调用零回归）。
+- 单测 `shared/recipe-cost/index.test.mjs` 9/9（含「体积原料按 g 填写判不兼容」「不传 unit 零回归」）。
+
+**原料库录入**（`apps/admin-web`）
+- `IngItem` 增加 `base_unit`（g/ml/个）与 `pack_in_base`；`StockPage` 编辑弹窗在「出成率」旁新增「基础单位 / 每包基础量」两项，
+  提交时随 `ing.upsert` 写回快照（未改动不写键）。
+
+**菜谱编辑器**（`RecipesPage`）
+- 删除选料 `onChange` 中的 `next[field.name].unit = hit.unit`，严守「原料仓只改原料列」；下拉开头的「名称 · 库存单位」仅作参考。
+- 行成本改用 `calcLineCost(line.qty, ing, line.unit)`；`dimMismatch` 行整体标红、成本列显示「—」并提示「单位不兼容」。
+
+**后端**（`bff/lib/algorithms/dish.js` / `bff/lib/recipe_cost.js`）
+- `upsertRecipe` 删除缺料自动建档（原 928-966），改为**写库前校验**：`main/aux/seasoning` 全部原料与 `data.ings` 比对，
+  缺失即 `throw 缺料未建档：<名清单>（请先在原料仓建档后再保存菜谱）`，避免「菜谱已写、原料缺失」的半成品状态；`清水/水/料水` 仍跳过。
+- `applyRecipeImport`（食谱卡导入）同步删除自动建档块（2026-10-28 收口）；`ensure_ings` 入参仅为向后兼容保留、已无写库副作用，导入缺料同样拦截。
+- `buildCostCard` 接入带单位行成本，历史无单位 BOM 仍走 `UNIT_TO_G` 旧解析兜底（成本报表零回归）。
+
+**测试与验证**
+- `dish.test.js` 60 例通过（两处 `recipeUpsert*` 平价夹具补齐已建档原料；新增 Node 超集断言「缺料拦截 + 不写库 + 不反向建档」，Python 参考实现仍自动建档故不对拍）。
+- `dish_import_delete.test.js` 27 例通过（原「自动建未匹配原料 / ensure_ings=false 不建料」两条改为「缺料拦截 + 不写库 + 原料未被反向建档」）。
+- 算法层 **26/26 全绿**（本改造前长期 24/26）；`tsc --noEmit` 通过；`recipe_cost.test.js`、`shared/recipe-cost` 单测全绿。
+
+**未做（有意）**
+- 浏览器 E2E 未脚本化（选料不改单位 / 不兼容标红为人工核对）；Android/iOS 双端不涉及 BOM 编辑。
+- 新建原料的 `base_unit` 未强制必填，仍允许留空走 `inferBaseUnit` 兜底（见 §7 开放问题，待产品确认）。

@@ -3,6 +3,57 @@
 > AI在修改任何模块前，必须查阅此文件，了解历史决策与废弃逻辑，避免引入过时方案。
 > 采用追加式记录，禁止覆盖历史条目。
 
+## [2026-10-28] V0.2 批次总账 - `0.1.1` 发版内容 + 发版后 7 项优化（补记 10-19 ~ 10-28）
+
+- 背景: `V0.1` 收官后按《下一版本（V0.2）发版计划》推进 W1-W6 六项；桌面端 `0.1.1` 于 **2026-10-23** 发布
+  （GitHub Releases `v0.1.1`，资产 `canteenAI-Setup-0.1.1.exe` + blockmap + latest.yml 齐备）。
+  本条目补记该版本包含什么、发版后又做了什么（此前 10-13 之后无 CHANGELOG 记录，属记账欠账）。
+- 阶段一（已进 `0.1.1` 包）:
+  1. **W1 供货单抹零**：`resolveDocPayable` 唯一出口（`payable = gross − discount`），折扣不摊入成本/均价/BOM；
+     `RecvFormModal` / `OrderFormModal` 暴露「整单优惠/抹零」，超优惠前后端双拦。
+  2. **W2 原料结构化字段 + 受控词表 Tag**：`ings.tags`（词条 ID 数组 + 自定义营销 Tag，JSON 字段免 DDL）、
+     `data.ing_terms` 词表、`term.upsert` / `ing.attr_set`、`GET /api/inventory/ing-terms`（含 `/match?q=`）。
+  3. **W3 产品超链接**：`ings.qc_report_url`、`sup_vendors.certs`（类型/证号/到期日/附件）、`certSummary` 五档分级、
+     看板 `cert_expiring` 临期告警、供应商/原料前端超链接（`safeHref` 白名单）。
+  4. **W4 食材/耗材分离**：`ings.type`（food/consumable）+ `bff/lib/ing_type.js` 唯一口径源，
+     成本/损耗/比价/补货/经营分析五处按 `isFood` 过滤，存量回灌。
+  5. **W5 检索域隔离**：`lib/search.js` 六域枚举 + 索引字段白名单 + 敏感字段黑名单，`/api/search`（`?domain=`、`/domains`），
+     前端 `SearchPage` 分域 tab + 头部搜索框。
+  6. **W6 BOM 中间材料**：`buildCostCard` 递归展开 `type='semi'` 中间材料（`stack` 防环），`清水/料水` 由硬跳过改为「可选中间材料」。
+  7. **BOM × 原料仓单向联动 + 结构化换算**（详见 `docs/计划与排期/计划-BOM原料库单向联动与单位换算改造.md`）：
+     `shared/recipe-cost` 维度感知 `calcLineCost(qty,ing,unit)`（`dimMismatch` 留空标红）、`base_unit`/`pack_in_base` 录入、
+     编辑器不再改写行单位、`upsertRecipe` 缺料拦截取代自动建档。
+- 阶段二（`0.1.1` 之后，10-23 15:31 ~ 10-27）:
+  1. **发版链路**：`desktop/scripts/release.js`（bump → sync-assets → `electron-builder --publish always`）；
+     `.github/workflows/release.yml`（push `v*` tag 触发云端 Windows 构建并上传 Releases，用内置 `GITHUB_TOKEN`）。
+  2. **受控词表通用内核 Phase 1**：`bff/lib/terms_core.js`（零依赖，scope / 单选多选 / `allowCustom` / ID 连续性），
+     `ing_terms.js` 退化为薄适配层、`algorithms/terms.js` 委托内核；原料域行为零变化。
+  3. **受控词表 Phase 2 · 供应商类目**：`bff/lib/supplier_terms.js`（S001-S005 种子 + 别名归一，未命中落「其他」并回执原文）；
+     `vendor.category` 由自由文本改为**词条 ID 标量**（存 `data.vendor_terms`，不升 schema）；写侧
+     `supplier_term.upsert` / `vendor.attr_set` / `vendor_term.backfill`；读侧统一还原标准名 + `category_id` + 检索 `category_kw` 别名；
+     `merge.js` 与 Python `merge.py` 的 `COLL_KEY` 同步纳入 `vendor_terms`。
+  4. **销售真实出餐扣料开关**：`data.config.saleRealDeduct`（默认关，`config.update` 切）；打开后 `sale.create` 审批落库
+     复用 `pos.deductBomForSaleItems`，扣料异常只记「跳过」不阻断；`pos.pay` / `sale.import` / `sale.update` / `sale.void` 不重复扣。
+  5. **清理模式（测试期隐藏工具）**：地址栏 `?maint=1` 激活（localStorage 多 tab 共享，未激活零 UI）；`maint.row_delete`
+     四道闸——22 张运营日志表白名单（`fin_*`/`sup_accounts`/`app_audit`/`recv_accept`/`loss_*` 禁删）、`where` 非空、
+     零命中抛错置已驳回、全程审批队列留痕。
+  6. **进货单补付口径修复**：`recv.update` 超付校验改为「本次实付 + 已登记补付 ≤ 应付」，避免补付结清后再编辑把实付翻倍；
+     `RecvFormModal` 校验与「付清」按钮同步按 `应付 − 已登记补付` 计算。
+  7. **供应商档案双源**：`vendorSource` / `vendorAllRows` 兼容 `data.vendors` 与 `sup_vendors` 新表，
+     修复「列表看得见、编辑说找不到 → 动作被置已驳回」。
+- 验证（本次实际跑过）:
+  - `npm test`（bff 全量，16 套）→ **exit 0**；算法层 **26/26**（补 dish 两例：缺料拦截改为新规则断言后由 24/26 转全绿）。
+  - `shared/recipe-cost` 单测 **9/9**；`store-node/merge.test.js` **23/23** 与 Python 一致；`maint.test.js` 5/5；`supplier_terms.test.js` 17 项。
+  - `apps/admin-web` `npx tsc --noEmit` → exit 0；`npm run build` 通过（35s，dist 已同步进 `desktop/app`）。
+  - 浏览器真人验收截图：W3 超链接 10/10、W5 检索域 11/11、供应商类目词表 3 张（`docs/验收截图/`）。
+- 欠账:
+  1. `desktop/app/bff` 曾长期缺 `terms_core.js` / `supplier_terms.js`（未跑 sync），已于 2026-10-28 补齐；**发版前必须跑 `node scripts/sync-assets.js`**。
+  2. 供应商类目前端下拉仍为硬编码（后端回标准名故可用）；真实快照未跑 `vendor_term.backfill`。
+  3. `ensure_ings` 入参与前端 Switch 仍在（已无写库副作用），待前端一起移除。
+  4. Android/iOS 未同步供应商资质 UI、词条录入；W3「打印送货单自动同步导出」待打印模板批次。
+
+---
+
 ## [2026-10-13 23:30] 阶段 28 - W3 · 菜品配方收官（FP-DISH-06/16/17/18）：菜品配方页 18/18 全部移植
 
 - 背景: 菜品配方页 18 项中仅余 4 项 ⬜（`FP-DISH-06` 删除菜品、`FP-DISH-16` 食谱卡批量导入、
