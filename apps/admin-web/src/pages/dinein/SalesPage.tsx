@@ -10,12 +10,14 @@ import {
   Space,
   Spin,
   Statistic,
+  Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
-import { fetchReportDaily, fetchSalesList, postAction } from '../../api'
+import { fetchAdminConfig, fetchReportDaily, fetchSalesList, postAction, saveAdminConfig } from '../../api'
 import type { ReportDaily, SaleListItem } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
 import { COLORS } from '../../theme'
@@ -81,6 +83,31 @@ export default function SalesPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
   const [aliasOpen, setAliasOpen] = useState(false)
+
+  // 特性开关：真实出餐销售统一走 POS 扣料（进销存-真实出餐销售统一走pos扣料+特性开关）。
+  // 开关存 data.config.saleRealDeduct（默认关闭）；开启后 admin-web 手工录入的销售单也按配方 BOM 扣料。
+  const [deductOn, setDeductOn] = useState(false)
+  const [deductLoading, setDeductLoading] = useState(false)
+
+  useEffect(() => {
+    fetchAdminConfig()
+      .then((resp) => setDeductOn(!!(resp?.config && resp.config.saleRealDeduct)))
+      .catch(() => { /* 非阻断：读不到配置时按关闭展示 */ })
+  }, [])
+
+  const toggleDeduct = async (next: boolean) => {
+    setDeductLoading(true)
+    try {
+      await saveAdminConfig({ saleRealDeduct: next })
+      setDeductOn(next)
+      message.success(next ? '已开启：手工录入销售单将按 POS 逻辑扣减库存' : '已关闭：手工录入销售单仅记账、不扣料')
+    } catch (e: unknown) {
+      const er = e as { response?: { data?: { error?: string } } }
+      message.error(er.response?.data?.error || '开关切换失败（需老板/店长权限）')
+    } finally {
+      setDeductLoading(false)
+    }
+  }
 
   const load = useCallback(() => {
     setLoading(true)
@@ -223,6 +250,17 @@ export default function SalesPage() {
                 {o.label}
               </Tag.CheckableTag>
             ))}
+            <Tooltip title="开启后：在「录入销售单」里手填的堂食/外卖真实出餐单，将复用移动端 POS 的配方 BOM 扣料逻辑自动扣减库存（平台导入单不扣，避免与平台自有 POS 重复）。关闭（默认）：仅记账、不扣料，保护现有数据。移动端 POS 结账始终扣料，不受此开关影响。">
+              <Space size={6}>
+                <Switch
+                  size="small"
+                  checked={deductOn}
+                  loading={deductLoading}
+                  onChange={toggleDeduct}
+                />
+                <Typography.Text style={{ fontSize: 13 }}>真实出餐扣料(POS)</Typography.Text>
+              </Space>
+            </Tooltip>
           </Space>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {report?.range_label ?? ''}

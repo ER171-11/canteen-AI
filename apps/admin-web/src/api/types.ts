@@ -7,6 +7,64 @@
 /** 角色枚举：与 BFF 下发 role 字段一致 */
 export type Role = '老板' | '店长' | '财务' | '厨房' | '收银' | '只读'
 
+/* ---------------- W5 检索域隔离 + 搜索索引字段管控 ---------------- */
+
+/** 业务域枚举（与 bff/lib/search.js 的 DOMAINS 对齐） */
+export type SearchDomainKey =
+  | 'procurement'
+  | 'finance'
+  | 'foodsafety'
+  | 'staff'
+  | 'equipment'
+  | 'sale'
+
+/** GET /api/search/domains 单个域描述 */
+export interface SearchDomainMeta {
+  key: SearchDomainKey
+  label: string
+}
+
+/** 单条检索命中：kind 为业务类型（原料/菜谱/供应商/销售单…），matched_field 为命中字段名 */
+export interface SearchHit {
+  id: string | null
+  kind: string
+  title: string
+  subtitle: string
+  matched_field: string
+}
+
+/** 单域检索结果 */
+export interface SearchDomainResult {
+  domain: string
+  label: string
+  count: number
+  hits: SearchHit[]
+}
+
+/** GET /api/search?domain=xxx&q= 单域检索响应 */
+export interface SearchOneResp {
+  ok: boolean
+  domain: string
+  result: SearchDomainResult
+  rev?: number | string | null
+}
+
+/** GET /api/search?q= 全局分域检索响应（各域独立，不跨域混排） */
+export interface SearchAllResp {
+  ok: boolean
+  query: string
+  total: number
+  domains: Record<string, SearchDomainResult>
+  domain_order: string[]
+  rev?: number | string | null
+}
+
+/** GET /api/search/domains 域枚举响应 */
+export interface SearchDomainsResp {
+  ok: boolean
+  domains: SearchDomainMeta[]
+}
+
 /** POST /api/admin/login 入参 */
 export interface LoginRequest {
   account: string
@@ -854,6 +912,16 @@ export interface IngItem {
   pack?: string
   /** 【Node 超集】整包规格（采购单位，数值）：补货建议「起订/整包」用；与 `pack`（包规字符串）分列 */
   packQty?: number
+  /**
+   * 成本折算基础单位（g=重量 / ml=体积 / 个=计数）。BOM 菜谱按自身单位填写后，
+   * 由换算程序据此与 `pack_in_base` 折算行成本；缺省时回退名称规格解析。
+   */
+  base_unit?: 'g' | 'ml' | '个'
+  /**
+   * 每 1 个库存单位含多少基础单位（如 桶 1.9L → base_unit='ml', pack_in_base=1900）。
+   * 与 `base_unit` 配合，替代旧「从名称正则抠规格」的脆弱做法。
+   */
+  pack_in_base?: number
   /** 起订量（采购单位，补货建议「起订/整包」用；旧版 ing.moq） */
   moq?: number | string
   /** 默认供应商（补货建议转单按此拆单；旧版 ing.sup） */
@@ -2208,7 +2276,10 @@ export interface SupplyVendorCertExpiring {
 export interface SupplyVendorRow {
   id: string | number | null
   name: string
+  /** 类目展示名（后端 categoryLabel 还原标准名；未命中的存量自由文本原样回显） */
   category: string
+  /** Phase 2：类目受控词条 ID（S 前缀）；存量自由文本未归一前为 null */
+  category_id?: string | null
   status: string
   period: string
   level: number | null
@@ -2233,6 +2304,32 @@ export interface SupplyVendorsResp {
   advice: string[]
   /** W3 资质临期清单（expired/red/orange） */
   cert_expiring?: SupplyVendorCertExpiring[]
+}
+
+/** Phase 2 供应商类目受控词条（data.vendor_terms 优先，缺失回退 seed） */
+export interface SupplyVendorTerm {
+  /** 词条 ID（S + 数字） */
+  id: string
+  /** 标准名（受控展示值） */
+  name: string
+  /** 受控维度（目前只有「供应商类目」） */
+  category: string
+  /** 别名：归一到同一词条 ID，不单独成项 */
+  aliases: string[]
+  /** 词条状态机：pending 待审 / active 上架 / rejected 驳回 */
+  status: string
+}
+export interface SupplyVendorTermsResp {
+  ok: boolean
+  scope: string
+  categories: string[]
+  count: number
+  terms: SupplyVendorTerm[]
+  /** 兜底词条 ID（未命中的自由文本归入这里） */
+  fallback_id: string
+  /** 词表来源：data 快照 / seed 内置种子 */
+  source: 'data' | 'seed' | string
+  rev?: number | string | null
 }
 
 export interface SupplyQuote {

@@ -7,6 +7,7 @@ import {
 import {
   Breadcrumb,
   Button,
+  Input,
   Layout,
   Menu,
   Result,
@@ -17,7 +18,7 @@ import {
   message,
 } from 'antd'
 import type { MenuProps } from 'antd'
-import { LogoutOutlined, MobileOutlined, ShopOutlined, SyncOutlined } from '@ant-design/icons'
+import { LogoutOutlined, MobileOutlined, SearchOutlined, ShopOutlined, SyncOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../store/auth'
 import EnvBanner from '../components/EnvBanner'
 import { canAccess, firstAccessiblePath } from '../rbac/roles'
@@ -162,6 +163,17 @@ export default function MainLayout() {
             ]}
           />
           <Space size="middle" wrap>
+            <Input.Search
+              allowClear
+              size="small"
+              prefix={<SearchOutlined style={{ color: '#bbb' }} />}
+              placeholder="全局搜索"
+              style={{ width: 200 }}
+              onSearch={(v) => {
+                const val = v.trim()
+                if (val) navigate(`/search?q=${encodeURIComponent(val)}`)
+              }}
+            />
             <Select
               size="small"
               style={{ minWidth: 200 }}

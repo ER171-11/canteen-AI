@@ -10,6 +10,7 @@ import {
   InputNumber,
   List,
   Modal,
+  Popconfirm,
   Row,
   Select,
   Space,
@@ -28,10 +29,12 @@ import {
   fetchFoodsafeSamples,
   ingestFoodsafeSample,
   logFoodsafeSample,
+  maintRowDelete,
 } from '../../api'
 import type { FoodsafeSamplesResp, SampleLevel, SampleRow } from '../../api/types'
 import { downloadBlob } from '../inventory/settle/download'
 import { useAuthStore } from '../../store/auth'
+import { maintEnabled } from '../../utils/maint'
 import { COLORS } from '../../theme'
 
 const LEVEL_META: Record<SampleLevel, { text: string; color: string }> = {
@@ -191,6 +194,30 @@ export default function SamplePage() {
     }
   }
 
+  /* 清理模式（测试期隐藏工具）：物理删除留样记录，maint.row_delete 走审批队列留痕 */
+  const deleteRow = async (r: SampleRow) => {
+    if (r.id == null) return
+    setBusy(true)
+    try {
+      const res = await maintRowDelete({ table: 'fs_samples', where: { id: r.id } })
+      if (res.ok) {
+        message.success(
+          res.confirmed
+            ? '清理动作已提交并确认，执行后生效'
+            : '清理动作已入队，待审批中心确认',
+        )
+        load()
+      } else {
+        message.error('清理提交失败')
+      }
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '清理提交失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const exportSamples = async () => {
     try {
       const blob = await fetchExportCsvBlob('samples')
@@ -278,21 +305,46 @@ export default function SamplePage() {
     {
       title: '操作',
       key: 'op',
-      width: 110,
+      width: 130,
       render: (_, r) => {
         if (!canWrite) return <span style={{ color: COLORS.gray }}>只读</span>
-        if (r.level === 'done') return <span style={{ color: COLORS.gray }}>已销毁</span>
-        return (
-          <Button
-            size="small"
-            danger
-            onClick={() => {
-              clearForm.resetFields()
-              setClearRow(r)
-            }}
-          >
-            销毁登记
-          </Button>
+        /* 清理模式（测试期隐藏工具）：默认不可见，?maint=1 激活后显示物理删除按钮 */
+        const delBtn =
+          maintEnabled() && r.id != null ? (
+            <Popconfirm
+              title="删除这条留样记录？"
+              description="物理删除，走审批队列，审批中心可驳回"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => void deleteRow(r)}
+            >
+              <Button size="small" type="link" danger style={{ padding: 0 }}>
+                删
+              </Button>
+            </Popconfirm>
+          ) : null
+        const main =
+          r.level === 'done' ? (
+            <span style={{ color: COLORS.gray }}>已销毁</span>
+          ) : (
+            <Button
+              size="small"
+              danger
+              onClick={() => {
+                clearForm.resetFields()
+                setClearRow(r)
+              }}
+            >
+              销毁登记
+            </Button>
+          )
+        return delBtn ? (
+          <Space size={4}>
+            {main}
+            {delBtn}
+          </Space>
+        ) : (
+          main
         )
       },
     },

@@ -29,6 +29,8 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import {
   fetchSupplyVendors,
+  fetchSupplyVendorTerms,
+  submitVendorTermUpsert,
   fetchSupplyCompare,
   fetchSupplyAccounts,
   fetchSupplyOverview,
@@ -53,6 +55,7 @@ import type {
   SupplyQuote,
   SupplyVendorRow,
   SupplyVendorsResp,
+  SupplyVendorTerm,
 } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
 import { client } from '../../api/client'
@@ -146,6 +149,19 @@ const DEFAULT_CFG: SupplyConfigResp['supply'] = {
   low_level: 3,
 }
 
+/**
+ * 供应商类目兜底词表：与 bff/lib/supplier_terms.js::seedTerms() 保持一致。
+ * 仅在 `GET /api/supply/vendor-terms` 不可用（离线/演示 mock）时兜底，
+ * 正常路径一律以后端词表为准（data.vendor_terms 优先）。
+ */
+const DEF_VENDOR_TERMS: SupplyVendorTerm[] = [
+  { id: 'S001', name: '食材', category: '供应商类目', aliases: [], status: 'active' },
+  { id: 'S002', name: '餐具', category: '供应商类目', aliases: [], status: 'active' },
+  { id: 'S003', name: '酒水', category: '供应商类目', aliases: [], status: 'active' },
+  { id: 'S004', name: '设备工程商', category: '供应商类目', aliases: [], status: 'active' },
+  { id: 'S005', name: '其他', category: '供应商类目', aliases: [], status: 'active' },
+]
+
 export default function VendorsPage() {
   const canWrite = useAuthStore((s) => s.canWrite)
   const [vendors, setVendors] = useState<SupplyVendorsResp | null>(null)
@@ -169,6 +185,13 @@ export default function VendorsPage() {
   const [vOpen, setVOpen] = useState(false)
   /* 非空 = 处于「编辑档案」模式（复用登记弹窗，提交带 edit 口径） */
   const [vEdit, setVEdit] = useState<SupplyVendorRow | null>(null)
+  /* Phase 2 供应商类目受控词表（后端 data.vendor_terms 优先，拉不到用 DEF_VENDOR_TERMS 兜底） */
+  const [vendorTerms, setVendorTerms] = useState<SupplyVendorTerm[]>(DEF_VENDOR_TERMS)
+  /* 类目词表管理弹窗（申请 / 审核 / 上架，走审批队列，与库存受控词表同源套路） */
+  const [termOpen, setTermOpen] = useState(false)
+  const [termName, setTermName] = useState('')
+  const [termAliases, setTermAliases] = useState('')
+  const [termBusy, setTermBusy] = useState(false)
   const [vForm] = Form.useForm()
   const [qOpen, setQOpen] = useState(false)
   const [qForm] = Form.useForm()
@@ -188,8 +211,10 @@ export default function VendorsPage() {
       fetchAdminPrice().catch(() => null),
       /* FP-PRICE-09/10：平台表取自 `GET /api/admin/config` 响应体（axios 的 `data`）里的 `config.compare_platforms` */
       client.get<{ config?: { compare_platforms?: unknown } }>('/admin/config').catch(() => null),
+      /* Phase 2：类目下拉必须跟后端受控词表走，拉不到才回兜底种子 */
+      fetchSupplyVendorTerms().catch(() => null),
     ])
-      .then(([v, c, a, o, cf, pr, cfg]) => {
+      .then(([v, c, a, o, cf, pr, cfg, vt]) => {
         setVendors(v)
         setCompare(c)
         setAccounts(a)
@@ -197,6 +222,7 @@ export default function VendorsPage() {
         if (cf?.supply) setCfg(cf.supply)
         if (pr) setPrice(pr)
         if (cfg?.data?.config) setPlatforms(normalizeComparePlatforms(cfg.data.config.compare_platforms))
+        setVendorTerms(vt?.terms?.length ? vt.terms : DEF_VENDOR_TERMS)
         setIsMock(false)
       })
       .catch(() => {
@@ -219,6 +245,79 @@ export default function VendorsPage() {
     setVEdit(r)
     setVOpen(true)
   }, [])
+
+  /* 类目词表管理：申请 / 审核 / 上架（全部走 supplier_term.upsert 审批队列，与库存受控词表同源） */
+  const reloadVendorTerms = useCallback(() => {
+    return fetchSupplyVendorTerms()
+      .then((r) => setVendorTerms(r?.terms?.length ? r.terms : DEF_VENDOR_TERMS))
+      .catch(() => {})
+  }, [])
+
+  const submitVendorTerm = async () => {
+    if (!termName.trim()) { message.warning('请输入类目词条名'); return }
+    const aliases = termAliases.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+    setTermBusy(true)
+    try {
+      const res = await submitVendorTermUpsert({ name: termName.trim(), category: '供应商类目', aliases })
+      if (res.ok) {
+        message.success(res.note || '类目词条已申请（待审批上架）')
+        setTermName(''); setTermAliases('')
+        reloadVendorTerms()
+      } else message.error(res.error || '申请失败')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '申请失败')
+    } finally { setTermBusy(false) }
+  }
+
+  const setVendorTermStatus = async (t: SupplyVendorTerm, status: string) => {
+    setTermBusy(true)
+    try {
+      const res = await submitVendorTermUpsert({ id: t.id, status })
+      if (res.ok) {
+        message.success(status === 'active' ? '已提交上架（待审批）'
+          : status === 'rejected' ? '已提交驳回（待审批）' : '已提交状态变更（待审批）')
+        reloadVendorTerms()
+      } else message.error(res.error || '操作失败')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '操作失败')
+    } finally { setTermBusy(false) }
+  }
+
+  /**
+   * 类目下拉选项：只列后端受控词表里的标准词条（value = 词条 ID，如 S001）。
+   * 写入侧由执行器 vendorCategoryOf 归一到词条 ID，展示侧 normVendor 还原标准名。
+   * 驳回（rejected）的词条不可再选，但在编档案的旧值仍可回显（见 fillVendorForm）。
+   */
+  const vendorTermOptions = useMemo(
+    () => vendorTerms.filter((t) => t && t.status !== 'rejected')
+      .map((t) => ({ value: String(t.id), label: String(t.name) })),
+    [vendorTerms],
+  )
+
+  /* 当前选中值不在词表内 = 存量自由文本（未归一），保存后会落兜底「其他」，需要明确提示 */
+  const vCatVal = Form.useWatch('category', vForm)
+  const vLegacyCat = useMemo(() => {
+    const s = vCatVal == null ? '' : String(vCatVal)
+    if (!s) return null
+    return vendorTermOptions.some((o) => o.value === s) ? null : s
+  }, [vCatVal, vendorTermOptions])
+
+  /**
+   * 档案类目 → 下拉值：优先词条 ID（category_id），
+   * 其次按标准名反查（存量档案里可能还是标准名文本），都对不上则原样回显旧自由文本
+   * （保存时后端会落兜底「其他」，UI 用 extra 文案提示）。
+   */
+  const categoryValueOf = useCallback((row: SupplyVendorRow): string | undefined => {
+    if (row.category_id) return String(row.category_id)
+    const cat = String(row.category ?? '').trim()
+    if (!cat || cat === '未分类') return undefined
+    const hit = vendorTerms.filter((t) => t && (
+      String(t.name) === cat || (t.aliases ?? []).some((a) => String(a).trim() === cat)
+    ))[0]
+    return hit ? String(hit.id) : cat
+  }, [vendorTerms])
 
   /**
    * 表单回填（「之前填过的内容不用再填一遍」）。
@@ -246,7 +345,7 @@ export default function VendorsPage() {
     vForm.setFieldsValue({
       name: row.name,
       vendor_id: row.id == null ? '' : String(row.id),
-      category: row.category,
+      category: categoryValueOf(row),
       period: row.period === '未标' ? '' : row.period,
       level: row.level ?? null,
       status: row.status || '合作中',
@@ -259,7 +358,7 @@ export default function VendorsPage() {
     if (certs.length) {
       window.setTimeout(() => vForm.setFieldsValue({ certs }), 0)
     }
-  }, [vForm])
+  }, [vForm, categoryValueOf])
 
   useEffect(() => {
     if (!vOpen) return
@@ -285,7 +384,15 @@ export default function VendorsPage() {
   const vCols: ColumnsType<SupplyVendorRow> = useMemo(
     () => [
       { title: '供应商', dataIndex: 'name', width: 150, render: (x) => <strong>{x}</strong> },
-      { title: '品类', dataIndex: 'category', width: 100, render: (x) => <Tag color={COLORS.blue}>{x}</Tag> },
+      {
+        title: '品类', dataIndex: 'category', width: 110,
+        /* Phase 2：展示标准名，悬停看词条 ID；无 category_id = 存量自由文本尚未归一 */
+        render: (x, r) => (
+          <Tooltip title={r.category_id ? `受控词条 ${r.category_id}` : '存量自由文本，未归入词表（编辑保存或词表回填后收口）'}>
+            <Tag color={r.category_id ? COLORS.blue : undefined}>{x}</Tag>
+          </Tooltip>
+        ),
+      },
       { title: '账期', dataIndex: 'period', width: 110 },
       {
         title: '评级',
@@ -710,6 +817,7 @@ export default function VendorsPage() {
             <Tooltip title={tip}><Button disabled={!canWrite} onClick={openVendorCreate}>供应商登记</Button></Tooltip>
             <Tooltip title={tip}><Button disabled={!canWrite} onClick={() => { qForm.resetFields(); setQOpen(true) }}>报价登记</Button></Tooltip>
             <Tooltip title={tip}><Button type="primary" disabled={!canWrite} onClick={() => { poForm.resetFields(); setPoOpen(true) }}>采购应付</Button></Tooltip>
+            <Tooltip title="申请 / 审核供应商类目受控词条（入审批队列）"><Button onClick={() => setTermOpen(true)}>类目词表</Button></Tooltip>
             <Button size="small" onClick={load}>刷新</Button>
           </Space>
         }
@@ -888,12 +996,20 @@ export default function VendorsPage() {
           <Form.Item name="vendor_id" label="编号">
             <Input placeholder="选填，留空自动生成" disabled={vEdit != null} />
           </Form.Item>
-          <Form.Item name="category" label="供应品类" rules={[{ required: true }]}>
-            {/* 编辑时把档案里已有的自定义品类也并进选项，避免打开就显示空值 */}
+          <Form.Item
+            name="category"
+            label="供应品类"
+            rules={[{ required: true, message: '请选择供应品类' }]}
+            /* 受控单选：选项只来自后端词表（GET /api/supply/vendor-terms），不再硬编码 */
+            extra={vLegacyCat
+              ? `旧值「${vLegacyCat}」不在受控词表内，保存后会归入「其他」，建议改选标准类目`
+              : '受控单选：只能选词表内的标准类目（老档案的别名/自由文本保存时自动归一）'}
+          >
             <Select
-              options={Array.from(new Set(['肉类', '蔬菜', '粮油', '调料', '冻品', '其他']
-                .concat(vEdit && vEdit.category && vEdit.category !== '未分类' ? [vEdit.category] : [])))
-                .map((s) => ({ value: s, label: s }))}
+              showSearch
+              optionFilterProp="label"
+              placeholder="请选择供应类目"
+              options={vendorTermOptions}
             />
           </Form.Item>
           <Form.Item name="period" label="账期"><Input placeholder="月结30天 / 现结" /></Form.Item>
@@ -1039,6 +1155,78 @@ export default function VendorsPage() {
         {allQuotes.length ? (
           <Table<QuoteDetailRow> rowKey="key" columns={QUOTE_ALL_COLS} dataSource={allQuotes} pagination={{ pageSize: 12 }} size="small" />
         ) : <Empty description="暂无外部报价记录" />}
+      </Modal>
+
+      {/* Phase 2 供应商类目受控词表管理：申请 / 审核 / 上架（全部入审批队列） */}
+      <Modal
+        title="供应商类目 · 受控词表管理"
+        open={termOpen}
+        onCancel={() => setTermOpen(false)}
+        footer={null}
+        width={820}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="类目为受控单选（禁止自定义）。新词条默认「待审核」，经审批中心确认上架后，供应商档案的「供应品类」才能选用；驳回/下架同理需审批。"
+          />
+          <Space wrap>
+            <Input
+              placeholder="类目词条名（如：生鲜果蔬）"
+              style={{ width: 180 }}
+              value={termName}
+              onChange={(e) => setTermName(e.target.value)}
+            />
+            <Input
+              placeholder="别名（逗号分隔，如：果蔬,蔬果）"
+              style={{ width: 280 }}
+              value={termAliases}
+              onChange={(e) => setTermAliases(e.target.value)}
+            />
+            <Button type="primary" loading={termBusy} onClick={submitVendorTerm}>申请词条</Button>
+          </Space>
+          <Table<SupplyVendorTerm>
+            rowKey="id"
+            size="small"
+            dataSource={vendorTerms}
+            pagination={false}
+            columns={[
+              { title: 'ID', dataIndex: 'id', width: 80 },
+              { title: '类目', dataIndex: 'name', width: 140 },
+              {
+                title: '别名',
+                dataIndex: 'aliases',
+                render: (a: string[]) => (a?.length ? a.join('、') : '-'),
+              },
+              {
+                title: '状态',
+                dataIndex: 'status',
+                width: 100,
+                render: (s: string) =>
+                  s === 'active' ? <Tag color="green">已上架</Tag>
+                    : s === 'pending' ? <Tag color="orange">待审核</Tag>
+                      : <Tag>已驳回</Tag>,
+              },
+              {
+                title: '操作',
+                key: 'act',
+                width: 140,
+                render: (_, t) =>
+                  t.status === 'pending' ? (
+                    <Space size={4}>
+                      <Button size="small" type="primary" disabled={termBusy} onClick={() => setVendorTermStatus(t, 'active')}>上架</Button>
+                      <Button size="small" disabled={termBusy} onClick={() => setVendorTermStatus(t, 'rejected')}>驳回</Button>
+                    </Space>
+                  ) : t.status === 'active' ? (
+                    <Button size="small" disabled={termBusy} onClick={() => setVendorTermStatus(t, 'rejected')}>下架</Button>
+                  ) : (
+                    <Button size="small" type="primary" disabled={termBusy} onClick={() => setVendorTermStatus(t, 'active')}>重新上架</Button>
+                  ),
+              },
+            ]}
+          />
+        </Space>
       </Modal>
     </div>
   )

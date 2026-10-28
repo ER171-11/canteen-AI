@@ -19,19 +19,22 @@ const RULES: Record<Role, (path: string) => boolean> = {
     path === '/dashboard' ||
     path === '/ops/analysis' ||
     path === '/ops/weekly' ||
-    path === '/inventory/loss',
+    path === '/inventory/loss' ||
+    path === '/search',
   厨房: (path) =>
     path.startsWith('/kitchen') ||
     path.startsWith('/safety') ||
     path === '/inventory/loss' ||
-    path === '/dashboard',
+    path === '/dashboard' ||
+    path === '/search',
   收银: (path) =>
     path.startsWith('/dinein') ||
     path.startsWith('/member') ||
     path === '/platform/actions' ||
     path === '/dashboard' ||
     path === '/ops/analysis' ||
-    path === '/ops/weekly',
+    path === '/ops/weekly' ||
+    path === '/search',
   只读: () => true,
 }
 

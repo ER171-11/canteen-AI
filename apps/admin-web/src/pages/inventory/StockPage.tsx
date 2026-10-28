@@ -176,6 +176,8 @@ export default function StockPage() {
             est: r.est,
             conv: r.conv || 1,
             yld: Math.round((r.yld ?? 1) * 100),
+            base_unit: r.base_unit,
+            pack_in_base: r.pack_in_base,
             on: r.on !== false,
             tags: r.tags ?? [],
             qc_report_url: r.qc_report_url ?? '',
@@ -474,6 +476,9 @@ export default function StockPage() {
             pending,
             // 出成率：表单存百分比（5~100），提交时折算为分数（0.05~1）
             yld: v.yld == null ? undefined : Math.min(1, Math.max(0.05, Number(v.yld) / 100)),
+            // 结构化换算字段：成本折算口径的唯一可靠来源（替代名称正则抠规格）
+            base_unit: v.base_unit || undefined,
+            pack_in_base: v.pack_in_base == null || v.pack_in_base === '' ? undefined : Number(v.pack_in_base),
           }
           setBusy(true)
           try {
@@ -595,6 +600,20 @@ export default function StockPage() {
                 </Form.Item>
                 <Form.Item name="yld" label="出成率 %" style={{ width: 120 }}>
                   <InputNumber min={5} max={100} step={1} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name="base_unit" label="基础单位" style={{ width: 130 }}>
+                  <Select
+                    allowClear
+                    placeholder="成本折算口径"
+                    options={[
+                      { value: 'g', label: 'g（重量）' },
+                      { value: 'ml', label: 'ml（体积）' },
+                      { value: '个', label: '个（计数）' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item name="pack_in_base" label="每包基础量" style={{ width: 140 }}>
+                  <InputNumber min={0} step={0.1} style={{ width: '100%' }} placeholder="如 1900" />
                 </Form.Item>
                 <Form.Item name="on" label="是否启用" style={{ width: 150 }}>
                   <Radio.Group

@@ -1,10 +1,11 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStore } from './store/auth'
 import { firstAccessiblePath } from './rbac/roles'
-import DemoSwitch from './components/DemoSwitch'
+import MaintBar from './components/MaintBar'
 import MainLayout from './layouts/MainLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
+import SearchPage from './pages/SearchPage'
 import ActionsPage from './pages/ActionsPage'
 import OrgPage from './pages/OrgPage'
 import ModuleBrowsePage from './pages/ModuleBrowsePage'
@@ -82,6 +83,7 @@ export default function App() {
         >
           <Route index element={<HomeRedirect />} />
           <Route path="dashboard" element={<DashboardPage />} />
+          <Route path="search" element={<SearchPage />} />
           <Route path="ops/analysis" element={<ModuleBrowsePage routeKey="ops/analysis" />} />
           <Route path="ops/weekly" element={<WeeklyReportPage />} />
           <Route path="ops/an-trend" element={<AnalysisTrendPage />} />
@@ -155,8 +157,8 @@ export default function App() {
           <Route path="*" element={<PlaceholderPage title="" />} />
         </Route>
       </Routes>
-      {/* 过渡期临时工具：运行时演示数据开关（淘汰完成后移除） */}
-      <DemoSwitch />
+      {/* 清理模式指示条（测试期隐藏工具，未激活时渲染 null） */}
+      <MaintBar />
     </BrowserRouter>
   )
 }

@@ -9,6 +9,7 @@ import {
   SafetyCertificateOutlined,
   AccountBookOutlined,
   CloudServerOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 
 export interface MenuLeaf {
@@ -144,6 +145,14 @@ export const MENU: MenuGroup[] = [
       { path: '/platform/app-release', title: 'App 下载' },
       { path: '/platform/ai-audit', title: 'AI审计' },
       { path: '/platform/audit-log', title: '审计日志' },
+    ],
+  },
+  {
+    key: 'search',
+    label: '检索',
+    icon: <SearchOutlined />,
+    children: [
+      { path: '/search', title: '全局搜索' },
     ],
   },
 ]

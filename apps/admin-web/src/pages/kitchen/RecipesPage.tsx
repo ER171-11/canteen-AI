@@ -212,7 +212,6 @@ export default function RecipesPage() {
             : '',
       price: undefined,
       cost: undefined,
-      ensure_ings: true,
       sync_dish: true,
       main: linesFromBom(r?.main),
       aux: linesFromBom(r?.aux).filter((l) => l.name),
@@ -482,6 +481,21 @@ export default function RecipesPage() {
           const v = await form.validateFields()
           setBusy(true)
           try {
+            // 缺料拦截（单向原则）：引用未在产品库建档的原料，列出并阻断保存
+            const knownNames = new Set((ings || []).map((g) => String(g.name)))
+            const missing: string[] = []
+            for (const key of ['main', 'aux', 'seasoning']) {
+              for (const l of (v[key] || []) as BomFormLine[]) {
+                const nm = l?.name ? String(l.name).trim() : ''
+                if (!nm || nm === '清水' || nm === '水' || nm === '料水') continue
+                if (!knownNames.has(nm) && missing.indexOf(nm) < 0) missing.push(nm)
+              }
+            }
+            if (missing.length) {
+              message.error('缺料未建档：' + missing.join('、') + '（请先在原料仓建档）')
+              setBusy(false)
+              return
+            }
             const r = await submitAndConfirmAction({
               type: 'recipe.upsert',
               payload: {
@@ -495,7 +509,6 @@ export default function RecipesPage() {
                 seasoning: (v.seasoning || []).filter((l: BomFormLine) => l?.name),
                 price: v.price,
                 cost: v.cost,
-                ensure_ings: v.ensure_ings,
                 sync_dish: v.sync_dish,
               },
               operator: 'admin',
@@ -512,7 +525,7 @@ export default function RecipesPage() {
         }}
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-          配料优先从进销存产品库选择；勾选「缺料自动建档」会把未入库原料写入产品库。
+          配料须先从进销存产品库建档后选择；用量与单位按菜谱口径填写，系统自动按原料换算成本。
         </Typography.Paragraph>
         <Form form={form} layout="vertical">
           <Form.Item name="sku_id" hidden>
@@ -546,9 +559,6 @@ export default function RecipesPage() {
             <Form.Item name="cost" label="成本" style={{ width: 140 }}>
               <InputNumber min={0} style={{ width: '100%' }} />
             </Form.Item>
-            <Form.Item name="ensure_ings" label="缺料建档" valuePropName="checked">
-              <Switch />
-            </Form.Item>
             <Form.Item name="sync_dish" label="同步菜品" valuePropName="checked">
               <Switch />
             </Form.Item>
@@ -569,9 +579,19 @@ export default function RecipesPage() {
                   {fields.map((field) => {
                     const line = linesOf(key)[field.name] as BomFormLine | undefined
                     const ing = line?.name ? resolveIngName(line.name, ingAlias, byName) : undefined
-                    const c = calcLineCost(line?.qty, ing)
+                    const c = calcLineCost(line?.qty, ing, line?.unit)
                     return (
-                      <Space key={field.key} style={{ display: 'flex', marginBottom: 8 }} align="start">
+                      <Space
+                        key={field.key}
+                        align="start"
+                        style={{
+                          display: 'flex',
+                          marginBottom: 8,
+                          ...(c?.dimMismatch
+                            ? { outline: '1px solid #D93025', borderRadius: 6, padding: 2, background: '#FFF6F6' }
+                            : {}),
+                        }}
+                      >
                         <Form.Item
                           {...field}
                           name={[field.name, 'name']}
@@ -593,9 +613,8 @@ export default function RecipesPage() {
                               const name = Array.isArray(val) ? val[val.length - 1] : val
                               const cur = form.getFieldValue(key) || []
                               const next = [...cur]
+                              /* 单向原则：原料仓只改「原料列」，严禁回写用量/单位（由菜谱侧自权威） */
                               next[field.name] = { ...(next[field.name] || {}), name }
-                              const hit = name ? resolveIngName(name, ingAlias, byName) : null
-                              if (hit?.unit) next[field.name].unit = hit.unit
                               form.setFieldValue(key, next)
                             }}
                           />
@@ -614,8 +633,15 @@ export default function RecipesPage() {
                         </div>
                         <div style={{ width: 84 }}>
                           <div style={{ color: '#999', fontSize: 11, lineHeight: '20px' }}>行成本</div>
-                          <div style={{ lineHeight: '30px', textAlign: 'right' }}>
-                            {c?.lineCost != null ? c.lineCost.toFixed(2) : '—'}
+                          <div
+                            style={{
+                              lineHeight: '30px',
+                              textAlign: 'right',
+                              color: c?.dimMismatch ? '#D93025' : undefined,
+                              fontWeight: c?.dimMismatch ? 600 : undefined,
+                            }}
+                          >
+                            {c?.dimMismatch ? '单位不兼容' : c?.lineCost != null ? c.lineCost.toFixed(2) : '—'}
                           </div>
                         </div>
                         <Button type="link" danger onClick={() => remove(field.name)}>
@@ -645,7 +671,7 @@ export default function RecipesPage() {
               <span style={{ color: '#D93025', fontWeight: 600 }}>{bomSummary.total.toFixed(2)}</span>
               <Typography.Text type="secondary"> 元/份</Typography.Text>
               <span style={{ marginLeft: 10, color: '#999', fontSize: 12 }}>
-                行成本 = 净料用量 ÷ 出成率 × 均价
+                行成本 = 用量(按单位折算基础量) ÷ 出成率 × 均价
               </span>
             </div>
             <div>

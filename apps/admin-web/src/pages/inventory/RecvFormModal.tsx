@@ -180,6 +180,23 @@ export default function RecvFormModal({
     return () => clearTimeout(t)
   }, [open, initialVals, form])
 
+  /* 已登记补付合计（带 source/ts 的记录，编辑提交后会被保留）：
+     表单「实付」只代表初始付款，实付 + 补付 合计不得超过应付，否则执行器会拒绝 */
+  const priorPaid = useMemo(() => {
+    if (!isEdit || !editDoc) return 0
+    return (
+      Math.round(
+        (editDoc.payments ?? [])
+          .filter(
+            (p) =>
+              !!(p && (p as Record<string, unknown>).source) ||
+              !!(p && (p as Record<string, unknown>).ts),
+          )
+          .reduce((a, p) => a + (Number(p?.amount) || 0), 0) * 100,
+      ) / 100
+    )
+  }, [isEdit, editDoc])
+
   const gross = useMemo(
     () =>
       r2(
@@ -190,7 +207,7 @@ export default function RecvFormModal({
   const discount = r2(Number(discountWatch) || 0)
   const payable = r2(Math.max(0, gross - discount))
   const paid = r2(Number(paidWatch) || 0)
-  const debt = r2(Math.max(0, payable - paid))
+  const debt = r2(Math.max(0, payable - paid - priorPaid))
 
   const poOptions = useMemo(
     () =>
@@ -219,7 +236,7 @@ export default function RecvFormModal({
     [ings, newIngs],
   )
 
-  const invalid = !(gross > 0) || discount > gross + 0.01 || paid > payable + 0.01
+  const invalid = !(gross > 0) || discount > gross + 0.01 || paid + priorPaid > payable + 0.01
 
   const submit = async () => {
     const v = await form.validateFields()
@@ -251,8 +268,12 @@ export default function RecvFormModal({
       return
     }
     const pay = r2(Number(v.paid) || 0)
-    if (pay > net + 0.01) {
-      message.warning('实付不得超过应付合计（超付会被执行器拒绝）')
+    if (pay + priorPaid > net + 0.01) {
+      message.warning(
+        priorPaid > 0
+          ? `实付 ${pay} + 已登记补付 ${priorPaid} 不得超过应付 ${net}（超付会被执行器拒绝）`
+          : '实付不得超过应付合计（超付会被执行器拒绝）',
+      )
       return
     }
     try {
@@ -483,7 +504,10 @@ export default function RecvFormModal({
           <Form.Item label="实付金额（元，欠款可后续补付）" name="paid" style={{ marginBottom: 4 }}>
             <InputNumber min={0} step={0.01} style={{ width: 160 }} />
           </Form.Item>
-          <Button style={{ marginTop: 26 }} onClick={() => form.setFieldsValue({ paid: payable })}>
+          <Button
+            style={{ marginTop: 26 }}
+            onClick={() => form.setFieldsValue({ paid: Math.max(0, r2(payable - priorPaid)) })}
+          >
             按应付全额
           </Button>
           <Form.Item label="付款方式" name="method" style={{ marginBottom: 4 }}>

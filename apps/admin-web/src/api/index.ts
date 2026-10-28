@@ -41,6 +41,7 @@ import type {
   SupplyEnqueueResp,
   SupplyOverviewResp,
   SupplyVendorsResp,
+  SupplyVendorTermsResp,
   FoodsafeEnqueueResp,
   FoodsafeOverviewResp,
   FoodsafeResp,
@@ -74,6 +75,10 @@ import type {
   SafetyPointsResp,
   SafetyPointUpsertBody,
   SafetyProgress,
+  SearchAllResp,
+  SearchDomainKey,
+  SearchDomainsResp,
+  SearchOneResp,
   StaffModuleResp,
   StaffScheduleResp,
   StaffClockResp,
@@ -206,6 +211,28 @@ export async function fetchSnapshot(): Promise<Snapshot> {
   return data
 }
 
+/** 特性开关：真实出餐销售统一走 POS 扣料（进销存-真实出餐销售统一走pos扣料+特性开关）。
+ * GET /api/admin/config — 读取当前 data.config（含 saleRealDeduct 开关）。 */
+export interface AdminConfigResp {
+  ok?: boolean
+  config: Record<string, unknown>
+  rest?: string
+  rev?: number | null
+  source?: string
+}
+
+export async function fetchAdminConfig(): Promise<AdminConfigResp> {
+  const { data } = await client.get<AdminConfigResp>('/admin/config')
+  return data
+}
+
+/** POST /api/admin/config — 写入 data.config（走 actions 队列，config.update 动作）。
+ * 仅 老板/店长 可写；本开关只传 saleRealDeduct 一项，其余配置保持不动。 */
+export async function saveAdminConfig(config: Record<string, unknown>): Promise<AdminConfigResp> {
+  const { data } = await client.post<AdminConfigResp>('/admin/config', { config })
+  return data
+}
+
 /** FP-SET-07 服务端快照备份项（GET /api/snapshot/backups） */
 export interface SnapshotBackupItem {
   id: string
@@ -283,6 +310,18 @@ export async function submitIngAttrSet(payload: {
   tags?: string[]
 }): Promise<PostActionResult & { confirmed?: boolean }> {
   return submitAndConfirmAction({ type: 'ing.attr_set', payload, operator: 'admin' })
+}
+
+/**
+ * maint.row_delete — 测试期清理模式：按 where 物理删除白名单表数据行。
+ * 入口走审批队列（提交+确认一步到位），审批中心可见、可驳回、全程留痕。
+ * 仅在清理模式（?maint=1）下由隐藏按钮触发。
+ */
+export async function maintRowDelete(payload: {
+  table: string
+  where: Record<string, string | number>
+}): Promise<PostActionResult & { confirmed?: boolean }> {
+  return submitAndConfirmAction({ type: 'maint.row_delete', payload, operator: 'maint' })
 }
 
 /**
@@ -1179,6 +1218,40 @@ export async function fetchSupplyVendors(): Promise<SupplyVendorsResp> {
   return data
 }
 
+/** GET /api/supply/vendor-terms — 供应商类目受控词表（Phase 2；只读，data.vendor_terms 优先） */
+export async function fetchSupplyVendorTerms(): Promise<SupplyVendorTermsResp> {
+  const { data } = await client.get<SupplyVendorTermsResp>('/supply/vendor-terms')
+  return data
+}
+
+/** POST /api/supply/vendor/category — 供应商类目设置（受控单选 → vendor.attr_set 入队） */
+export async function setSupplyVendorCategory(body: {
+  vendor_id?: string
+  name?: string
+  /** 词条 ID / 标准名 / 别名均可，后端归一到词条 ID */
+  category: string
+}): Promise<SupplyEnqueueResp> {
+  const { data } = await client.post<SupplyEnqueueResp>('/supply/vendor/category', body)
+  return data
+}
+
+/** POST /api/supply/vendor/term — 供应商类目词条申请 / 审核（→ supplier_term.upsert 入审批队列） */
+export async function submitVendorTermUpsert(payload: {
+  /** 审核/上架时带词条 ID */
+  id?: string
+  /** 词条标准名（申请必填） */
+  name?: string
+  /** 受控维度，供应商域固定为「供应商类目」 */
+  category?: string
+  /** 别名（逗号分隔转数组） */
+  aliases?: string[]
+  /** 状态机：pending 待审 / active 上架 / rejected 驳回 */
+  status?: string
+}): Promise<SupplyEnqueueResp> {
+  const { data } = await client.post<SupplyEnqueueResp>('/supply/vendor/term', payload)
+  return data
+}
+
 /** GET /api/supply/compare — 比价（同原料多供应商 + 价差） */
 export async function fetchSupplyCompare(): Promise<SupplyCompareResp> {
   const { data } = await client.get<SupplyCompareResp>('/supply/compare')
@@ -1355,4 +1428,24 @@ export async function fetchExportCsvBlob(kind: 'ings' | 'dishes' | 'sales' | 'sa
     timeout: 60000,
   })
   return data as Blob
+}
+
+/* ---------------- W5 检索域隔离 + 搜索索引字段管控（只读检索端点） ---------------- */
+
+/** GET /api/search/domains — 业务域枚举（供前端 tab 渲染） */
+export async function fetchSearchDomains(): Promise<SearchDomainsResp> {
+  const { data } = await client.get<SearchDomainsResp>('/search/domains')
+  return data
+}
+
+/** GET /api/search?q= — 全局分域检索（各域独立 tab，不跨域混排） */
+export async function fetchSearchAll(q: string): Promise<SearchAllResp> {
+  const { data } = await client.get<SearchAllResp>('/search', { params: { q } })
+  return data
+}
+
+/** GET /api/search?domain=xxx&q= — 单域检索 */
+export async function fetchSearchOne(domain: SearchDomainKey, q: string): Promise<SearchOneResp> {
+  const { data } = await client.get<SearchOneResp>('/search', { params: { domain, q } })
+  return data
 }
