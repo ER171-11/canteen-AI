@@ -6,6 +6,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Popconfirm,
   Space,
   Table,
@@ -26,11 +27,17 @@ import {
   saveSettleTemplate,
 } from '../api'
 import type { SnapshotBackupItem } from '../api'
+import {
+  fetchSnapshotRollbackPreview,
+  submitSnapshotRollback,
+  type SnapshotSummary,
+} from '../api/snapshotRollback'
 import type { SettleTemplate } from '../api/types'
 import { DEFAULT_SETTLE_TPL, normalizeSettleTpl } from './inventory/settle/template'
 import { downloadBlob } from './inventory/settle/download'
 import { DEF_COMPARE_PLATFORMS, normalizeComparePlatforms } from './inventory/comparePlatforms'
 import type { ComparePlatform } from './inventory/comparePlatforms'
+import HighRiskDataCard from './system/HighRiskDataCard'
 import { useAuthStore } from '../store/auth'
 
 /** 今日（本地）日期串，用于导出文件名 */
@@ -64,7 +71,11 @@ type Config = {
 
 export default function SystemConfigPage() {
   const canWrite = useAuthStore((s) => s.canWrite)
+  const role = useAuthStore((s) => s.role)
   const noWriteTip = '当前角色无写权限（配置写仅老板/店长）'
+  /* W2-01 高危门禁（ADR-013 D4-1）：回滚仅老板/店长可发起/确认；员工直接 403 */
+  const isHighRisk = role === '老板' || role === '店长'
+  const highRiskTip = '高危操作仅老板/店长可执行'
   const [config, setConfig] = useState<Config>({})
   const [source, setSource] = useState<string>('-')
   const [rev, setRev] = useState<string | number | undefined>()
@@ -293,6 +304,63 @@ export default function SystemConfigPage() {
       message.error(err.response?.data?.error || '打快照失败（仅老板/店长可操作）')
     } finally {
       setBackupBusy(false)
+    }
+  }
+
+  /* ---- W2-01 快照回滚（ADR-013 D1）：高危写，仅老板/店长，走 /api/actions 队列 ---- */
+  const [rollbackId, setRollbackId] = useState<string | null>(null)
+  const [rollbackPreview, setRollbackPreview] = useState<{
+    backup_rev: number | null
+    backup_generated_at: string | null
+    current_rev: number | null
+    will_restore: SnapshotSummary
+    will_discard: SnapshotSummary | null
+  } | null>(null)
+  const [rollbackBusy, setRollbackBusy] = useState(false)
+  const [rollbackWord, setRollbackWord] = useState('')
+  const ROLLBACK_CONFIRM_WORD = '确认回滚'
+
+  const openRollback = async (item: SnapshotBackupItem) => {
+    setRollbackId(item.id)
+    setRollbackWord('')
+    setRollbackBusy(true)
+    try {
+      const p = await fetchSnapshotRollbackPreview(item.id)
+      setRollbackPreview({
+        backup_rev: p.backup_rev,
+        backup_generated_at: p.backup_generated_at,
+        current_rev: p.current_rev,
+        will_restore: p.will_restore,
+        will_discard: p.will_discard,
+      })
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '预览失败')
+      setRollbackId(null)
+    } finally {
+      setRollbackBusy(false)
+    }
+  }
+
+  const doRollback = async () => {
+    if (!rollbackId) return
+    if (rollbackWord.trim() !== ROLLBACK_CONFIRM_WORD) {
+      message.error(`请输入确认词「${ROLLBACK_CONFIRM_WORD}」`)
+      return
+    }
+    setRollbackBusy(true)
+    try {
+      await submitSnapshotRollback({ backup_id: rollbackId })
+      message.success('快照回滚已入队 → 请到审批中心确认执行（执行前会自动打新备份）')
+      setRollbackId(null)
+      setRollbackPreview(null)
+      setRollbackWord('')
+      loadBackups()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '回滚入队失败（仅老板/店长可操作）')
+    } finally {
+      setRollbackBusy(false)
     }
   }
 
@@ -571,7 +639,7 @@ export default function SystemConfigPage() {
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="服务端快照备份（ADR-009）：把当前快照手动存为一份历史备份（bff/data/snapshots/），只写备份文件，不写业务库、不入审批队列。回滚属高危写，须经运营管理员审批走审批中心，尚未开放入口。"
+        message="服务端快照备份（ADR-009）：把当前快照手动存为一份历史备份（bff/data/snapshots/），只写备份文件，不写业务库、不入审批队列。回滚属高危写（仅老板/店长）：点行内「回滚」→ 预览 → 输入确认词入队，执行前自动打新备份。导入恢复 / 重置基线 / 清空见下方「高危数据维护」。"
       />
       <Space style={{ marginBottom: 12 }} wrap>
         <Input
@@ -594,9 +662,65 @@ export default function SystemConfigPage() {
         pagination={false}
         locale={{ emptyText: '暂无快照备份' }}
         dataSource={backups}
-        columns={BACKUP_COLUMNS}
+        columns={buildBackupColumns(isHighRisk, highRiskTip, rollbackId, rollbackBusy, openRollback)}
       />
+
+      {/* W2-01 快照回滚确认弹窗（ADR-013 D1）：预览 → 输入确认词 → 入队（高危，仅老板/店长） */}
+      <Modal
+        title="快照回滚（高危）"
+        open={rollbackId != null}
+        onCancel={() => { setRollbackId(null); setRollbackPreview(null); setRollbackWord('') }}
+        confirmLoading={rollbackBusy}
+        okText={`确认回滚（输入「${ROLLBACK_CONFIRM_WORD}」）`}
+        okButtonProps={{ disabled: rollbackWord.trim() !== ROLLBACK_CONFIRM_WORD }}
+        onOk={doRollback}
+      >
+        {rollbackPreview ? (
+          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            <Alert
+              type="warning"
+              showIcon
+              message="回滚将把整包快照（data + ext）恢复到所选备份，覆盖当前全部业务数据。"
+            />
+            <div>
+              当前快照 rev <b>{rollbackPreview.current_rev ?? '-'}</b> → 目标备份 rev{' '}
+              <b>{rollbackPreview.backup_rev ?? '-'}</b>（备份时间{' '}
+              {rollbackPreview.backup_generated_at || '-'}）
+            </div>
+            <div>
+              回滚后<b>将丢弃当前</b>：原料 {rollbackPreview.will_discard?.ings ?? 0} 种 · 进货单{' '}
+              {rollbackPreview.will_discard?.recv ?? 0} 张 · 销售流水{' '}
+              {rollbackPreview.will_discard?.sales ?? 0} 条 · 报价{' '}
+              {rollbackPreview.will_discard?.quotes ?? 0} 条 · 库存流水{' '}
+              {rollbackPreview.will_discard?.logs ?? 0} 条 · 菜品{' '}
+              {rollbackPreview.will_discard?.dishes ?? 0} 道 · 业务扩展表{' '}
+              {rollbackPreview.will_discard?.ext_tables ?? 0} 张。
+            </div>
+            <div>
+              恢复后快照将包含：原料 {rollbackPreview.will_restore.ings} 种 · 进货单{' '}
+              {rollbackPreview.will_restore.recv} 张 · 销售流水 {rollbackPreview.will_restore.sales} 条 · 报价{' '}
+              {rollbackPreview.will_restore.quotes} 条 · 库存流水 {rollbackPreview.will_restore.logs} 条 · 菜品{' '}
+              {rollbackPreview.will_restore.dishes} 道 · 业务扩展表 {rollbackPreview.will_restore.ext_tables} 张。
+            </div>
+            <Alert
+              type="info"
+              showIcon
+              message="执行器会在回滚前自动打一份新备份（回滚本身也可回滚），备份失败将拒绝执行。"
+            />
+            <Input
+              placeholder={`请输入确认词：${ROLLBACK_CONFIRM_WORD}`}
+              value={rollbackWord}
+              onChange={(e) => setRollbackWord(e.target.value)}
+            />
+          </Space>
+        ) : (
+          <div style={{ padding: 16, textAlign: 'center' }}>加载预览中…</div>
+        )}
+      </Modal>
     </Card>
+
+    {/* W4 高危三件套（ADR-013 D4）：导入备份恢复 / 重置为基线 / 清空业务数据 */}
+    <HighRiskDataCard />
 
     <Card
       title="各模块数据输入通道一览"
@@ -627,18 +751,44 @@ const CHANNEL_COLUMNS: ColumnsType<ChannelRow> = [
 ]
 
 /** FP-SET-07 快照备份列表列（只读展示；回滚入口待 FP-SET-10 走审批队列后开放） */
-const BACKUP_COLUMNS: ColumnsType<SnapshotBackupItem> = [
-  { title: '备份时间', dataIndex: 'created_at', width: 180, render: (v: string) => fmtBackupTime(v) },
-  {
-    title: '快照 rev',
-    dataIndex: 'rev',
-    width: 100,
-    render: (v: number | null) => (v == null ? '-' : String(v)),
-  },
-  { title: '大小', dataIndex: 'size', width: 100, render: (v: number) => fmtSize(v) },
-  { title: '操作人', dataIndex: 'operator', width: 120, render: (v: string | null) => v || '-' },
-  { title: '说明', dataIndex: 'note', render: (v: string) => v || '-' },
-]
+function buildBackupColumns(
+  isHighRisk: boolean,
+  highRiskTip: string,
+  rollbackId: string | null,
+  rollbackBusy: boolean,
+  openRollback: (r: SnapshotBackupItem) => void,
+): ColumnsType<SnapshotBackupItem> {
+  return [
+    { title: '备份时间', dataIndex: 'created_at', width: 180, render: (v: string) => fmtBackupTime(v) },
+    {
+      title: '快照 rev',
+      dataIndex: 'rev',
+      width: 100,
+      render: (v: number | null) => (v == null ? '-' : String(v)),
+    },
+    { title: '大小', dataIndex: 'size', width: 100, render: (v: number) => fmtSize(v) },
+    { title: '操作人', dataIndex: 'operator', width: 120, render: (v: string | null) => v || '-' },
+    { title: '说明', dataIndex: 'note', render: (v: string) => v || '-' },
+    {
+      title: '操作',
+      key: 'op',
+      width: 90,
+      render: (_: unknown, r: SnapshotBackupItem) => (
+        <Tooltip title={isHighRisk ? undefined : highRiskTip}>
+          <Button
+            size="small"
+            danger
+            disabled={!isHighRisk || rollbackId === r.id}
+            loading={rollbackId === r.id && rollbackBusy}
+            onClick={() => openRollback(r)}
+          >
+            回滚
+          </Button>
+        </Tooltip>
+      ),
+    },
+  ]
+}
 
 /**
  * FP-SET-01 各模块数据输入通道一览（旧版设置页 HTML:571-585 的 10 行表格）。

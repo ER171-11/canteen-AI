@@ -14,6 +14,7 @@
  *   POST /api/supply/vendor/term        类目词条申请/审核 → supplier_term.upsert 入队
  *   POST /api/supply/vendor/category    供应商类目设置 → vendor.attr_set 入队（受控单选）
  *   POST /api/supply/quote              供应商报价 → quote.upsert 入队
+ *   POST /api/supply/quote/delete       删除单条报价 → quote.delete 入队（W2-02，零命中显式驳回）
  *   POST /api/supply/po                 采购应付登记 → supply.po 入队
  *
  * 红线①：GET 全为只读；红线②：所有写操作一律 enqueue 进 actions 队列（经审批中心确认才落库）。
@@ -23,6 +24,7 @@ const { enqueue } = require('./actions');
 const { mayWriteActions } = require('../lib/auth');
 const { loadSnapshot } = require('./snapshot');
 const supply = require('../lib/supply');
+const quoteImport = require('../lib/quote_import');
 const supTerms = require('../lib/supplier_terms');
 
 const CONFIG_FILE = 'supply_config.json';
@@ -138,12 +140,30 @@ function handle(req, res, ctx, pathname) {
     return false;
   }
 
+  /* ---------- 只读 · 批量导入预览（纯计算，零写；不进 write 门禁，避免误判为写操作） ---------- */
+  if (m === 'POST' && pathname === '/api/supply/quote/import/preview') {
+    (async () => {
+      const body = await readJson(ctx, req);
+      const snap = loadSnapshot();
+      const data = (snap && snap.data) || {};
+      const items = Array.isArray(body && body.items) ? body.items : [];
+      try {
+        const r = quoteImport.previewQuoteImport(data, items);
+        ctx.sendJSON(res, 200, Object.assign({ ok: true }, r, { rev: snap ? snap.rev : null }));
+      } catch (e) {
+        ctx.sendJSON(res, 400, { ok: false, error: (e && e.message) || String(e) });
+      }
+    })();
+    return true;
+  }
+
   if (m !== 'POST') return false;
 
   const write = [
     '/api/supply/config', '/api/supply/vendor', '/api/supply/vendor/delete',
     '/api/supply/vendor/term', '/api/supply/vendor/category',
-    '/api/supply/quote', '/api/supply/po',
+    '/api/supply/quote', '/api/supply/quote/delete', '/api/supply/po',
+    '/api/supply/quote/import',
   ];
   if (write.indexOf(pathname) < 0) return false;
   if (!ctx.auth || !mayWriteActions(ctx.auth)) {
@@ -265,6 +285,37 @@ function handle(req, res, ctx, pathname) {
         set_default_sup: body.set_default_sup === true
       }, operatorOf(ctx, body), ctx.traceId);
       ctx.sendJSON(res, 200, { ok: true, action_id: id, rev, note: '报价已入队 → 审批中心确认' });
+      return;
+    }
+
+    /* 删除单条报价（W2-02 / FP-PRICE-07）：按 id，或 ing + src 定位；只摘 data.quotes 一行 */
+    if (pathname === '/api/supply/quote/delete') {
+      const qid = trim(body.id || body.quote_id);
+      const ing = trim(body.ing || body.ing_id);
+      const src = trim(body.src || body.supplier);
+      if (!qid && (!ing || !src)) {
+        ctx.sendJSON(res, 400, { ok: false, error: '需要 id，或 ing + src（二者其一）' });
+        return;
+      }
+      const id = doEnqueue('quote.delete', {
+        id: qid || undefined,
+        ing: qid ? undefined : ing,
+        src: qid ? undefined : src,
+      }, operatorOf(ctx, body), ctx.traceId);
+      ctx.sendJSON(res, 200, { ok: true, action_id: id, rev, note: '报价删除已入队 → 审批中心确认' });
+      return;
+    }
+
+    /* 批量导入比价结果（W2-04 / FP-PRICE-12，ADR-013 D2）：整批一个动作，只写 data.quotes。
+     * 前端先经 /import/preview 预览（命中/跳过/非法计数），确认后再提交 items 走队列。 */
+    if (pathname === '/api/supply/quote/import') {
+      const items = Array.isArray(body.items) ? body.items : [];
+      if (!items.length) {
+        ctx.sendJSON(res, 400, { ok: false, error: 'items 不能为空（先经 /import/preview 校验）' });
+        return;
+      }
+      const id = doEnqueue('quote.import', { items }, operatorOf(ctx, body), ctx.traceId);
+      ctx.sendJSON(res, 200, { ok: true, action_id: id, rev, note: '报价导入已入队（' + items.length + ' 行）→ 审批中心确认' });
       return;
     }
 

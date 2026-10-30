@@ -278,7 +278,7 @@ Add '| 应收/实收按「单日期」还是「收款日期」统计 | ~~`FP-DAS
 Add '| 「服务端快照」形态（替代旧 localStorage 备份） | ~~`FP-SET-07/10`~~ **已解除**：服务端主存 + 客户端 localStorage 热备份，回滚须运营管理员审批（批准人 William） | `docs/decisions/ADR-009-服务端快照形态与录入职责边界.md` |'
 Add '| 双机同步四件套是否废弃 | ~~`FP-SET-05/06/08/09`~~ **已签署废弃**（批准人 William，2026-10-12） | `docs/decisions/ADR-009-服务端快照形态与录入职责边界.md` |'
 Add '| 结构测算「模拟层」设计（只读推演、禁写库） | ~~`FP-CALC-11/12/13`~~ **已解除**：三项已全部 ⬆️ | `docs/decisions/ADR-007-结构测算模拟层只读推演.md` |'
-Add '| 数据终点迁移：本地 SQLite 退场、云端为单一主存（ADR-009 已定案方向，代码未落地，属有意偏离） | 全部写类执行器底层（consumer.js / store-node 写店内库链路） | `docs/decisions/ADR-010-本地SQLite退场与云端单一主存.md`（草案） |'
+Add '| 数据终点迁移：本地主存退场、云端为单一主存（ADR-009 已定案方向；**ADR-010 已拍板 D0–D3（2026-10-28）**：腾讯云 PostgreSQL / 独立 worker / 按店迁移严禁双写；离线只读） | 全部写类执行器底层（`routes/actions.js::applyToSnapshot` 直写本地 `snapshot.json`；休眠的 `store-node` 双机链路随 Phase 3 退场） | `docs/decisions/ADR-010-本地SQLite退场与云端单一主存.md`（D0–D3 已拍板；Phase 0 接缝层已就绪 2026-10-28，Phase 1–3 完成后解除偏离） |'
 Add ''
 Add '## 备注'
 Add ''

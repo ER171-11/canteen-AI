@@ -17,7 +17,6 @@ import {
   Select,
   Space,
   Statistic,
-  Switch,
   Table,
   Tabs,
   Tag,
@@ -36,10 +35,11 @@ import {
   fetchSupplyOverview,
   fetchSupplyConfig,
   fetchAdminPrice,
+  fetchExportQuoteTaskBlob,
   saveSupplyConfig,
   upsertSupplyVendor,
   deleteSupplyVendor,
-  logSupplyQuote,
+  deleteSupplyQuote,
   logSupplyPo,
 } from '../../api'
 import type {
@@ -61,7 +61,10 @@ import { useAuthStore } from '../../store/auth'
 import { client } from '../../api/client'
 import { comparePlatformUrl, DEF_COMPARE_PLATFORMS, normalizeComparePlatforms } from './comparePlatforms'
 import type { ComparePlatform } from './comparePlatforms'
-import { safeHref } from './utils'
+import QuoteEntryModal, { type QuoteIngOption } from './QuoteEntryModal'
+import QuoteImportModal from './QuoteImportModal'
+import { downloadBlob } from './settle/download'
+import { safeHref, todayStr } from './utils'
 import { COLORS } from '../../theme'
 
 type SupplyTab = 'vendors' | 'compare' | 'accounts' | 'price'
@@ -70,6 +73,8 @@ type PriceFilter = 'all' | 'better' | 'worse' | 'none'
 /** FP-PRICE-06/08 报价明细统一行：两表（比价 / 原料比价）与全量表共用同一列口径 */
 type QuoteDetailRow = {
   key: string
+  /** 报价主键（存量报价可能没有；缺失时删除按 ing+src 定位） */
+  id: string
   ingName: string
   unit: string
   buy: string
@@ -103,6 +108,8 @@ const qDetailOf = (
   diff?: number,
 ): QuoteDetailRow => ({
   key: `${ingName}|${q.src}|${q.date ?? ''}|${q.price}|${idx}`,
+  /* 原料比价行（PriceQuoteRow）带报价主键；供应商比价行（SupplyQuote）没有，删除时按 ing+src 定位 */
+  id: String((q as PriceQuoteRow).id ?? ''),
   ingName,
   unit,
   buy,
@@ -115,8 +122,15 @@ const qDetailOf = (
   note: q.note ?? '',
 })
 
-/** 报价明细列（逐列对齐旧版 `quoteListHtml` :5035 / `openQuoteList` :5035） */
-function quoteDetailCols(showIng: boolean): ColumnsType<QuoteDetailRow> {
+/**
+ * 报价明细列（逐列对齐旧版 `quoteListHtml` :5035 / `openQuoteList` :5035）。
+ * 传入 `onDelete` 时末列追加「删」（W2-02 / FP-PRICE-07：单条报价删除，走审批队列）。
+ */
+function quoteDetailCols(
+  showIng: boolean,
+  onDelete?: (r: QuoteDetailRow) => void,
+  canWrite = true,
+): ColumnsType<QuoteDetailRow> {
   const cols: ColumnsType<QuoteDetailRow> = [{ title: '日期', dataIndex: 'date', width: 110 }]
   if (showIng) {
     cols.push({ title: '原料', dataIndex: 'ingName', width: 160, render: (x) => <strong>{x}</strong> })
@@ -137,10 +151,27 @@ function quoteDetailCols(showIng: boolean): ColumnsType<QuoteDetailRow> {
     },
     { title: '备注', dataIndex: 'note', render: (x) => <Typography.Text type="secondary">{x || ''}</Typography.Text> },
   )
+  if (onDelete) {
+    cols.push({
+      title: '操作', key: 'act', width: 80, align: 'center',
+      render: (_, r) => (
+        <Popconfirm
+          title={`删除报价「${r.ingName} · ${r.src} · ¥${r.price}」？`}
+          description={`${r.date || '无日期'} · 只摘掉这一条报价记录，不动原料主数据、库存与进货单。`}
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+          onConfirm={() => onDelete(r)}
+        >
+          <Tooltip title={canWrite ? undefined : '当前角色无写权限'}>
+            <Button size="small" type="link" danger disabled={!canWrite}>删</Button>
+          </Tooltip>
+        </Popconfirm>
+      ),
+    })
+  }
   return cols
 }
-
-const QUOTE_ALL_COLS = quoteDetailCols(true)
 
 const DEFAULT_CFG: SupplyConfigResp['supply'] = {
   spread_warn_pct: 10,
@@ -194,7 +225,6 @@ export default function VendorsPage() {
   const [termBusy, setTermBusy] = useState(false)
   const [vForm] = Form.useForm()
   const [qOpen, setQOpen] = useState(false)
-  const [qForm] = Form.useForm()
   const [poOpen, setPoOpen] = useState(false)
   const [poForm] = Form.useForm()
   const [cfgOpen, setCfgOpen] = useState(false)
@@ -523,6 +553,26 @@ export default function VendorsPage() {
     [compare],
   )
 
+  /* W2-02 / FP-PRICE-07：删除单条报价（按 id 优先，存量无 id 时按 原料+供应商 定位） */
+  const removeQuote = useCallback(async (r: QuoteDetailRow) => {
+    setBusy(true)
+    try {
+      const res = r.id
+        ? await deleteSupplyQuote({ id: r.id })
+        : await deleteSupplyQuote({ ing: r.ingName, src: r.src })
+      if (res.ok) { message.success(res.note || '报价删除已入队'); load() }
+      else message.error(res.error || '报价删除失败')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '报价删除失败')
+    } finally {
+      setBusy(false)
+    }
+  }, [load])
+
+  const quoteCols = useMemo(() => quoteDetailCols(false, removeQuote, canWrite), [removeQuote, canWrite])
+  const quoteAllCols = useMemo(() => quoteDetailCols(true, removeQuote, canWrite), [removeQuote, canWrite])
+
   /* FP-PRICE-06 报价记录：按原料行展开看多家报价分组（旧版 data-quotelist → quoteListHtml :5035） */
   const cmpExpand = useCallback(
     (r: SupplyCompareResp['rows'][number]) => (
@@ -530,11 +580,11 @@ export default function VendorsPage() {
         rowKey="key"
         size="small"
         pagination={false}
-        columns={quoteDetailCols(false)}
+        columns={quoteCols}
         dataSource={r.quotes.map((q, i) => qDetailOf(q, r.name, r.unit, r.buy, i, r.avg > 0 ? Math.round((q.perStock - r.avg) * 100) / 100 : undefined))}
       />
     ),
-    [],
+    [quoteCols],
   )
 
   const accCols: ColumnsType<SupplyAccountRow> = useMemo(
@@ -656,11 +706,11 @@ export default function VendorsPage() {
         rowKey="key"
         size="small"
         pagination={false}
-        columns={quoteDetailCols(false)}
+        columns={quoteCols}
         dataSource={r.quotes.map((q, i) => qDetailOf(q, r.name, r.unit, r.buy, i, r.avg > 0 ? q.diff : undefined))}
       />
     ),
-    [],
+    [quoteCols],
   )
 
   /* FP-PRICE-08 全部外部报价记录（旧版 openQuoteList :5035）：与主表同源（price.report.rows），按日期倒序 */
@@ -733,34 +783,33 @@ export default function VendorsPage() {
       old_name: editing && vEdit && vEdit.id == null ? vEdit.name : undefined,
     }), () => { setVOpen(false); setVEdit(null) }, editing ? '供应商档案修改已入队' : '供应商档案已入队')
   }
-  /* FP-PRICE-05 报价口径实时折算（口径同 bff/lib/price.js::quotePerStock：
-     per='buy' 按采购单位价 ÷ conv，'stock' 即库存单位价），对比本店均价给「低/高」提示 */
-  const qIng = Form.useWatch('ing', qForm)
-  const qPrice = Form.useWatch('price', qForm)
-  const qPer = Form.useWatch('per', qForm)
-  const qRows = price?.report.rows ?? []
-  /* 报价归属以原料 id 为准（ing=原料 id，name 随报价落库供两表显示）——早前按名称提交导致原料比价表匹配不上 */
-  const qRow = useMemo(() => qRows.find((r) => r.ingId === qIng) || null, [qRows, qIng])
-  const qHint = useMemo(() => {
-    if (!qRow) return null
-    const p = Number(qPrice) || 0
-    if (p <= 0) return null
-    const conv = qRow.conv > 0 ? qRow.conv : 1
-    const unit = qPer === 'buy' ? p / conv : p
-    const avg = Number(qRow.avg) || 0
-    const diff = unit - avg
-    const pct = avg > 0 ? (Math.abs(diff) / avg) * 100 : 0
-    return { unit, avg, diff, pct, unitName: qRow.unit, buy: qRow.buy, conv: qRow.conv }
-  }, [qRow, qPrice, qPer])
+  /* FP-PRICE-05 报价口径实时折算已随弹窗抽到 QuoteEntryModal（两份页面共用同一口径），
+     这里只提供「在售原料 + 本店均价」下拉数据源 */
+  const qIngOptions = useMemo<QuoteIngOption[]>(
+    () => (price?.report.rows ?? []).map((r) => ({
+      ingId: r.ingId, name: r.name, avg: r.avg, unit: r.unit, buy: r.buy, conv: r.conv,
+    })),
+    [price],
+  )
 
-  const submitQuote = async () => {
-    const v = await qForm.validateFields()
-    const row = qRows.find((r) => r.ingId === v.ing) || null
-    await run(() => logSupplyQuote({
-      ing: v.ing, name: row?.name, src: v.src, price: Number(v.price), per: v.per, unit: v.unit,
-      note: v.note, set_default_sup: v.set_default_sup === true,
-    }), () => setQOpen(false), '报价已入队')
+  /* W2-03 / FP-PRICE-11：导出待比价任务（只读下载，喂外部 fetch_quotes.py） */
+  const [taskBusy, setTaskBusy] = useState(false)
+  const [quoteImportOpen, setQuoteImportOpen] = useState(false)
+  const exportQuoteTask = async () => {
+    setTaskBusy(true)
+    try {
+      const blob = await fetchExportQuoteTaskBlob()
+      const filename = `待比价任务_${todayStr()}.json`
+      downloadBlob(filename, blob)
+      message.success(`已导出 ${filename}（${price?.plan.onSale ?? 0} 种在售原料），放到「比价脚本/」目录即可运行`)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string }
+      message.error(err?.response?.data?.error || err?.message || '导出失败')
+    } finally {
+      setTaskBusy(false)
+    }
   }
+
   const submitPo = async () => {
     const v = await poForm.validateFields()
     await run(() => logSupplyPo({
@@ -815,7 +864,7 @@ export default function VendorsPage() {
           <Space wrap>
             <Tooltip title={tip}><Button disabled={!canWrite} onClick={openCfg}>配置</Button></Tooltip>
             <Tooltip title={tip}><Button disabled={!canWrite} onClick={openVendorCreate}>供应商登记</Button></Tooltip>
-            <Tooltip title={tip}><Button disabled={!canWrite} onClick={() => { qForm.resetFields(); setQOpen(true) }}>报价登记</Button></Tooltip>
+            <Tooltip title={tip}><Button disabled={!canWrite} onClick={() => setQOpen(true)}>报价登记</Button></Tooltip>
             <Tooltip title={tip}><Button type="primary" disabled={!canWrite} onClick={() => { poForm.resetFields(); setPoOpen(true) }}>采购应付</Button></Tooltip>
             <Tooltip title="申请 / 审核供应商类目受控词条（入审批队列）"><Button onClick={() => setTermOpen(true)}>类目词表</Button></Tooltip>
             <Button size="small" onClick={load}>刷新</Button>
@@ -935,6 +984,12 @@ export default function VendorsPage() {
                       { value: 'none', label: '暂无报价' },
                     ]} />
                     <Button onClick={() => setPlanOpen(true)}>待比价清单</Button>
+                    {/* W2-03 / FP-PRICE-11：导出任务 JSON（panda-quote-task v1，外部 fetch_quotes.py 直接消费） */}
+                    <Tooltip title="导出 panda-quote-task v1 任务文件，放进「比价脚本/」目录运行 fetch_quotes.py 即得比价结果">
+                      <Button loading={taskBusy} onClick={exportQuoteTask}>导出待比价任务</Button>
+                    </Tooltip>
+                    {/* W2-04 / FP-PRICE-12（ADR-013 D2）：导入比价结果 JSON → 预览 → 确认入队（整批一个 quote.import 动作） */}
+                    <Button onClick={() => setQuoteImportOpen(true)}>导入比价结果</Button>
                     <Button onClick={() => setQuoteAllOpen(true)}>全部报价记录（{allQuotes.length}）</Button>
                   </Space>
                   {priceRows.length ? (
@@ -1083,47 +1138,17 @@ export default function VendorsPage() {
         </Form>
       </Modal>
 
-      <Modal title="录入供应商报价" open={qOpen} onCancel={() => setQOpen(false)} confirmLoading={busy} destroyOnHidden onOk={submitQuote}>
-        <Form form={qForm} layout="vertical" preserve={false}>
-          <Form.Item name="ing" label="原料" rules={[{ required: true, message: '请选择原料' }]}>
-            {/* value 取原料 id：报价据此归集到「原料比价」主表（名称仅作显示与回退匹配） */}
-            <Select
-              showSearch
-              placeholder="选择在售原料"
-              options={qRows.map((r) => ({ value: r.ingId, label: `${r.name}（本店均价 ¥${r.avg}/${r.unit}）` }))}
-              filterOption={(inp, opt) => String(opt?.label ?? '').includes(inp)}
-            />
-          </Form.Item>
-          <Form.Item name="src" label="供应商" rules={[{ required: true, message: '请填写供应商' }]}><Input /></Form.Item>
-          <Form.Item name="per" label="报价口径" initialValue="buy">
-            <Select
-              options={[
-                { value: 'buy', label: qRow && qRow.conv > 1 ? `按采购单位（元/${qRow.buy}，1${qRow.buy}=${qRow.conv}${qRow.unit}）` : '按采购单位' },
-                { value: 'stock', label: qRow ? `按库存单位（元/${qRow.unit}）` : '按库存单位' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="price" label="报价金额（元）" rules={[{ required: true, message: '请填写报价' }]}><InputNumber style={{ width: '100%' }} min={0} step={0.01} /></Form.Item>
-          {qHint && (
-            <Alert
-              style={{ marginBottom: 12 }}
-              showIcon
-              type={qHint.diff < -0.01 ? 'success' : qHint.diff > 0.01 ? 'warning' : 'info'}
-              message={
-                `折算 ¥${qHint.unit.toFixed(2)}/${qHint.unitName}，与本店均价 ¥${qHint.avg} 相比：` +
-                (qHint.diff < -0.01
-                  ? `低 ¥${(-qHint.diff).toFixed(2)}（省 ${qHint.pct.toFixed(0)}%）`
-                  : qHint.diff > 0.01
-                    ? `高 ¥${qHint.diff.toFixed(2)}（贵 ${qHint.pct.toFixed(0)}%）`
-                    : '基本持平')
-              }
-            />
-          )}
-          <Form.Item name="unit" label="单位"><Input placeholder="kg / 箱" /></Form.Item>
-          <Form.Item name="note" label="备注"><Input placeholder="含运 / 到店价" /></Form.Item>
-          <Form.Item name="set_default_sup" label="设为该原料默认供应商" valuePropName="checked"><Switch /></Form.Item>
-        </Form>
-      </Modal>
+      {/* W3-04：报价录入抽成共享组件（供应商比价页 / 原料库存页行内「比价」共用同一口径） */}
+      <QuoteEntryModal
+        open={qOpen}
+        ings={qIngOptions}
+        platforms={platforms}
+        onCancel={() => setQOpen(false)}
+        onDone={load}
+      />
+
+      {/* W2-04 / FP-PRICE-12（ADR-013 D2）：批量导入比价结果（预览 → 入队 → 审批确认 → 落库） */}
+      <QuoteImportModal open={quoteImportOpen} onClose={() => setQuoteImportOpen(false)} />
 
       <Modal title="采购应付登记" open={poOpen} onCancel={() => setPoOpen(false)} confirmLoading={busy} destroyOnHidden onOk={submitPo}>
         <Form form={poForm} layout="vertical" preserve={false}>
@@ -1150,10 +1175,10 @@ export default function VendorsPage() {
         ) : <Empty description="暂无在售原料" />}
       </Modal>
 
-      {/* FP-PRICE-08 全部外部报价记录（旧版 openQuoteList）：列 = 日期/原料/来源/报价/折库存单位/对比本店/备注 */}
+      {/* FP-PRICE-08 全部外部报价记录（旧版 openQuoteList）：列 = 日期/原料/来源/报价/折库存单位/对比本店/备注/删 */}
       <Modal title={`全部外部报价记录（${allQuotes.length}）`} open={quoteAllOpen} footer={null} onCancel={() => setQuoteAllOpen(false)} width={1000}>
         {allQuotes.length ? (
-          <Table<QuoteDetailRow> rowKey="key" columns={QUOTE_ALL_COLS} dataSource={allQuotes} pagination={{ pageSize: 12 }} size="small" />
+          <Table<QuoteDetailRow> rowKey="key" columns={quoteAllCols} dataSource={allQuotes} pagination={{ pageSize: 12 }} size="small" />
         ) : <Empty description="暂无外部报价记录" />}
       </Modal>
 

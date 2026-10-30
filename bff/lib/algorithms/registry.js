@@ -16,6 +16,7 @@ const safetyCheck = require('./safety_check');
 const sale = require('./sale');
 const terms = require('./terms');
 const maint = require('./maint');
+const snapshot = require('./snapshot');
 
 /* 库存算法：入库/盘点后重算 stock/qty/avg */
 registerAll({
@@ -30,11 +31,21 @@ registerAll({
   'config.update': (ctx, data, payload) => inv.applyConfig(data, payload),
   'rest.update': (ctx, data, payload) => inv.applyRest(data, payload),
   'ing.upsert': (ctx, data, payload) => inv.applyIngUpsert(data, payload),
+  /* W3-02 / FP-ING-06 批量设置安全线/出成率：整批一个动作（一条队列 = 一次审批） */
+  'ing.batch': (ctx, data, payload) => inv.applyIngBatch(data, payload),
+  /* W3-03 / FP-ING-11 删除原料：有流水/单据/报价/销售/配方引用即禁删（提示改「停用」） */
+  'ing.delete': (ctx, data, payload) => inv.applyIngDelete(data, payload),
   'quote.upsert': (ctx, data, payload) => inv.applyQuoteUpsert(data, payload),
+  /* W2-02 / FP-PRICE-07 删除单条外部报价：只摘 data.quotes 一行，零命中显式报错 */
+  'quote.delete': (ctx, data, payload) => inv.applyQuoteDelete(data, payload),
+  /* W2-04 / FP-PRICE-12 批量导入比价结果（D2 append 模式）：整批一个动作，只写 data.quotes */
+  'quote.import': (ctx, data, payload) => inv.applyQuoteImport(data, payload),
   'loss.report': (ctx, data, payload) => inv.applyLossReport(data, payload, ctx),
   'loss.approve': (ctx, data, payload) => inv.approveLossReport(ctx, data, payload),
   'loss.reject': (ctx, data, payload) => inv.rejectLossReport(ctx, data, payload),
   'recv.inbound': (ctx, data, payload) => inv.applyRecvInbound(data, payload),
+  /* 凭证 → 记账：把「待审核」进货单推进为「已入库」（ADR-004 §2.5 两段式第二段） */
+  'recv.post': (ctx, data, payload) => inv.applyRecvPost(data, payload, ctx),
   'recv.accept': (ctx, data, payload) => inv.insertRecvAccept(ctx, payload),
   /* 编辑/作废：做成建议动作走审批队列，不直写库；作废只留痕、不物理删除 */
   'recv.update': (ctx, data, payload) => inv.applyRecvUpdate(data, payload),
@@ -200,6 +211,22 @@ registerAll({
  *                     入口走审批队列，审批中心可见、可驳回、全程留痕 */
 registerAll({
   'maint.row_delete': (ctx, data, payload) => maint.applyRowDelete(ctx, data, payload)
+});
+
+/* W2-01 / FP-SET-10 快照回滚（ADR-013 D1）：整包恢复 data+ext，强制前置备份 + schema 校验，
+ * 仅老板/店长可发起（routes/actions.js 的 HIGH_RISK_TYPES 门禁），rev 绝不回退 */
+registerAll({
+  'snapshot.rollback': (ctx, data, payload) => snapshot.applySnapshotRollback(data, payload, ctx)
+});
+
+/* W4 高危三件套（ADR-013 D4，最高危，仅老板/店长可发起，全部强制前置备份）：
+ *   snapshot.import          W4-01 从「暂存导入文件」整包恢复 data+ext
+ *   snapshot.reset_baseline  W4-02 整包重置为随包基线制品（带校验和）
+ *   snapshot.clear           W4-03 清空业务数据（business）/ 回到首次安装状态（all） */
+registerAll({
+  'snapshot.import': (ctx, data, payload) => snapshot.applySnapshotImport(data, payload, ctx),
+  'snapshot.reset_baseline': (ctx, data, payload) => snapshot.applySnapshotResetBaseline(data, payload, ctx),
+  'snapshot.clear': (ctx, data, payload) => snapshot.applySnapshotClear(data, payload, ctx)
 });
 
 module.exports = { stock, inv, dish, pos, ops, inspection, safetyPoint, safetyCheck, terms, maint };

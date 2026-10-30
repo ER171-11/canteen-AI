@@ -18,6 +18,7 @@ import ReservedModulePage from './pages/ops/ReservedModulePage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import SystemConfigPage from './pages/SystemConfigPage'
 import AppReleasePage from './pages/AppReleasePage'
+import OptimizationRoadmapPage from './pages/platform/OptimizationRoadmapPage'
 import DishesPage from './pages/kitchen/DishesPage'
 import RecipesPage from './pages/kitchen/RecipesPage'
 import SopPage from './pages/kitchen/SopPage'
@@ -95,6 +96,7 @@ export default function App() {
           <Route path="platform/org" element={<OrgPage />} />
           <Route path="platform/system" element={<SystemConfigPage />} />
           <Route path="platform/app-release" element={<AppReleasePage />} />
+          <Route path="platform/optimization" element={<OptimizationRoadmapPage />} />
 
           {/* 菜品厨房 */}
           <Route path="kitchen/dishes" element={<DishesPage />} />

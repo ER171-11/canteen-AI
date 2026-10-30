@@ -13,6 +13,13 @@ export function safeHref(url?: string | null): string | null {
   return null
 }
 
+/** 本地日期 YYYY-MM-DD（导出文件名用，与后端 routes/export.js::todayStr 同口径） */
+export function todayStr(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
 /** safe=0/缺失时按 est×2 兜底安全线 */
 export function safetyLine(ing: IngItem): number {
   if (ing.safe && ing.safe > 0) return ing.safe

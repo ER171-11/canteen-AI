@@ -1,5 +1,7 @@
 import type { InventoryDoc, SettleTemplate } from '../../../api/types'
-import { buildSettleData, esc, fmt, numToCn, settleNo, today, type IngLookup } from './data'
+import {
+  buildSettleData, esc, fmt, numToCn, pendingNotice, settleNo, today, type IngLookup,
+} from './data'
 import { DEFAULT_REST_NAME } from './template'
 
 /**
@@ -34,6 +36,7 @@ body{font-family:"Noto Sans CJK SC","Microsoft YaHei","PingFang SC",sans-serif;c
 .signs{margin-top:24px;display:flex;justify-content:space-between;gap:14px}
 .signs .sign{font-size:12.5px}
 .foot{margin-top:18px;border-top:1px dashed #bbb;padding-top:6px;color:#666;font-size:10.5px;display:flex;justify-content:space-between;gap:12px}
+.pending{margin:6px 0 8px;border:1px solid #f0c36d;background:#fffbe6;color:#8a6100;font-size:11px;padding:4px 6px;border-radius:3px}
 .sheet{page-break-after:always}.sheet:last-child{page-break-after:auto}
 @media print{body{padding:0}}`
 
@@ -92,6 +95,11 @@ export function settleSheet(
 
   const batchTag = ex.total ? `\u3000·\u3000第 ${ex.index} / ${ex.total} 张` : ''
 
+  /* 凭证层提示（D-B）：文案与弹窗/CSV 共用 pendingNotice 一个出口，
+     保证「系统里看到的」与「打出来/导出去的」说的是同一句话、同一个金额 */
+  const notice = pendingNotice(doc, d)
+  const pendingTag = notice ? '<div class="pending">' + esc(notice) + '</div>' : ''
+
   return `
   <div class="ttl"><div class="rest">${esc(restName)}</div><div class="doc">${esc(tpl.title)}</div></div>
   ${meta ? `<div class="meta">${meta}</div>` : '<div style="height:6px"></div>'}
@@ -101,6 +109,7 @@ export function settleSheet(
     <tr><td class="k">收款单位</td><td colspan="3">${esc(doc.supplier)}</td><td class="k">支出用途</td><td>${esc(purpose)}</td></tr>
     ${payeeRow}
   </table>
+  ${pendingTag}
   <table class="lines">
     <thead><tr><th style="width:42px">序号</th><th>品名</th><th style="width:70px">数量</th><th style="width:58px">单位</th><th style="width:92px">单价(元)</th><th style="width:100px">金额(元)</th></tr></thead>
     <tbody>${rows}</tbody>

@@ -10,6 +10,8 @@
  */
 
 const { today, nowIso, num, r3, arr } = require('./util');
+/* 进货单状态口径唯一出口（凭证层「待审核」不进库存，见 lib/recv_status.js） */
+const recvStatus = require('../recv_status');
 
 /* 流水排序权重（数值越小越早应用）：期初0 / 手工调整1 / 采购入库2 / 盘点调整3 */
 const ORDER = { 期初: 0, 手工调整: 1, 采购入库: 2, 盘点调整: 3 };
@@ -44,10 +46,10 @@ function rebuildStock(data) {
   }
 
   for (const po of arr(data.recv)) {
-    const st = String((po && po.status) || '');
-    // 仅已入库计入库存；草稿/待收不进；已作废旧版 delRecv 物理删除→Node 改为留痕，
+    // 仅已入库计入库存；草稿/待收/待审核不进；已作废旧版 delRecv 物理删除→Node 改为留痕，
     // 由此处跳过（作废单不进台账，库存按剩余单据重算，效果等价于旧版「删除后重建」且不丢审计）
-    if (st && (st.indexOf('草稿') >= 0 || st.indexOf('待') >= 0 || st.indexOf('作废') >= 0 || st.indexOf('void') >= 0) && st.indexOf('已入库') < 0) continue;
+    // 口径唯一出口：lib/recv_status.js（与 report/modules/workbench 同源，避免各处各写一遍）
+    if (!recvStatus.isEffective(po)) continue;
     for (const l of arr(po && po.lines)) {
       const gid = (l && (l.ing != null ? l.ing : l.ing_id));
       if (gid === undefined || gid === null) continue;

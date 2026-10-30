@@ -9,6 +9,8 @@
  */
 const { buildCostCard, gramsPerUnit } = require('./recipe_cost');
 const { buildDemand } = require('../routes/kitchen');
+/* 进货单状态口径唯一出口：待审核 = 已收货待记账，不再出现在「待验收」工作台 */
+const recvStatus = require('./recv_status');
 
 function arr(v) { return Array.isArray(v) ? v : []; }
 function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
@@ -179,7 +181,7 @@ function kitchenWorkbench(ext, data, date) {
 /* ------------------------------------------------------------------ */
 function recvWorkbench(ext, data, date) {
   const day = date || today();
-  const recv = arr(data && data.recv).filter((r) => r && !/已入库|取消/.test(String(r.status || '')));
+  const recv = arr(data && data.recv).filter((r) => r && recvStatus.isPendingAccept(r));
   let standards = 0;
   let specReqFor = () => undefined;
   try {

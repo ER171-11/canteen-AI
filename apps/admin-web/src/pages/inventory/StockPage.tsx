@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { Key } from 'react'
 import {
   Alert,
   Button,
@@ -9,6 +10,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Radio,
   Row,
   Select,
@@ -24,10 +26,15 @@ import {
   fetchIngTerms,
   submitAndConfirmAction,
   submitIngAttrSet,
+  submitIngDelete,
+  submitIngDisable,
   submitTermUpsert,
 } from '../../api'
 import type { IngItem, IngTerm } from '../../api/types'
 import MockAlert from '../kitchen/components/MockAlert'
+import QuoteEntryModal, { type QuoteIngOption } from './QuoteEntryModal'
+import StockBatchModal from './StockBatchModal'
+import StockCalibrateModal, { type CalibrateTarget } from './StockCalibrateModal'
 import { fmtNum, safeHref, safetyLine, stockStatus, stockValue } from './utils'
 import { COLORS } from '../../theme'
 
@@ -52,6 +59,18 @@ export default function StockPage() {
   const [onlyPending, setOnlyPending] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [form] = Form.useForm()
+
+  /* W3-04 / FP-ING-13：原料行内「比价」入口（复用供应商比价页的报价录入弹窗） */
+  const [quoteOpen, setQuoteOpen] = useState(false)
+  const [quoteIngId, setQuoteIngId] = useState<string | undefined>(undefined)
+
+  /* W3-01 / FP-ING-05 手工校准（独立弹窗，与主数据编辑分开） */
+  const [calibOpen, setCalibOpen] = useState(false)
+  const [calibTarget, setCalibTarget] = useState<CalibrateTarget | null>(null)
+
+  /* W3-02 / FP-ING-06 批量设置安全线/出成率（整批一个动作） */
+  const [selectedKeys, setSelectedKeys] = useState<Key[]>([])
+  const [batchOpen, setBatchOpen] = useState(false)
 
   /* ---- W2 受控词表 + 属性 Tag ---- */
   const [terms, setTerms] = useState<IngTerm[]>([])
@@ -246,6 +265,83 @@ export default function StockPage() {
     )
   }
 
+  /* 报价录入下拉：与「原料比价」同一口径（在售原料 + 本店均价），停用原料不参与比价 */
+  const quoteIngs = useMemo<QuoteIngOption[]>(
+    () => items
+      .filter((g) => g.on !== false)
+      .map((g) => ({
+        ingId: String(g.id),
+        name: g.name,
+        avg: Number(g.avg) || 0,
+        unit: g.unit ?? '',
+        buy: g.buy || g.pack || g.unit,
+        conv: Number(g.conv ?? 1) || 1,
+      })),
+    [items],
+  )
+
+  const openQuote = (r: IngRow) => {
+    setQuoteIngId(String(r.id))
+    setQuoteOpen(true)
+  }
+
+  const openCalib = (r: IngRow) => {
+    setCalibTarget({
+      id: String(r.id),
+      name: r.name,
+      unit: r.unit,
+      stock: r.stock,
+      qty: r.qty,
+      avg: r.avg,
+    })
+    setCalibOpen(true)
+  }
+
+  /**
+   * W3-03 / FP-ING-11 删除原料：走 ing.delete（引用保护）。
+   * 有流水/单据/报价/销售/配方引用会被执行器驳回——错误信息里直接给出正解「改为停用」，
+   * 并顺手弹一个「改为停用」的一步确认（红线 #6：不物理删台账）。
+   */
+  const removeIng = async (r: IngRow) => {
+    setBusy(true)
+    try {
+      const res = await submitIngDelete({ id: String(r.id) })
+      if (res.error) {
+        Modal.confirm({
+          title: '该原料不能删除',
+          content: res.error,
+          okText: '改为停用',
+          cancelText: '取消',
+          onOk: async () => {
+            try {
+              await submitIngDisable({ id: String(r.id), on: false })
+              message.success('已停用（历史台账保留）')
+              load()
+            } catch (e: unknown) {
+              const err = e as { response?: { data?: { error?: string } } }
+              message.error(err.response?.data?.error || '停用失败')
+            }
+          },
+        })
+        return
+      }
+      if (res.settled) message.success('已删除')
+      else if (res.confirmed) message.success('删除已入队，待审批中心确认')
+      else message.success('已提交，待确认')
+      load()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '删除失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const selectedRows = useMemo(
+    () => items.filter((g) => selectedKeys.some((k) => String(k) === String(g.id))),
+    [items, selectedKeys],
+  )
+
   const columns: ColumnsType<IngRow> = [
     {
       title: '名称',
@@ -285,11 +381,37 @@ export default function StockPage() {
     {
       title: '操作',
       key: 'act',
-      width: 80,
+      width: 200,
       render: (_, r) => (
-        <Button size="small" type={r.pending ? 'primary' : 'default'} onClick={() => openEdit(r)}>
-          {r.pending ? '完善' : '编辑'}
-        </Button>
+        <Space size={0}>
+          <Button size="small" type={r.pending ? 'primary' : 'default'} onClick={() => openEdit(r)}>
+            {r.pending ? '完善' : '编辑'}
+          </Button>
+          {/* W3-04 / FP-ING-13：行内比价（录一条外部报价 → quote.upsert 审批入队）。
+              耗材不参与比价（W4 决策 #4），故耗材行不露入口（原料比价主表本就不收耗材）。 */}
+          {(r as IngRow & { type?: string }).type !== 'consumable' && (
+            <Button size="small" type="link" onClick={() => openQuote(r)}>
+              比价
+            </Button>
+          )}
+          {/* W3-01 / FP-ING-05 手工校准：独立弹窗改存量（库存/均价），与档案编辑分开 */}
+          <Button size="small" type="link" onClick={() => openCalib(r)}>
+            校准
+          </Button>
+          {/* W3-03 / FP-ING-11 删除原料：有引用会被执行器拒绝并提示改「停用」 */}
+          <Popconfirm
+            title={`删除原料「${r.name}」？`}
+            description="有流水/单据/报价/销售/配方引用的原料会被拒绝删除（请改为停用）。"
+            okText="删除"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={() => removeIng(r)}
+          >
+            <Button size="small" type="link" danger>
+              删
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ]
@@ -396,6 +518,10 @@ export default function StockPage() {
             <Button type="primary" onClick={() => openEdit()}>
               新增原料
             </Button>
+            {/* W3-02 / FP-ING-06：勾选原料 → 批量改安全线/出成率（整批 1 条队列） */}
+            <Button disabled={!selectedKeys.length} onClick={() => setBatchOpen(true)}>
+              批量设置{selectedKeys.length ? `（${selectedKeys.length}）` : ''}
+            </Button>
             <Button onClick={() => setTermOpen(true)}>词条管理</Button>
             <span style={{ color: '#888', fontSize: 12 }}>包规·供应商·安全线经确认台写入</span>
           </Space>
@@ -431,6 +557,11 @@ export default function StockPage() {
             rowClassName={(r) => (r.on === false ? 'ing-off-row' : '')}
             pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 项` }}
             size="small"
+            rowSelection={{
+              selectedRowKeys: selectedKeys,
+              onChange: (keys) => setSelectedKeys(keys),
+              preserveSelectedRowKeys: true,
+            }}
             expandable={{
               expandedRowRender: renderDetail,
               expandRowByClick: true,
@@ -734,6 +865,38 @@ export default function StockPage() {
           />
         </Space>
       </Modal>
+
+      {/* W3-04 / FP-ING-13：原料行内「比价」→ 复用供应商比价页的报价录入弹窗（同一 quote.upsert 口径） */}
+      <QuoteEntryModal
+        open={quoteOpen}
+        ings={quoteIngs}
+        defaultIngId={quoteIngId}
+        onCancel={() => setQuoteOpen(false)}
+      />
+
+      {/* W3-01 / FP-ING-05：手工校准（存量为唯一改动对象，走 stock.count） */}
+      <StockCalibrateModal
+        open={calibOpen}
+        ing={calibTarget}
+        onCancel={() => setCalibOpen(false)}
+        onDone={() => {
+          setCalibOpen(false)
+          load()
+        }}
+      />
+
+      {/* W3-02 / FP-ING-06：批量设置安全线/出成率（整批一个 ing.batch 动作） */}
+      <StockBatchModal
+        open={batchOpen}
+        ids={selectedRows.map((g) => String(g.id))}
+        names={selectedRows.map((g) => g.name)}
+        onCancel={() => setBatchOpen(false)}
+        onDone={() => {
+          setBatchOpen(false)
+          setSelectedKeys([])
+          load()
+        }}
+      />
     </div>
   )
 }

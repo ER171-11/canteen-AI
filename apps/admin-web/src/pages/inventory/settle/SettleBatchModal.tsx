@@ -67,7 +67,14 @@ export default function SettleBatchModal({
   const sum = useMemo(() => {
     const pay = r2(selDocs.reduce((a, d) => a + (Number(d.payable) || 0), 0))
     const debt = r2(selDocs.reduce((a, d) => a + docDebt(d), 0))
-    return { pay, debt }
+    /* 这里的合计**含**待审核单（= 这几张纸的金额之和），与「累计应付」口径不同，需显式标注 */
+    const pending = selDocs.filter((d) => String(d.status ?? '').indexOf('待审核') >= 0)
+    return {
+      pay,
+      debt,
+      pendingCount: pending.length,
+      pendingPayable: r2(pending.reduce((a, d) => a + (Number(d.payable) || 0), 0)),
+    }
   }, [selDocs])
 
   const columns: ColumnsType<InventoryDoc> = [
@@ -205,6 +212,9 @@ export default function SettleBatchModal({
         <Typography.Text type="secondary">
           已选 {selDocs.length} / {list.length} 张 · 应付合计 ¥{fmt(sum.pay)} · 欠款 ¥
           {fmt(sum.debt)}
+          {sum.pendingCount > 0
+            ? `（其中待审核 ${sum.pendingCount} 张 ¥${fmt(sum.pendingPayable)} 未计入系统应付）`
+            : ''}
         </Typography.Text>
       </Space>
 

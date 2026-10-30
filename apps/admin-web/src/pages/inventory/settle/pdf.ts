@@ -1,5 +1,7 @@
 import type { InventoryDoc, SettleTemplate } from '../../../api/types'
-import { buildSettleData, fmt, numToCn, settleNo, today, type IngLookup } from './data'
+import {
+  buildSettleData, fmt, numToCn, pendingNotice, settleNo, today, type IngLookup,
+} from './data'
 import { downloadBlob } from './download'
 import type { SettleOpts } from './html'
 
@@ -78,6 +80,22 @@ export interface PdfPage {
   w: number
   h: number
   ops: Op[]
+}
+
+/** 提示文案折行：优先按「；」断句，单段过长再按 34 字硬切（PDF 无自动换行） */
+function noticeLinesOf(s: string): string[] {
+  if (!s) return []
+  const parts = s.split('；')
+  const out: string[] = []
+  parts.forEach((p, i) => {
+    const seg = i < parts.length - 1 ? p + '；' : p
+    if (seg.length <= 40) {
+      out.push(seg)
+      return
+    }
+    for (let k = 0; k < seg.length; k += 34) out.push(seg.slice(k, k + 34))
+  })
+  return out
 }
 
 function pdfFont(bold: boolean, size: number): string {
@@ -181,7 +199,12 @@ export function settlePageModel(
     widths.push(W4)
   }
 
-  const topH = 40 + (meta ? 16 : 8) + 7 + headRows.length * H + 7 + H
+  /* 待审核提示：与弹窗/打印件/CSV 共用 data.ts::pendingNotice 同一句文案。
+     PDF 是手工坐标、不会自动折行，故先断句成行，并把高度计入 topH 以免压到明细表。 */
+  const noticeLines = noticeLinesOf(pendingNotice(doc, d))
+  const NOTICE_H = noticeLines.length ? 8 + noticeLines.length * 10 : 0
+
+  const topH = 40 + (meta ? 16 : 8) + 7 + headRows.length * H + 7 + NOTICE_H + H
   const contH = 22 + H
   /** 合计框 + 签字栏 + 页脚 */
   const TAIL = 6 + 73 + 18 + 30 + 14 + 20
@@ -221,6 +244,15 @@ export function settlePageModel(
       y += 7
       headRows.forEach((cells, i) => pdfCells(ops, widths[i], y + i * H, H, cells))
       y += headRows.length * H + 7
+      if (noticeLines.length) {
+        noticeLines.forEach((ln, i) => {
+          ops.push({
+            t: 'text', s: ln, x: 0, y: y + 8 + i * 10,
+            font: pdfFont(false, 7.5), color: '#8a6100',
+          })
+        })
+        y += NOTICE_H
+      }
     } else {
       ops.push({
         t: 'text',

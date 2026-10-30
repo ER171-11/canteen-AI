@@ -17,7 +17,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
-import { postAction } from '../../api'
+import { submitAndConfirmAction } from '../../api'
 import { previewRecvImport } from '../../api/recvImport'
 import type {
   RecvImportGroup,
@@ -39,7 +39,8 @@ import { fmt } from './settle/data'
  *
  * 红线（与 ADR-004 一致）：
  *   · **预览 = 只读**：previewRecvImport 不写文件、不入队，可反复点。
- *   · **提交 = 一个动作**：整批只投一条 `recv.import`，批内原子；确认前账面零变化。
+ *   · **提交 = 一个动作**：整批只投一条 `recv.import`（draft:true），批内原子；
+ *     单据当场落「待审核」（老板能看、能打结算单），**库存与应付零变化**（ADR-004 §2.5）。
  *   · 解析失败 / 不支持的格式一律**显式报错**，不静默丢弃任何一行（红线⑥）。
  *
  * 与旧版的关系（都写在界面上）：
@@ -171,8 +172,10 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
       const err = e as { response?: { data?: { error?: string; head?: RecvImportHead } } }
       const data = err.response?.data
       setPreview(null)
-      /* 列名识别不了时后端会把原始网格回传：直接展开「手动指定列」面板指路，不留死路 */
-      if (data?.head) {
+      /* 列名识别不了时后端会把原始网格回传：直接展开「手动指定列」面板指路，不留死路。
+       * 但格式级失败（如旧版 .xls / 空表格）后端回的 head.rows 为空数组 —— 此时面板里
+       * 没有任何列可选，展开只会让用户对着一个空白面板发呆，故只在有真实网格时才展开。 */
+      if (data?.head && Array.isArray(data.head.rows) && data.head.rows.length) {
         setHead(data.head)
         setHeaderRow(data.head.headerRowIndex >= 0 ? data.head.headerRowIndex : 0)
         setColMap(data.head.colMap ?? {})
@@ -203,10 +206,13 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
     /* 新增原料的分类（预览给出，供执行器建档时写入 cat；缺省执行器兜底「其他」） */
     const catOf = new Map((preview.newIngs ?? []).map((n) => [n.name, n.cat]))
     try {
-      await postAction({
+      /* 凭证层登记（ADR-004 §2.5）：整批落「待审核」单据，立即可见/可打结算单，
+       * 但库存与应付不动；记账生效由 recv.post 审批后完成。提交即确认，不再等审批中心点一下。 */
+      const r = await submitAndConfirmAction({
         type: 'recv.import',
         operator: role ?? account ?? 'admin',
         payload: {
+          draft: true,
           /* 整批一个动作：批内的 N 张单据一次性进队列，批末由执行器统一 rebuildStock（ADR-004 §2.4） */
           docs: groups.map((g) => ({
             supplier: preview.single ? String(supplier).trim() : g.supplier,
@@ -225,7 +231,13 @@ export default function RecvImportModal({ open, onClose, onQueued }: RecvImportM
           source: 'admin-web/inventory/inbound',
         },
       })
-      message.success('批量导入已入队 → 请到审批中心确认（确认后店内库存/欠款才变）')
+      if (r.confirmed) {
+        message.success(
+          `已登记 ${groups.length} 张「待审核」进货单 → 可在列表打印结算单；确认入库后库存/应付才变化`,
+        )
+      } else {
+        message.warning('已提交，但确认未通过 → 请到审批中心确认后，单据才会出现在列表')
+      }
       onQueued?.()
       reset()
       onClose()

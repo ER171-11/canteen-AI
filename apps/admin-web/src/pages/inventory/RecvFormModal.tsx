@@ -14,7 +14,7 @@ import {
   message,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { postAction } from '../../api'
+import { postAction, submitAndConfirmAction } from '../../api'
 import type { IngItem, InventoryDoc } from '../../api/types'
 import { useAuthStore } from '../../store/auth'
 import { fmt, r2, today } from './settle/data'
@@ -276,10 +276,14 @@ export default function RecvFormModal({
       )
       return
     }
+    const operator = role ?? account ?? 'admin'
     try {
-      await postAction({
+      /* 两段式（ADR-004 §2.5）：
+       *   新建 = 凭证层登记 → draft:true 只落单据（立即可见、可打结算单），库存/应付不动，一步确认不受审批阻塞；
+       *   编辑 = 账务层变更（已入库单会改库存/欠款）→ 仍走审批队列，由老板确认。 */
+      const body = {
         type: isEdit ? 'recv.update' : 'recv.inbound',
-        operator: role ?? account ?? 'admin',
+        operator,
         payload: {
           /* 编辑模式：带 id 让执行器 applyRecvUpdate 定位原单；新建不带 id */
           ...(isEdit ? { id: String(editDoc?.id ?? editDoc?.no ?? '') } : {}),
@@ -313,13 +317,21 @@ export default function RecvFormModal({
             }
           }),
           source: 'admin-web/inventory/inbound',
+          /* 凭证层登记：只落单据、不动账面；编辑不带该字段（编辑已入库单属账务变更，仍走审批） */
+          ...(isEdit ? {} : { draft: true }),
         },
-      })
-      message.success(
-        isEdit
-          ? '进货单修改已入队 → 请到审批中心确认（确认后店内库存/欠款才变）'
-          : '进货单已入队 → 请到审批中心确认（确认后店内库存/欠款才变）',
-      )
+      }
+      if (isEdit) {
+        await postAction(body)
+        message.success('进货单修改已入队 → 请到审批中心确认（确认后店内库存/欠款才变）')
+      } else {
+        const r = await submitAndConfirmAction(body)
+        if (r.confirmed) {
+          message.success('进货单已登记为「待审核」→ 可在列表打印结算单；确认入库后库存/应付才变化')
+        } else {
+          message.warning('已提交，但确认未通过 → 请到审批中心确认后，单据才会出现在列表')
+        }
+      }
       onQueued?.()
       onClose()
     } catch (e: unknown) {

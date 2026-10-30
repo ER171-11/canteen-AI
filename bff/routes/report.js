@@ -19,6 +19,8 @@ const { loadSnapshot } = require('./snapshot');
 // 单一公式源，不另写第二份成本口径
 const { dishCostMap, dishResolver, costOfDish, near30Agg } = require('./export');
 const { isFood } = require('../lib/ing_type'); // W4：耗材不进经营分析口径（库存总值/断货补货）
+/* 进货单生效口径唯一出口（凭证层「待审核」不计入应付/入库统计） */
+const recvStatus = require('../lib/recv_status');
 
 function todayStr() {
   const d = new Date();
@@ -156,11 +158,10 @@ function makeInDashRange(range, rangeFrom, rangeTo) {
   };
 }
 
-/** 进货单是否为有效入库单（排除草稿/待验/取消/作废；口径与打烊「入库」统计同源） */
+/** 进货单是否为有效入库单（排除草稿/待验/待审核/取消/作废）
+ *  口径唯一出口在 lib/recv_status.js，本处仅保留旧函数名供本文件既有调用点使用 */
 function isInboundEffective(r) {
-  const st = String((r && r.status) || '已入库');
-  if (/草稿|待验|取消|作废/i.test(st)) return false;
-  return /已入库|done|入库/i.test(st);
+  return recvStatus.isEffective(r);
 }
 
 /** FP-DASH-07 库存总值：对齐旧版 stockValue()（HTML:1244/1251）= Σ 库存 × 均价（时点值，不随周期变）。

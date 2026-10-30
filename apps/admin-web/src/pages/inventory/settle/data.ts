@@ -115,6 +115,25 @@ export function buildSettleData(doc: InventoryDoc, lookup: IngLookup): SettleDat
   }
 }
 
+/**
+ * 待审核（凭证层）提示文案 —— **唯一出口**：弹窗预览、打印/PDF/HTML、CSV 三处共用同一句，
+ * 避免出现「纸上有、系统里没有」或两处措辞不一致（ADR-004 §2.5 D-B）。
+ * 非待审核单返回空串，调用方照常输出即可。
+ */
+export function pendingNotice(
+  doc: InventoryDoc,
+  d?: { payable: number; paid: number },
+): string {
+  if (String(doc.status ?? '').indexOf('待审核') < 0) return ''
+  const payable = d ? d.payable : r2(Number(doc.payable) || 0)
+  const paid = d ? d.paid : docPaid(doc)
+  return (
+    '本单为「待审核」凭证：本单金额 ¥' + fmt(payable) + ' 尚未计入系统应付' +
+    (paid > 0.005 ? '；登记的实付 ¥' + fmt(paid) + ' 亦未计入系统累计实付' : '') +
+    '。请在系统外核对后再付款。'
+  )
+}
+
 /** CSV 转义 + UTF-8 BOM + CRLF（旧版 csv():5293）——无 BOM 时 Excel 打开中文必乱码 */
 export function csv(rows: Array<Array<unknown>>): string {
   return (

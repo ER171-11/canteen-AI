@@ -12,14 +12,21 @@
  *   restock.adjust                    → applyRestockAdjust（行内改量/供应商/起订/整包并记回原料主数据）
  *   config.update                     → applyConfig
  *   rest.update                       → applyRest（写顶层 data.rest 餐厅名）
- *   ing.upsert                        → applyIngUpsert
+ *   ing.upsert                        → applyIngUpsert（主数据维护，**不再**用于存量校准）
+ *   ing.batch                         → applyIngBatch（W3-02 批量改安全线/出成率，一条动作）
+ *   ing.delete                        → applyIngDelete（W3-03 引用保护：有引用即禁删，改停用）
  *   quote.upsert                      → applyQuoteUpsert
+ *   quote.delete                      → applyQuoteDelete（W2-02 删除单条报价，零命中显式报错）
  *   loss.report                       → applyLossReport
- *   recv.inbound                      → applyRecvInbound（含 Node 超集：paid / method / po / line.recvQty）
+ *   recv.inbound                      → applyRecvInbound（含 Node 超集：paid / method / po / line.recvQty；
+ *                                        draft:true = 凭证层登记「待审核」，不动账面）
+ *   recv.post                         → applyRecvPost（待审核 → 已入库，唯一记账生效口，含版本比对）
  *   recv.accept                       → insertRecvAccept
  *   recv.pay                          → applyRecvPay（补付 / 欠款清收）
  *   recv.import                       → applyRecvImport（批量导入，批末统一 rebuildStock 一次）
  *   stock.count                       → applyStockCount + insertStockCount
+ *                                       （W3-01 手工校准：payload.avg 改均价、强制填原因、
+ *                                         流水 inCost 取「传入均价 ?? 现有均价」，修掉盘点均价清 0）
  *   order.mark                        → applyOrderMark
  *   vendor.upsert                     → upsertVendor
  *   vendor.delete                     → applyVendorDelete（有往来账禁删）
@@ -34,6 +41,13 @@ const { today, nowIso, num, r2, r3, arr } = require('./util');
 const { rebuildStock } = require('./stock');
 const { resolveIngType, normalizeType } = require('../ing_type');
 const supTerms = require('../supplier_terms');
+/* 进货单状态口径唯一出口：凭证层「待审核」/ 账务层「已入库」两段式（lib/recv_status.js） */
+const recvStatus = require('../recv_status');
+
+/** 是否按「凭证层」登记（只落单据、不动账面），仅认显式 draft/pending_review */
+function isDraftRecv(payload) {
+  return !!(payload && (payload.draft === true || payload.pending_review === true));
+}
 
 /* ---------- 通用辅助 ---------- */
 
@@ -683,6 +697,131 @@ function applyIngUpsert(data, payload) {
   return 'ing 新建 ' + newId + ' ' + row.name + (row.pending ? '（待完善）' : '');
 }
 
+/* ---------- ing.batch（W3-02 / FP-ING-06） ---------- */
+
+/**
+ * ing.batch：批量设置「安全库存线 / 出成率」——整批一个动作（一条队列 = 一次审批）。
+ *
+ * 只改主数据字段（safe/safety/yld），**不碰 stock/avg**（存量校准走 stock.count，
+ * 否则会被 rebuildStock 冲回）。零命中显式报错（红线 #7），不做静默空跑。
+ */
+function applyIngBatch(data, payload) {
+  if (data.ings === undefined || data.ings === null) data.ings = [];
+  if (!Array.isArray(data.ings)) throw new Error('data.ings 不是数组');
+  const rawIds = Array.isArray(payload.ids) ? payload.ids
+    : (Array.isArray(payload.ing_ids) ? payload.ing_ids : []);
+  const ids = rawIds.map((x) => String(x).trim()).filter(Boolean);
+  if (!ids.length) throw new Error('ing.batch 需要 ids（至少一项）');
+  const hasSafe = payload.safe !== undefined && payload.safe !== null && String(payload.safe).trim() !== '';
+  const hasYld = payload.yld !== undefined && payload.yld !== null && String(payload.yld).trim() !== '';
+  if (!hasSafe && !hasYld) throw new Error('ing.batch 需要 safe 或 yld（至少一项）');
+  const safeV = hasSafe ? toFloat(payload.safe) : null;
+  if (hasSafe && safeV < 0) throw new Error('safe 不能为负');
+  const yldV = hasYld ? clampYld(toFloat(payload.yld)) : null;
+
+  const now = nowIso();
+  let hit = 0;
+  const missing = [];
+  for (const g of arr(data.ings)) {
+    if (!g || typeof g !== 'object' || ids.indexOf(String(g.id)) < 0) continue;
+    hit += 1;
+    if (hasSafe) { g.safe = safeV; g.safety = safeV; }
+    if (hasYld) g.yld = yldV;
+    g._u = now;
+  }
+  if (!hit) throw new Error('ing.batch 零命中：ids 未匹配任何原料（' + ids.join(',') + '）');
+  for (const id of ids) {
+    if (!arr(data.ings).some((g) => g && String(g.id) === id)) missing.push(id);
+  }
+  const parts = [];
+  if (hasSafe) parts.push('安全线 ' + pf(safeV));
+  if (hasYld) parts.push('出成率 ' + Math.round(yldV * 100) + '%');
+  return 'ing.batch 更新 ' + hit + ' 个原料（' + parts.join(' / ') + '）'
+    + (missing.length ? ' · 未匹配 ' + missing.length + ' 项' : '');
+}
+
+/* ---------- ing.delete（W3-03 / FP-ING-11） ---------- */
+
+/** BOM 行 → 原料名（对象行取 name/ing；字符串行去掉尾部用量与单位），不猜别名 */
+function bomLineName(line) {
+  if (line && typeof line === 'object' && !Array.isArray(line)) {
+    return String(line.name || line.ing || line.ing_name || '').trim();
+  }
+  const s = String(line == null ? '' : line).trim();
+  const m = s.match(/^(.+?)\s*[0-9]+(?:\.[0-9]+)?\s*[a-zA-Z\u4e00-\u9fff%]*$/);
+  return (m ? m[1] : s).trim();
+}
+
+/**
+ * 原料被引用情况（W3-03 引用保护）。
+ * 逐类计数，错误信息里写清「被什么引用」——红线 #7：不做静默删除，也不给模糊提示。
+ *
+ * 覆盖：库存流水 / 进货单 / 采购单 / 报价 / 出餐销售 / 配方（data.rec 绑定 + 菜谱主数据）。
+ * 引用匹配口径：原料 id 精确；报价与配方另按原料名精确匹配（历史「按名录入」行）。
+ */
+function ingRefsOf(data, g) {
+  const id = String(g.id);
+  const name = String(g.name || '').trim();
+  const refs = [];
+  const bump = (k, n) => { if (n > 0) refs.push(k + ' ' + n); };
+  const hasLine = (lines) => arr(lines).some((l) => l && l.ing != null && String(l.ing) === id);
+
+  bump('库存流水', arr(data.logs).filter((l) => l && l.ing != null && String(l.ing) === id).length);
+  bump('进货单', arr(data.recv).filter((r) => r && hasLine(r.lines)).length);
+  bump('采购单', arr(data.orders).filter((o) => o && hasLine(o.lines)).length);
+  bump('出餐销售', arr(data.sales).filter((s) => s && hasLine(s.lines)).length);
+  bump('报价', arr(data.quotes).filter((q) => q && (String(q.ing) === id
+    || (name && String(q.ing || '').trim() === name))).length);
+
+  /* 配方：data.rec[dishId] = BOM 行数组；菜谱主数据在 data.recipes / data.ext.recipes */
+  let recipeHits = 0;
+  const nameHit = (lines) => arr(lines).some((l) => {
+    if (l && typeof l === 'object' && !Array.isArray(l)) {
+      if (l.ing != null && String(l.ing) === id) return true;
+    }
+    const n = bomLineName(l);
+    return !!n && !!name && n === name;
+  });
+  if (data.rec && typeof data.rec === 'object' && !Array.isArray(data.rec)) {
+    for (const k of Object.keys(data.rec)) if (nameHit(data.rec[k])) recipeHits += 1;
+  }
+  const recipes = arr(data.recipes).concat(arr(data.ext && data.ext.recipes));
+  for (const r of recipes) {
+    if (!r || typeof r !== 'object') continue;
+    if (String(r.ing_sku || '') === id) { recipeHits += 1; continue; }
+    if (['main', 'aux', 'seasoning', 'face_main'].some((k) => nameHit(r[k]))) recipeHits += 1;
+  }
+  bump('配方', recipeHits);
+  return refs;
+}
+
+/**
+ * ing.delete：删除原料（错建/重复档案清理）。
+ *
+ * 红线（沿用 dish.js / applyVendorDelete 先例）：
+ *   · 有引用（流水/单据/报价/销售/配方）**禁删**——删掉会让台账、BOM 与比价表悬空，
+ *     正确做法是把原料改为「停用」（on:false），历史台账保留；
+ *   · 无引用才物理摘除 data.ings 一行（本域既定口径，同 order.delete / dish.delete）；
+ *   · 零命中显式报错，不静默空跑。
+ */
+function applyIngDelete(data, payload) {
+  if (data.ings === undefined || data.ings === null) data.ings = [];
+  if (!Array.isArray(data.ings)) throw new Error('data.ings 不是数组');
+  const key = String((payload && (payload.id || payload.ing_id || payload.name)) || '').trim();
+  if (!key) throw new Error('ing.delete 缺 id/name');
+  const idx = data.ings.findIndex((g) => g
+    && (String(g.id) === key || String(g.name || '').trim() === key));
+  if (idx < 0) throw new Error('找不到原料 ' + key);
+  const g = data.ings[idx];
+  const refs = ingRefsOf(data, g);
+  if (refs.length) {
+    throw new Error('原料「' + (g.name || g.id) + '」已被引用（' + refs.join(' / ')
+      + '），不能删除（请改为「停用」on:false，台账保留）');
+  }
+  data.ings.splice(idx, 1);
+  return 'ing 删除 ' + (g.id || '') + ' ' + (g.name || '');
+}
+
 /* ---------- quote.upsert ---------- */
 
 /**
@@ -716,35 +855,58 @@ function quoteIngKey(data, v) {
 /**
  * quote.upsert：供应商报价（按 ing+src 幂等覆盖）。
  */
-function applyQuoteUpsert(data, payload) {
-  if (data.quotes === undefined || data.quotes === null) data.quotes = [];
-  if (!Array.isArray(data.quotes)) throw new Error('data.quotes 不是数组');
-  const quotes = data.quotes;
+/* ---------- quote.upsert / quote.import（W2-04 / FP-PRICE-12，ADR-013 D2） ---------- */
+
+/** 取下一个报价 id（Q 前缀，纯数字递增，对齐旧版 id 形态） */
+function nextQuoteId(quotes) {
+  const nums = [];
+  for (const q of quotes) {
+    const m = String(q.id || '');
+    if (m[0] === 'Q' && /^\d+$/.test(m.slice(1))) nums.push(parseInt(m.slice(1), 10));
+  }
+  return 'Q' + (nums.length ? Math.max(...nums) + 1 : 200);
+}
+
+/**
+ * quote 单行写入（被 upsert / import 共用）：
+ *   append=false（默认，手工录入）：按 ing+src 幂等**覆盖**；
+ *   append=true（导入）：按 ing+src+price(+date) 去重**追加**，命中完全相同的行则跳过（不覆盖）。
+ * 返回 {action:'update'|'append'|'skip', msg}。
+ */
+function upsertQuote(quotes, payload, data, append) {
   const ing = quoteIngKey(data, payload.ing || payload.ing_id);
   const src = String(payload.src || payload.supplier || '').trim();
   if (!ing || !src) throw new Error('缺少 ing / src');
   if (payload.price == null) throw new Error('缺少 price');
   const price = toFloat(payload.price);
   const now = nowIso();
-  for (const q of quotes) {
-    /* 幂等键归一：历史按名录入的行（q.ing = 原料名）与本次按 id 提交视为同一报价，就地改写归属键 */
-    if (quoteIngKey(data, q.ing) === ing && String(q.src) === src) {
-      if (String(q.ing) !== ing) q.ing = ing;
-      q.price = price;
-      q.per = payload.per || q.per || 'buy';
-      q.date = payload.date || today();
-      if (payload.note != null) q.note = payload.note;
-      q._u = now;
-      bindDefaultSup(data, ing, src, payload);
-      return 'quote 更新 ' + ing + '@' + src + ' → ¥' + pf(price);
+  const per = payload.per || 'buy';
+  const date = payload.date || today();
+  const note = payload.note != null ? payload.note : '';
+
+  if (append) {
+    for (const q of quotes) {
+      if (quoteIngKey(data, q.ing) === ing && String(q.src) === src
+        && toFloat(q.price) === price && (q.date || today()) === date) {
+        return { action: 'skip', msg: 'quote 跳过重复 ' + ing + '@' + src + ' ¥' + pf(price) };
+      }
+    }
+  } else {
+    for (const q of quotes) {
+      /* 幂等键归一：历史按名录入的行（q.ing = 原料名）与本次按 id 提交视为同一报价，就地改写归属键 */
+      if (quoteIngKey(data, q.ing) === ing && String(q.src) === src) {
+        if (String(q.ing) !== ing) q.ing = ing;
+        q.price = price;
+        q.per = per;
+        q.date = date;
+        if (note) q.note = note;
+        q._u = now;
+        bindDefaultSup(data, ing, src, payload);
+        return { action: 'update', msg: 'quote 更新 ' + ing + '@' + src + ' → ¥' + pf(price) };
+      }
     }
   }
-  const nums = [];
-  for (const q of quotes) {
-    const m = String(q.id || '');
-    if (m[0] === 'Q' && /^\d+$/.test(m.slice(1))) nums.push(parseInt(m.slice(1), 10));
-  }
-  const qid = payload.id || ('Q' + (nums.length ? Math.max(...nums) + 1 : 200));
+  const qid = payload.id || nextQuoteId(quotes);
   quotes.push({
     id: qid,
     ing: ing,
@@ -752,14 +914,73 @@ function applyQuoteUpsert(data, payload) {
     src: src,
     supplier: src,
     price: price,
-    per: payload.per || 'buy',
+    per: per,
     unit: payload.unit || '',
-    date: payload.date || today(),
-    note: payload.note || '',
+    date: date,
+    note: note,
     _u: now
   });
   bindDefaultSup(data, ing, src, payload);
-  return 'quote 新建 ' + qid + ' ' + ing + '@' + src + ' ¥' + pf(price);
+  return { action: 'append', msg: 'quote 新建 ' + qid + ' ' + ing + '@' + src + ' ¥' + pf(price) };
+}
+
+/**
+ * quote.upsert：供应商报价（默认按 ing+src 幂等覆盖；payload.append=true 时按 ing+src+price 去重追加，ADR-013 D2）。
+ */
+function applyQuoteUpsert(data, payload) {
+  if (data.quotes === undefined || data.quotes === null) data.quotes = [];
+  if (!Array.isArray(data.quotes)) throw new Error('data.quotes 不是数组');
+  const r = upsertQuote(data.quotes, payload, data, !!payload.append);
+  return r.msg;
+}
+
+/**
+ * quote.import（W2-04 / FP-PRICE-12，ADR-013 D2）：批量导入比价结果（整批一个动作）。
+ * 红线（沿用旧 ADR-003）：只写 data.quotes；不写 logs / ings.stock / ings.avg / recv；
+ *   conv ≠ 1 的原料默认跳过，不在导入里自动推断跨单位价格（见 lib/quote_import.js）。
+ * 内部复用 lib/quote_import.js 的解析/去重口径（与预览端点一致），保证「预览即所见、提交即所得」。
+ */
+function applyQuoteImport(data, payload) {
+  const qimp = require('./../quote_import');
+  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+  const r = qimp.runQuoteImport(data, items);
+  return 'quote.import 追加 ' + r.appended + ' 条 · 跳过(重复/跨单位) ' + r.skipped
+    + ' 条 · 非法 ' + r.invalid + ' 条';
+}
+
+/* ---------- quote.delete（W2-02 / FP-PRICE-07） ---------- */
+
+/**
+ * quote.delete：删除**单条**外部报价（错录 / 供应商撤回报价）。
+ *
+ * 定位优先级：`id`（报价主键）→ `ing + src`（原料 + 供应商，即 quote.upsert 的幂等键）。
+ * 红线 #6：只摘 data.quotes 里这一行，**不动物料主数据、不动库存流水、不动进货单**；
+ * 红线 #7：命中 0 行必须显式报错，不静默成功（避免「以为删了其实没删」）。
+ * 留痕：动作本身走 /api/actions 队列（谁、何时、删了哪条），审批中心可见可驳回。
+ */
+function applyQuoteDelete(data, payload) {
+  const p = payload || {};
+  if (!Array.isArray(data.quotes)) throw new Error('data.quotes 不是数组');
+  const quotes = data.quotes;
+  const id = String(p.id || p.quote_id || '').trim();
+  const ingRaw = p.ing || p.ing_id;
+  const src = String(p.src || p.supplier || '').trim();
+  if (!id && (!ingRaw || !src)) throw new Error('quote.delete 需要 id，或 ing + src');
+
+  let idx = -1;
+  if (id) {
+    idx = quotes.findIndex((q) => String((q && q.id) == null ? '' : q.id) === id);
+  } else {
+    const ing = quoteIngKey(data, ingRaw);
+    idx = quotes.findIndex((q) => q && quoteIngKey(data, q.ing) === ing && String(q.src) === src);
+  }
+  if (idx < 0) throw new Error('quote.delete 未命中：' + (id ? 'id=' + id : String(ingRaw) + '@' + src));
+
+  const gone = quotes[idx];
+  quotes.splice(idx, 1);
+  return 'quote 删除 ' + String((gone && gone.id) || '?')
+    + ' ' + String((gone && gone.ing) || '') + '@' + String((gone && gone.src) || '')
+    + ' ¥' + pf(gone && gone.price);
 }
 
 /* ---------- loss.report ---------- */
@@ -845,6 +1066,9 @@ function applyRecvInbound(data, payload) {
   if (data.recv === undefined || data.recv === null) data.recv = [];
   if (!Array.isArray(data.recv)) throw new Error('data.recv 不是数组');
   const recv = data.recv;
+  /* 凭证层登记（ADR-004 §2.5）：draft:true → status='待审核'，单据立即可见/可打结算单，
+     但**不进库存、不进应付**；记账生效由 recv.post 审批后完成 */
+  const draft = isDraftRecv(payload);
   const rid = payload.id || payload.recv_id;
   const oid = payload.order_id || payload.po_id;
   const items = payload.items || [];
@@ -872,14 +1096,16 @@ function applyRecvInbound(data, payload) {
   }
 
   let msg = null;
+  let drafted = null; /* 本次登记出来的待审核单（末尾写审核基线） */
   if (rid) {
     let found = false;
     for (const r of recv) {
       if (String(r.id || r.no) === String(rid)) {
-        r.status = payload.status || '已入库';
-        r.note = (r.note || '') + ' 【云端确认入库】';
+        r.status = payload.status || (draft ? recvStatus.PENDING_REVIEW : recvStatus.EFFECTIVE);
+        r.note = (r.note || '') + (draft ? ' 【登记待审核】' : ' 【云端确认入库】');
+        drafted = r;
         found = true;
-        msg = 'recv ' + rid + ' → 已入库';
+        msg = 'recv ' + rid + ' → ' + (draft ? '待审核（未记账）' : '已入库');
         break;
       }
     }
@@ -908,9 +1134,9 @@ function applyRecvInbound(data, payload) {
       lines: lines,
       payable: src.payable || 0,
       payments: (src.payments || []).slice(),
-      note: '【云端入库·自采购 ' + (src.no || oid) + '】',
+      note: (draft ? '【待审核·自采购 ' : '【云端入库·自采购 ') + (src.no || oid) + '】',
       method: src.method || '现金/转账',
-      status: '已入库',
+      status: draft ? recvStatus.PENDING_REVIEW : recvStatus.EFFECTIVE,
       from_order: src.id || oid
     };
     /* 超集：整单优惠/抹零 —— 仅在有让利时才写字段（0 时不落库，与 Python 逐字段一致） */
@@ -920,6 +1146,7 @@ function applyRecvInbound(data, payload) {
       inbound.discount = srcDisc;
     }
     recv.push(inbound);
+    drafted = inbound;
     src.status = '已转进货';
     src.note = (src.note || '') + ' → ' + inbound.no;
     msg = 'orders ' + oid + ' → recv ' + inbound.no + ' 已入库';
@@ -974,9 +1201,9 @@ function applyRecvInbound(data, payload) {
       lines: lines,
       payable: amt.payable,
       payments: payments,
-      note: '【云端入库】' + (payload.note || ''),
+      note: (draft ? '【待审核·登记】' : '【云端入库】') + (payload.note || ''),
       method: method,
-      status: '已入库'
+      status: draft ? recvStatus.PENDING_REVIEW : recvStatus.EFFECTIVE
     };
     if (amt.discount > 0) {
       inbound.gross = amt.gross;
@@ -987,8 +1214,20 @@ function applyRecvInbound(data, payload) {
        故此处只登记单向关联，不改 data.orders：界面已明示，不做静默假装。 */
     if (payload.po) inbound.po = String(payload.po);
     recv.push(inbound);
-    msg = 'recv 追加入库 ' + inbound.no + '（' + lines.length + ' 行）'
+    drafted = inbound;
+    msg = (draft ? 'recv 登记待审核 ' : 'recv 追加入库 ') + inbound.no + '（' + lines.length + ' 行）'
       + (paid > 0 ? '，实付 ' + pf(paid) : '');
+  }
+
+  if (draft) {
+    /* 审核基线：审批人看到的就是这一版（金额/行数），recv.post 用它比对「确认后被改过」 */
+    if (drafted) {
+      drafted.review_snapshot = {
+        at: nowIso(), payable: num(drafted.payable, 0), lines: arr(drafted.lines).length,
+        by: payload.operator || null
+      };
+    }
+    return msg + '；未计入库存与应付（待审核，确认入库后生效）';
   }
 
   const rb = rebuildStock(data);
@@ -1056,6 +1295,11 @@ function applyRecvPay(data, payload) {
   if (!rid) throw new Error('recv.pay 缺 recv_id');
   const doc = data.recv.find((p) => p && (String(p.id) === rid || String(p.no) === rid));
   if (!doc) throw new Error('recv.pay 未找到进货单: ' + rid);
+
+  /* 凭证层未记账的单不计入应付，付款会挂在「未生效」的单上 → 显式拒绝，先确认入库 */
+  if (recvStatus.isPendingReview(doc)) {
+    throw new Error('该进货单待审核（未计入应付），不能补付：请先确认入库再登记付款');
+  }
 
   const amount = Math.round((num(payload.amount, 0) + 1e-12) * 100) / 100;
   if (!(amount > 0)) throw new Error('recv.pay 金额必须大于 0：' + payload.amount);
@@ -1195,6 +1439,10 @@ function applyRecvUpdate(data, payload) {
   }
   /* 未传 paid：保留原 payments（初始 + 补付）不变 */
 
+  /* 凭证层（待审核/草稿）单未计入库存：只改单据，不重算台账 */
+  if (!recvStatus.isEffective(doc)) {
+    return 'recv.update ' + (doc.no || rid) + ' 已更新（待审核·未记账，库存与应付不变）';
+  }
   const rb = rebuildStock(data);
   return 'recv.update ' + (doc.no || rid) + ' 已更新；' + rb;
 }
@@ -1242,6 +1490,71 @@ function applyRecvVoid(data, payload, ctx) {
     + '库存按台账自动回退，原单保留可查）；' + rb;
 }
 
+/* ---------- recv.post（凭证 → 记账生效） ---------- */
+
+/** 差异二次确认词：确认后单据被人改过时必须输入，防「批了 A、付了 B」 */
+const POST_CONFIRM_WORD = '确认入库';
+
+/**
+ * recv.post：把「待审核」进货单推进为「已入库」，此时才进库存/均价/应付（ADR-004 §2.5）。
+ *
+ * 与 recv.inbound 的分工：
+ *   · recv.inbound(draft:true) = 凭证层登记：单据立即可见、可打结算单，账面零变化；
+ *   · recv.post                 = 账务层生效：唯一把单据计入台账的那一步，必须经审批确认。
+ *
+ * 版本比对（D-C）：审批人看到的应付与执行时不一致（确认后被编辑），必须输入确认词
+ *   才能按新金额记账，并把 before→after 写进单据（posted_diff）与动作回执，不静默放行。
+ *
+ * 幂等：已是「已入库」直接跳过；已作废显式拒绝；状态不是「待审核」显式拒绝（不静默降级）。
+ */
+function applyRecvPost(data, payload, ctx) {
+  const c = ctx || {};
+  if (!Array.isArray(data.recv)) throw new Error('data.recv 不是数组');
+  const rid = payload.recv_id != null ? String(payload.recv_id)
+    : (payload.id != null ? String(payload.id) : '');
+  if (!rid) throw new Error('recv.post 缺 recv_id');
+  const doc = data.recv.find((p) => p && (String(p.id) === rid || String(p.no) === rid));
+  if (!doc) throw new Error('recv.post 未找到进货单: ' + rid);
+  if (recvStatus.isVoided(doc)) throw new Error('已作废进货单不可记账: ' + rid);
+  if (recvStatus.isEffective(doc)) return 'recv.post ' + (doc.no || rid) + ' 已入库（跳过）';
+  if (!recvStatus.isPendingReview(doc)) {
+    throw new Error('仅「待审核」进货单可记账生效（当前状态：'
+      + (recvStatus.statusOf(doc) || '空') + '）');
+  }
+
+  const curPayable = Math.round(num(doc.payable, 0) * 100) / 100;
+  const base = (doc.review_snapshot && typeof doc.review_snapshot === 'object')
+    ? doc.review_snapshot : null;
+  /* 优先用前端在确认弹窗里带上来的应付（= 审批人看到的那一版），缺失才回落到登记基线 */
+  const expectRaw = payload.expect_payable != null && payload.expect_payable !== ''
+    ? payload.expect_payable
+    : (base ? base.payable : null);
+  let diff = null;
+  if (expectRaw !== null && expectRaw !== undefined && expectRaw !== '') {
+    const expect = Math.round(num(expectRaw, 0) * 100) / 100;
+    if (Math.abs(expect - curPayable) >= 0.01) {
+      const word = String(payload.confirm_word || '').trim();
+      if (word !== POST_CONFIRM_WORD) {
+        throw new Error('单据在确认后被修改（应付 ' + expect + ' → ' + curPayable
+          + '）。确认按新金额记账，请先在「确认词」输入「' + POST_CONFIRM_WORD + '」再提交');
+      }
+      diff = { expect: expect, actual: curPayable };
+    }
+  }
+
+  doc.status = recvStatus.EFFECTIVE;
+  doc.posted_at = payload.ts || c.now || nowIso();
+  doc.posted_by = payload.operator || 'QUEUE';
+  if (c.rev !== undefined && c.rev !== null) doc.posted_rev = c.rev;
+  if (c.traceId) doc.posted_trace = c.traceId;
+  if (diff) doc.posted_diff = Object.assign({ at: doc.posted_at }, diff);
+  doc.note = (doc.note || '') + ' 【记账生效·' + doc.posted_by + '】';
+
+  const rb = rebuildStock(data);
+  return 'recv.post ' + (doc.no || rid) + ' → 已入库（应付 ' + curPayable
+    + (diff ? '，确认时 ' + diff.expect + '，差异已留痕' : '') + '）；' + rb;
+}
+
 /* ---------- recv.import（批量导入） ---------- */
 
 /**
@@ -1275,6 +1588,8 @@ function applyRecvImport(data, payload) {
   const docs = Array.isArray(payload && payload.docs) ? payload.docs : [];
   if (!docs.length) throw new Error('recv.import 缺 docs（空批次已拒绝，未改动账面）');
   const markPaid = !!(payload && payload.markPaid);
+  /* 凭证层登记（ADR-004 §2.5）：整批只写单据、不动账面；记账生效走 recv.post */
+  const draft = isDraftRecv(payload);
   let newDoc = 0;
   let newLine = 0;
   let newIng = 0;
@@ -1342,12 +1657,20 @@ function applyRecvImport(data, payload) {
       payments: (markPaid && payable > 0) ? [{ amount: payable, date: date, method: '现金/转账' }] : [],
       note: String(doc.note || '').trim() || '【批量导入】',
       method: '现金/转账',
-      status: '已入库'
+      status: draft ? recvStatus.PENDING_REVIEW : recvStatus.EFFECTIVE
     };
     /* 超集：整单优惠/抹零 —— 仅在有让利时才写字段（0 时不落库，与 Python 逐字段一致） */
     if (amt.discount > 0) {
       inbound.gross = amt.gross;
       inbound.discount = amt.discount;
+    }
+    if (draft) {
+      /* 审核基线：审批人看到的就是这一版（金额/行数），recv.post 用它比对「确认后被改过」 */
+      inbound.review_snapshot = {
+        at: nowIso(), payable: num(inbound.payable, 0), lines: lines.length,
+        by: payload.operator || null
+      };
+      inbound.note = '【待审核·批量导入】' + inbound.note;
     }
     recv.push(inbound);
     total = Math.round((total + payable) * 100) / 100;
@@ -1359,18 +1682,31 @@ function applyRecvImport(data, payload) {
     data.suppliers = names;
   }
 
+  const head = (draft ? 'recv.import 登记待审核 ' : 'recv.import 导入 ')
+    + newDoc + ' 张进货单（' + newLine + ' 行，合计 ' + pf(total) + '）'
+    + (newIng ? '，自动新建原料 ' + newIng + ' 种（待完善草稿，请到「原料档案」补全）' : '')
+    + (markPaid ? '，已按应付全额登记付款' : '，默认挂账（可后续补付）');
+
+  /* 凭证层：整批不进库存/应付，也就无需重算台账 */
+  if (draft) return head + '；未计入库存与应付（待审核，确认入库后生效）';
+
   /* 批末统一重算一次台账（O(单据数 + 库存行数)，而非 O(N × 库存行数)） */
   const rb = rebuildStock(data);
-  return 'recv.import 导入 ' + newDoc + ' 张进货单（' + newLine + ' 行，应付合计 ' + pf(total) + '）'
-    + (newIng ? '，自动新建原料 ' + newIng + ' 种（待完善草稿，请到「原料档案」补全）' : '')
-    + (markPaid ? '，已按应付全额登记付款' : '，默认挂账（可后续补付）') + '；' + rb;
+  return head + '；' + rb;
 }
 
 /* ---------- stock.count ---------- */
 
 /**
- * stock.count：记差异 + 写盘点调整流水并 rebuild_stock（真改账面）。
+ * stock.count：记差异 + 写「手工调整」流水并 rebuild_stock（真改账面）。
  * 与 Python 版不同：写库走 ctx.store，无则跳过。
+ *
+ * ADR-013 D3（W3-01 手工校准）——口径变化：
+ *   · `payload.avg` 显式传入 = 手工校准：**均价可单独改**（不传 real_qty 则数量不动）；
+ *   · 手工校准**强制填原因**（写进流水 note，供损耗/审计追溯）；
+ *   · 流水 `inCost` 不再写死 0，改为「传入均价 ?? 该原料现有均价」——
+ *     修掉「盘点一次 → 均价清零 → 库存总值变 0 元」的既有缺陷（rebuildStock 用它回写 avg）；
+ *   · 存量校准只走本动作；`ing.upsert` 继续负责主数据维护，不能用来改 stock/avg（会被重算冲回）。
  */
 function applyStockCount(data, payload, ctx) {
   const name = payload.name || payload.ing_name || '原料';
@@ -1392,52 +1728,74 @@ function applyStockCount(data, payload, ctx) {
     realF = null;
   }
 
-  // 旁路差异表（审计）
-  insertStockCount(ctx, payload);
+  /* 均价：显式传入（含 0）即按手工校准处理（W3-01） */
+  let avgF = null;
+  if (payload.avg !== undefined && payload.avg !== null && String(payload.avg).trim() !== '') {
+    try {
+      avgF = toFloat(payload.avg);
+    } catch (e) {
+      throw new Error('avg 不是有效数值');
+    }
+    if (avgF < 0) throw new Error('avg 不能为负');
+  }
+  const calibrate = avgF !== null || payload.calibrate === true;
+  const noteIn = String(payload.note || '').trim();
+  /* 红线 #7 不静默降级：校准没有原因就无法追溯，直接拒绝 */
+  if (calibrate && !noteIn) {
+    throw new Error('手工校准必须填写原因（写入「手工调整」流水，供损耗/审计追溯）');
+  }
 
   if (gid === null) {
+    if (calibrate) throw new Error('手工校准失败：未匹配到原料 ' + name);
+    // 旁路差异表（审计）
+    insertStockCount(ctx, payload);
     return 'stock.count ' + name + '（未匹配原料，仅记差异表）';
   }
-  if (realF === null) {
-    const note = String(payload.note || '').slice(0, 120);
-    return 'stock.count ' + name + '（仅审计登记，未改账面）· ' + (note || '缺实盘数');
+  if (realF === null && avgF === null) {
+    insertStockCount(ctx, payload);
+    return 'stock.count ' + name + '（仅审计登记，未改账面）· ' + (noteIn.slice(0, 120) || '缺实盘数');
   }
 
-  // 账面：优先用传入 book，否则读当前 stock
-  if (bookF === null) {
-    for (const g of arr(data.ings)) {
-      if (String(g.id) === String(gid)) {
-        bookF = toFloat(g.qty != null ? g.qty : (g.stock || 0));
-        break;
-      }
-    }
-    if (bookF === null) bookF = 0.0;
+  let ing = null;
+  for (const g of arr(data.ings)) {
+    if (String(g.id) === String(gid)) { ing = g; break; }
   }
-  const delta = r3e(realF - bookF);
+  const stockNow = ing ? toFloat(ing.qty != null ? ing.qty : (ing.stock || 0)) : 0.0;
+  const avgNow = ing ? toFloat(ing.avg || 0) : 0.0;
+
+  // 账面：优先用传入 book，否则读当前 stock
+  if (bookF === null) bookF = stockNow;
+  /* 只改均价（不传实盘数）→ 数量按当前库存写绝对值，等价「数量不动、只修均价」 */
+  const targetQty = realF === null ? stockNow : realF;
+  const inCost = avgF !== null ? avgF : avgNow;
+
+  /* 差异表只在真的盘点数量时登记（纯均价校准不是数量差异，避免损耗页出现伪差异） */
+  if (realF !== null) insertStockCount(ctx, payload);
+
+  const delta = r3e(targetQty - bookF);
   if (data.logs === undefined || data.logs === null) data.logs = [];
   if (!Array.isArray(data.logs)) throw new Error('data.logs 不是数组');
   const logs = data.logs;
-  // 用「手工调整」按实盘绝对值落账：rebuild 从零重放时，盘点差异 Δ 会在无期初/入库基线时变成错误账面
+  // 用「手工调整」按绝对值落账：rebuild 从零重放时，盘点差异 Δ 会在无期初/入库基线时变成错误账面
   logs.push({
     type: '手工调整',
     ing: gid,
     date: payload.date || today(),
-    qty: realF,
-    ref: '盘点·' + name,
-    note: payload.note || ('账面 ' + bookF + ' → 实盘 ' + realF + '（Δ' + delta + '）'),
+    qty: targetQty,
+    ref: (realF === null ? '校准·' : '盘点·') + name,
+    note: noteIn || ('账面 ' + bookF + ' → 实盘 ' + targetQty + '（Δ' + delta + '）'),
     source: 'queue',
-    inCost: 0
+    inCost: inCost
   });
   // 同步改 ings 即时字段，避免等 rebuild 前快照仍显示旧数
-  for (const g of arr(data.ings)) {
-    if (String(g.id) === String(gid)) {
-      g.qty = realF;
-      g.stock = realF;
-      break;
-    }
+  if (ing) {
+    ing.qty = targetQty;
+    ing.stock = targetQty;
   }
   const rb = rebuildStock(data);
-  return 'stock.count ' + name + ' 账面' + pf(bookF) + '→实盘' + pf(realF) + ' Δ' + pf(delta) + '；' + rb;
+  let msg = 'stock.count ' + name + ' 账面' + pf(bookF) + '→实盘' + pf(targetQty) + ' Δ' + pf(delta);
+  if (avgF !== null) msg += ' · 均价' + pf(avgNow) + '→' + pf(avgF);
+  return msg + '；' + rb;
 }
 
 /**
@@ -2145,7 +2503,12 @@ module.exports = {
   applyConfig,
   applyRest,
   applyIngUpsert,
+  applyIngBatch,
+  applyIngDelete,
   applyQuoteUpsert,
+  applyQuoteImport,
+  quoteIngKey,
+  applyQuoteDelete,
   applyLossReport,
   approveLossReport,
   rejectLossReport,
@@ -2154,6 +2517,7 @@ module.exports = {
   applyRecvPay,
   applyRecvUpdate,
   applyRecvVoid,
+  applyRecvPost,
   applyRecvImport,
   applyRestockToOrders,
   applyRestockConfig,

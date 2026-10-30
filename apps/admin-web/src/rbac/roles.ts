@@ -16,6 +16,7 @@ const RULES: Record<Role, (path: string) => boolean> = {
     path.startsWith('/finance') ||
     path === '/platform/actions' ||
     path === '/platform/org' ||
+    path === '/platform/optimization' ||
     path === '/dashboard' ||
     path === '/ops/analysis' ||
     path === '/ops/weekly' ||
@@ -25,12 +26,14 @@ const RULES: Record<Role, (path: string) => boolean> = {
     path.startsWith('/kitchen') ||
     path.startsWith('/safety') ||
     path === '/inventory/loss' ||
+    path === '/platform/optimization' ||
     path === '/dashboard' ||
     path === '/search',
   收银: (path) =>
     path.startsWith('/dinein') ||
     path.startsWith('/member') ||
     path === '/platform/actions' ||
+    path === '/platform/optimization' ||
     path === '/dashboard' ||
     path === '/ops/analysis' ||
     path === '/ops/weekly' ||

@@ -23,6 +23,8 @@ const { loadSnapshot } = require('./snapshot');
 const { buildBoard } = require('../lib/inspection_board');
 /* Phase 2：供应商类目存受控词条 ID，看板归集/展示统一还原标准名 */
 const supTerms = require('../lib/supplier_terms');
+/* 进货单生效口径唯一出口（「待审核」凭证不进今日采购统计） */
+const recvStatus = require('../lib/recv_status');
 
 const NO_SNAP_HINT = 'no_snapshot';
 const NO_SNAP_MSG = '店内快照未接通 · 本页可空开浏览，推送快照后刷新看真数';
@@ -1673,8 +1675,8 @@ async function handle(req, res, ctx, pathname) {
     for (const po of arr(data.recv)) {
       const d = String((po && (po.date || po.ts)) || '');
       if (d.indexOf(day) !== 0) continue;
-      const st = String((po && po.status) || '');
-      if (st && /草稿|待/.test(st) && !/已入库/.test(st)) continue;
+      // 只统计已记账单：草稿/待收/待审核一律不进（口径见 lib/recv_status.js）
+      if (!recvStatus.isEffective(po)) continue;
       let sum = 0;
       for (const l of arr(po.lines)) {
         const qty = num(l && l.qty);

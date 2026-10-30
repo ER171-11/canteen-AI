@@ -168,6 +168,48 @@ export async function submitAndConfirmAction(
   }
 }
 
+/**
+ * 提交 + 确认 + 等终态（桌面端 `CANTEEN_LOCAL_APPLY=1` 时确认即落库）。
+ *
+ * 与 submitAndConfirmAction 的差别：把**执行器的驳回原因**带回来。
+ * 只有「需要看到服务端拒绝理由」的入口才用它（如 ing.delete 的引用保护——
+ * 提示「已被流水/配方引用，请改为停用」必须让用户看见，不能只在审批中心里躺着）。
+ */
+export async function submitAndConfirmActionSettled(
+  body: PostActionBody,
+  opts: { tries?: number; intervalMs?: number } = {},
+): Promise<PostActionResult & { confirmed?: boolean; settled?: boolean }> {
+  const enq = await postAction(body)
+  let applied: { ok?: boolean; status?: string; error?: string } | null = null
+  try {
+    const c = await confirmAction(enq.id, { operator: body.operator || 'admin', rev: enq.rev })
+    applied = c.applied ?? null
+  } catch {
+    return { ...enq, confirmed: false }
+  }
+  if (applied && applied.ok === true) return { ...enq, status: applied.status || '已执行', confirmed: true, settled: true }
+  if (applied && applied.ok === false) {
+    return { ...enq, status: applied.status || '已驳回', confirmed: true, settled: true, error: applied.error }
+  }
+  /* 店内消费者模式下确认只到「待执行」，轮询拿终态（约 3 秒内），拿不到按「已入队」呈现 */
+  const tries = opts.tries ?? 12
+  const intervalMs = opts.intervalMs ?? 250
+  for (let i = 0; i < tries; i += 1) {
+    try {
+      const s = await fetchActionStatus(enq.id)
+      const st = String(s.status ?? '')
+      if (st === '已执行') return { ...enq, status: st, confirmed: true, settled: true }
+      if (st === '已驳回' || st === '已过期') {
+        return { ...enq, status: st, confirmed: true, settled: true, error: s.error || undefined }
+      }
+    } catch {
+      /* 网络抖动继续等 */
+    }
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return { ...enq, status: '待执行', confirmed: true, settled: false }
+}
+
 /*
  * GET /api/health。当前 BFF 的健康检查实际挂在 /health（未带 /api 前缀），
  * 故失败时回退直连 /health；两者都不通则抛错由调用方按「BFF 离线」处理。
@@ -310,6 +352,58 @@ export async function submitIngAttrSet(payload: {
   tags?: string[]
 }): Promise<PostActionResult & { confirmed?: boolean }> {
   return submitAndConfirmAction({ type: 'ing.attr_set', payload, operator: 'admin' })
+}
+
+/**
+ * stock.count — W3-01 / FP-ING-05 手工校准（ADR-013 D3）。
+ *
+ * 口径：只走这一个动作改**存量**（库存/均价），写「手工调整」流水；
+ * 不用 ing.upsert 改 stock/avg（会被 rebuildStock 冲回）。
+ *   · 传 real_qty = 盘点口径（改数量）；
+ *   · 传 avg      = 校准均价（可单独改，数量不动）；
+ *   · 两者都传  = 一起校准；
+ *   · note 必填（写入流水，供损耗/审计追溯）。
+ */
+export async function submitStockCalibrate(payload: {
+  ing_id: string
+  name?: string
+  book_qty?: number
+  real_qty?: number
+  avg?: number
+  note: string
+}): Promise<PostActionResult & { confirmed?: boolean; settled?: boolean }> {
+  return submitAndConfirmActionSettled({ type: 'stock.count', payload, operator: 'admin' })
+}
+
+/**
+ * ing.batch — W3-02 / FP-ING-06 批量设置安全库存线 / 出成率。
+ * 整批一个动作（勾 10 个原料只产生 1 条队列），只改主数据，不碰 stock/avg。
+ */
+export async function submitIngBatch(payload: {
+  ids: string[]
+  safe?: number
+  yld?: number
+}): Promise<PostActionResult & { confirmed?: boolean; settled?: boolean }> {
+  return submitAndConfirmActionSettled({ type: 'ing.batch', payload, operator: 'admin' })
+}
+
+/**
+ * ing.delete — W3-03 / FP-ING-11 删除原料（引用保护）。
+ * 有流水/单据/报价/销售/配方引用会被执行器驳回，错误信息里会提示改「停用」。
+ */
+export async function submitIngDelete(payload: {
+  id?: string
+  name?: string
+}): Promise<PostActionResult & { confirmed?: boolean; settled?: boolean }> {
+  return submitAndConfirmActionSettled({ type: 'ing.delete', payload, operator: 'admin' })
+}
+
+/** ing.upsert — 停用/启用原料（删除被引用拒绝后的正解，红线 #6 不物理删） */
+export async function submitIngDisable(payload: {
+  id: string
+  on: boolean
+}): Promise<PostActionResult & { confirmed?: boolean }> {
+  return submitAndConfirmAction({ type: 'ing.upsert', payload, operator: 'admin' })
 }
 
 /**
@@ -538,7 +632,13 @@ export async function postAction(body: PostActionBody): Promise<PostActionResult
 export async function confirmAction(
   id: string,
   body: { operator?: string; rev?: string | number },
-): Promise<{ ok: boolean; id: string; status: string }> {
+): Promise<{
+  ok: boolean
+  id: string
+  status: string
+  /** CANTEEN_LOCAL_APPLY=1 时确认即执行，此处带回执行器结果（含驳回原因） */
+  applied?: { http?: number; ok?: boolean; status?: string; error?: string } | null
+}> {
   const { data } = await client.post(`/actions/${encodeURIComponent(id)}/confirm`, body)
   return data
 }
@@ -1316,6 +1416,19 @@ export async function deleteSupplyVendor(body: {
   return data
 }
 
+/**
+ * W2-02 / FP-PRICE-07 POST /api/supply/quote/delete — 删除单条报价 → quote.delete 入队。
+ * 定位：优先 `id`（报价主键），否则 `ing` + `src`（原料 + 供应商）。只摘 data.quotes 一行。
+ */
+export async function deleteSupplyQuote(body: {
+  id?: string
+  ing?: string
+  src?: string
+}): Promise<SupplyEnqueueResp> {
+  const { data } = await client.post<SupplyEnqueueResp>('/supply/quote/delete', body)
+  return data
+}
+
 /** POST /api/supply/quote — 供应商报价 → quote.upsert 入队（ing = 原料 id；name 供比价两表显示） */
 export async function logSupplyQuote(body: {
   ing: string
@@ -1424,6 +1537,18 @@ export async function fetchExportBackupBlob(): Promise<Blob> {
 /** GET /api/export/{ings|dishes|sales|samples}.csv — 原料库存 / 菜品成本毛利 / 销售应收实收 / 留样台账 CSV（只读） */
 export async function fetchExportCsvBlob(kind: 'ings' | 'dishes' | 'sales' | 'samples'): Promise<Blob> {
   const { data } = await client.get(`/export/${kind}.csv`, {
+    responseType: 'blob',
+    timeout: 60000,
+  })
+  return data as Blob
+}
+
+/**
+ * W2-03 / FP-PRICE-11 GET /api/export/quote-task.json — 待比价任务（只读，panda-quote-task v1）。
+ * 产物直接喂外部 `比价脚本/fetch_quotes.py`；本端点零写库、不入队。
+ */
+export async function fetchExportQuoteTaskBlob(): Promise<Blob> {
+  const { data } = await client.get('/export/quote-task.json', {
     responseType: 'blob',
     timeout: 60000,
   })

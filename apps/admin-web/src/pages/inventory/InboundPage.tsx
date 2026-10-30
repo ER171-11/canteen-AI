@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { rk } from '../../utils/rowKey'
 import { allValueOf, fromAll, withAll } from '../../utils/filterAll'
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -30,6 +31,7 @@ import {
   fetchRecvAccept,
   fetchSnapshot,
   postAction,
+  submitAndConfirmAction,
 } from '../../api'
 import type {
   AcceptStandard,
@@ -69,6 +71,26 @@ function docKey(d: InventoryDoc): string {
 function isVoided(d: InventoryDoc): boolean {
   return /作废|void/i.test(String(d.status ?? ''))
 }
+
+/**
+ * 凭证层「待审核」：已登记、未记账（ADR-004 §2.5）。
+ * 单据可看、可打结算单；库存与应付要等「确认入库」（recv.post）之后才变化。
+ */
+function isPendingReview(d: InventoryDoc): boolean {
+  return String(d.status ?? '').indexOf('待审核') >= 0
+}
+
+/** 是否已记账生效（口径与后端 bff/lib/recv_status.js 同源：待审核/草稿/待收/作废都不算） */
+function isEffective(d: InventoryDoc): boolean {
+  const st = String(d.status ?? '').trim()
+  if (!st) return true
+  if (isVoided(d) || isPendingReview(d)) return false
+  if (/草稿|draft|待|pending|取消|cancel/i.test(st)) return false
+  return /已入库|done|入库/i.test(st)
+}
+
+/** 差异确认词：本单在老板看到之后金额被改过，必须手输才能按新金额记账 */
+const POST_CONFIRM_WORD = '确认入库'
 
 /** pass/warn/fail 及中文 → Tag 色 */
 function verdictMeta(v?: string): { color: string; text: string } | null {
@@ -131,6 +153,10 @@ export default function InboundPage() {
   const [editOpen, setEditOpen] = useState(false)
   /* FP-RECV-02 批量导入：预览（只读）→ 提交只投一个 recv.import 动作 */
   const [importOpen, setImportOpen] = useState(false)
+  /* 两段式第二段：待审核单「确认入库」（recv.post）—— 库存与应付到这一步才变化 */
+  const [postDoc, setPostDoc] = useState<InventoryDoc | null>(null)
+  const [postWord, setPostWord] = useState('')
+  const [postBusy, setPostBusy] = useState(false)
 
   const load = useCallback((d: Dayjs) => {
     setLoading(true)
@@ -227,15 +253,27 @@ export default function InboundPage() {
    */
   const kpi = useMemo(() => {
     const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
-    const pay = r2(docs.reduce((a, d) => a + (Number(d.payable) || 0), 0))
-    const got = r2(docs.reduce((a, d) => a + docPaid(d), 0))
+    /* 只统计已记账单（口径同后端 recv_status.isEffective）：
+     * 待审核单已登记但未生效、作废单留痕但永不生效 —— 都不进应付/欠供应商，
+     * 否则老板会按虚数付款。待审核另给张数与金额，只作提示、不并入（D-B 决议）。 */
+    const eff = docs.filter(isEffective)
+    const pending = docs.filter(isPendingReview)
+    const pay = r2(eff.reduce((a, d) => a + (Number(d.payable) || 0), 0))
+    const got = r2(eff.reduce((a, d) => a + docPaid(d), 0))
     const cutoff = dayjs().subtract(29, 'day').format('YYYY-MM-DD')
     const mPay = r2(
-      docs
+      eff
         .filter((d) => String(d.date ?? '') >= cutoff)
         .reduce((a, d) => a + (Number(d.payable) || 0), 0),
     )
-    return { monthPayable: mPay, totalPayable: pay, totalPaid: got, debt: r2(pay - got) }
+    return {
+      monthPayable: mPay,
+      totalPayable: pay,
+      totalPaid: got,
+      debt: r2(pay - got),
+      pendingCount: pending.length,
+      pendingPayable: r2(pending.reduce((a, d) => a + (Number(d.payable) || 0), 0)),
+    }
   }, [docs])
 
   const drawerAccepts = useMemo(() => {
@@ -278,6 +316,55 @@ export default function InboundPage() {
     }
   }
 
+  /* 登记基线（老板看到的那一版应付）与当前应付不一致 → 说明单子在审核期间被改过 */
+  const needConfirmWord = useMemo(() => {
+    if (!postDoc) return false
+    const snap = postDoc.review_snapshot as { payable?: number } | undefined
+    const base = Number(snap?.payable)
+    if (!Number.isFinite(base)) return false
+    return Math.abs(base - Number(postDoc.payable ?? 0)) >= 0.01
+  }, [postDoc])
+
+  /**
+   * 确认入库（recv.post）：把待审核单推进为「已入库」，这一刻库存/均价/应付才变化。
+   * 若单据在老板看到之后被改过（应付与审核基线不一致），要求手输确认词 —— 防「批了 A、付了 B」。
+   */
+  const doPost = async () => {
+    if (!postDoc) return
+    const word = postWord.trim()
+    if (needConfirmWord && word !== POST_CONFIRM_WORD) {
+      message.warning(`金额已变，请输入确认词「${POST_CONFIRM_WORD}」`)
+      return
+    }
+    setPostBusy(true)
+    try {
+      const payload: Record<string, unknown> = {
+        recv_id: docKey(postDoc),
+        expect_payable: Number(postDoc.payable ?? 0),
+        operator: role ?? account ?? 'admin',
+      }
+      if (word) payload.confirm_word = word
+      const r = await submitAndConfirmAction({
+        type: 'recv.post',
+        operator: role ?? account ?? 'admin',
+        payload,
+      })
+      if (r.confirmed) {
+        message.success('已确认入库：库存与应付已更新')
+      } else {
+        message.warning('已提交，但确认未通过 → 请到审批中心查看该动作的驳回原因')
+      }
+      setPostDoc(null)
+      setPostWord('')
+      load(acceptDate)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      message.error(err.response?.data?.error || '确认入库失败')
+    } finally {
+      setPostBusy(false)
+    }
+  }
+
   const openAcceptModal = (doc?: InventoryDoc) => {
     form.resetFields()
     const firstLine = doc?.lines?.[0]
@@ -297,6 +384,21 @@ export default function InboundPage() {
   const columns: ColumnsType<InventoryDoc> = [
     { title: '单号', dataIndex: 'no', width: 150, render: (v) => v ?? '-' },
     { title: '日期', dataIndex: 'date', width: 110 },
+    {
+      title: '状态',
+      key: 'status',
+      width: 96,
+      render: (_, r) =>
+        isVoided(r) ? (
+          <Tag color="default">已作废</Tag>
+        ) : isPendingReview(r) ? (
+          <Tooltip title="已登记、未计入库存与应付；老板确认入库后才生效">
+            <Tag color={COLORS.yellow}>待审核</Tag>
+          </Tooltip>
+        ) : (
+          <Tag color={COLORS.green}>已入库</Tag>
+        ),
+    },
     { title: '供应商', dataIndex: 'supplier', width: 140, ellipsis: true },
     {
       title: '明细',
@@ -358,6 +460,14 @@ export default function InboundPage() {
       width: 90,
       align: 'right',
       render: (_, r) => {
+        /* 待审核单未计入应付：不显示「欠款」，否则会与顶部「累计应付」对不上 */
+        if (isPendingReview(r)) {
+          return (
+            <Tooltip title="未审核，未计入应付">
+              <span style={{ color: COLORS.gray }}>—</span>
+            </Tooltip>
+          )
+        }
         const d = docDebt(r)
         return d > 0.01 ? <span style={{ color: COLORS.red }}>¥{d}</span> : '—'
       },
@@ -369,6 +479,8 @@ export default function InboundPage() {
       render: (_, r) =>
         isVoided(r) ? (
           <Tag color="default">已作废</Tag>
+        ) : isPendingReview(r) ? (
+          <Tag color={COLORS.yellow}>待入库</Tag>
         ) : docDebt(r) > 0.01 ? (
           <Tag color={COLORS.yellow}>有欠款</Tag>
         ) : (
@@ -389,8 +501,18 @@ export default function InboundPage() {
           <Button type="link" size="small" onClick={() => setSettleDoc(r)}>
             结算单
           </Button>
-          {/* FP-RECV-07 补付：仅欠款单显示，走 recv.pay 审批队列 */}
-          {canWrite && !isMock && docDebt(r) > 0.01 && (
+          {/* 两段式第二段：待审核单「确认入库」—— 库存与应付到这一步才变化 */}
+          {canWrite && !isMock && isPendingReview(r) && (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => { setPostDoc(r); setPostWord('') }}
+            >
+              确认入库
+            </Button>
+          )}
+          {/* FP-RECV-07 补付：仅已记账且有欠款的单显示（待审核单未计入应付，不能先付） */}
+          {canWrite && !isMock && isEffective(r) && docDebt(r) > 0.01 && (
             <Button type="link" size="small" onClick={() => setPayDoc(r)}>
               补付
             </Button>
@@ -628,8 +750,19 @@ export default function InboundPage() {
           </Space>
         }
       >
+        {kpi.pendingCount > 0 && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={
+              `待审核 ${kpi.pendingCount} 张 · ¥${kpi.pendingPayable}：单据已登记、可打印结算单，`
+              + '但未计入库存与应付；点行内「确认入库」后才生效'
+            }
+          />
+        )}
         {filtered.length === 0 && !loading ? (
-          <Empty description="暂无进货单：货到了点右上角「新建进货单」录入，提交后到审批中心确认" />
+          <Empty description="暂无进货单：货到了点右上角「新建进货单」登记（登记即可打结算单，确认入库后才扣账）" />
         ) : (
           <Table<InventoryDoc>
             rowKey={rk}
@@ -637,8 +770,10 @@ export default function InboundPage() {
             dataSource={filtered}
             loading={loading}
             pagination={{ pageSize: 15 }}
-            scroll={{ x: 1100 }}
-            rowClassName={(r) => (docDebt(r) > 0.01 ? 'ant-table-row-warning' : '')}
+            scroll={{ x: 1200 }}
+            rowClassName={(r) =>
+              isEffective(r) && docDebt(r) > 0.01 ? 'ant-table-row-warning' : ''
+            }
             /* FP-RECV-11 明细行内展开：逐项 名称/数量/单价/金额 */
             expandable={{
               expandedRowRender,
@@ -787,6 +922,51 @@ export default function InboundPage() {
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 两段式第二段：确认入库（recv.post）—— 库存与应付生效的唯一入口 */}
+      <Modal
+        title={`确认入库 · ${postDoc?.no ?? postDoc?.id ?? ''}`}
+        open={!!postDoc}
+        onCancel={() => { setPostDoc(null); setPostWord('') }}
+        confirmLoading={postBusy}
+        okText={needConfirmWord ? '确认按新金额入库' : '确认入库'}
+        onOk={doPost}
+        destroyOnHidden
+      >
+        {postDoc && (
+          <>
+            <p style={{ marginTop: 0 }}>
+              供应商 <b>{postDoc.supplier || '-'}</b> · 明细 {postDoc.lines?.length ?? 0} 行 ·
+              应付 <b>¥{Number(postDoc.payable ?? 0)}</b>
+            </p>
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="确认后：库存/均价 + 应付/欠供应商 同时变化，单据状态变「已入库」。"
+            />
+            {needConfirmWord && (
+              <>
+                <Alert
+                  type="error"
+                  showIcon
+                  style={{ marginBottom: 8 }}
+                  message={
+                    '本单在登记后被修改：登记时应付 ¥'
+                    + Number((postDoc.review_snapshot as { payable?: number } | undefined)?.payable ?? 0)
+                    + '，现在 ¥' + Number(postDoc.payable ?? 0)
+                  }
+                />
+                <Input
+                  placeholder={`请输入「${POST_CONFIRM_WORD}」`}
+                  value={postWord}
+                  onChange={(e) => setPostWord(e.target.value)}
+                />
+              </>
+            )}
+          </>
+        )}
       </Modal>
 
       {/* 结算单（只读输出层） */}

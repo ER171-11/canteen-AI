@@ -1,5 +1,7 @@
 import type { InventoryDoc, SettleTemplate } from '../../../api/types'
-import { buildSettleData, csv, numToCn, r2, settleNo, today, type IngLookup } from './data'
+import {
+  buildSettleData, csv, numToCn, pendingNotice, r2, settleNo, today, type IngLookup,
+} from './data'
 import { download } from './download'
 import { DEFAULT_REST_NAME } from './template'
 import type { SettleOpts } from './html'
@@ -41,6 +43,9 @@ export function exportSettleCsv(
   rows.push(['小写合计', '¥' + d.payable.toFixed(2)])
   rows.push(['人民币大写', numToCn(d.payable)])
   rows.push(['应付全额', d.payable, '已付', d.paid, '欠款', d.debt])
+  /* 与弹窗 / 打印件 / PDF 同一句提示（pendingNotice 唯一出口） */
+  const notice = pendingNotice(doc, d)
+  if (notice) rows.push(['备注', notice])
   rows.push([])
   rows.push(['签字栏', (tpl.subjects || []).join(' / ')])
   const name = `结算单_${doc.no}.csv`
@@ -71,6 +76,17 @@ export function exportSettleBatchCsv(
     '欠款合计',
     r2(list.reduce((a, p) => a + buildSettleData(p, lookup).debt, 0)),
   ])
+  /* 这里的合计**含**待审核单（就是这几张纸上的金额之和）；
+     与首页「累计应付」（按决议不含待审核）不同，故必须显式标注，否则被当成对不上账 */
+  const pendingDocs = list.filter((p) => String(p.status ?? '').indexOf('待审核') >= 0)
+  if (pendingDocs.length) {
+    rows.push([
+      '其中待审核',
+      pendingDocs.length + ' 张',
+      '未计入系统应付',
+      r2(pendingDocs.reduce((a, p) => a + (Number(p.payable) || 0), 0)),
+    ])
+  }
   list.forEach((po, i) => {
     const d = buildSettleData(po, lookup)
     rows.push([])
@@ -90,6 +106,8 @@ export function exportSettleBatchCsv(
     rows.push(['合计', '', '', '', '', d.payable])
     rows.push(['人民币大写', numToCn(d.payable)])
     rows.push(['应付全额', d.payable, '已付', d.paid, '欠款', d.debt])
+    const notice = pendingNotice(po, d)
+    if (notice) rows.push(['备注', notice])
     rows.push(['签字栏', (tpl.subjects || []).join(' / ')])
   })
   const name = `结算单_批量_${reportDate}_${list.length}张.csv`

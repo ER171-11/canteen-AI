@@ -34,9 +34,10 @@ const SNAP = {
   rev: 12,
   generated_at: '2026-10-10T00:00:00.000Z',
   data: {
+    rest: '测试餐厅',
     ings: [
-      { id: 'i1', name: '五花肉', cat: '鲜肉', buy: '斤', spec: '', conv: 1, unit: '斤', stock: 8, safe: 5, avg: 18.5, last: 19, yld: 100 },
-      { id: 'i2', name: '黄瓜', cat: '蔬菜', buy: '斤', spec: '', conv: 1, unit: '斤', stock: 0.7, safe: 1, avg: 3, last: 3.2, yld: 100 }
+      { id: 'i1', name: '五花肉', cat: '鲜肉', buy: '斤', spec: '', conv: 1, unit: '斤', stock: 8, safe: 5, avg: 18.5, last: 19, yld: 100, on: true },
+      { id: 'i2', name: '黄瓜', cat: '蔬菜', buy: '斤', spec: '', conv: 1, unit: '斤', stock: 0.7, safe: 1, avg: 3, last: 3.2, yld: 100, on: true }
     ],
     dishes: [
       { id: 'd1', name: '长寿饺', cat: '五福饺', price: 32, est: 9, on: true },
@@ -173,6 +174,46 @@ async function main() {
     sm1[4] === '4.5' && sm1[5] === '张三/李四', sm1);
   const sm2 = rows.find((l) => l.indexOf('拍黄瓜') >= 0).split(',');
   ok('samples.csv 越界温度原样透出（9.5）', sm2[4] === '9.5', sm2[4]);
+
+  /* ---- W2-03 / FP-PRICE-11 待比价任务 JSON（panda-quote-task v1） ---- */
+  res = (await call('/api/export/quote-task.json')).res;
+  ok('quote-task.json 被接管且 200', res.code === 200, res.code);
+  ok('quote-task.json Content-Type=json', /application\/json/.test(res.headers['Content-Type'] || ''), res.headers['Content-Type']);
+  ok('quote-task.json 附件文件名含中文 filename*',
+    /attachment/.test(res.headers['Content-Disposition'] || '')
+    && /filename\*=UTF-8''/.test(res.headers['Content-Disposition'] || ''), res.headers['Content-Disposition']);
+  let task = null;
+  try { task = JSON.parse(text(res)); } catch (e) { task = null; }
+  ok('quote-task 契约头：type=panda-quote-task / version=1',
+    task && task.type === 'panda-quote-task' && task.version === 1, task && [task.type, task.version]);
+  ok('quote-task rest 取 data.rest', task && task.rest === '测试餐厅', task && task.rest);
+  ok('quote-task guide 指向 fetch_quotes.py（外部脚本可读）',
+    !!task && /fetch_quotes\.py/.test(String(task.guide)) && /采购单位/.test(String(task.guide)));
+  ok('quote-task items 覆盖在售原料 2 种', task && Array.isArray(task.items) && task.items.length === 2,
+    task && task.items && task.items.length);
+  const ITEM_KEYS = ['ingId', 'ingName', 'cat', 'unit', 'buy', 'conv', 'avg', 'keyword', 'taskDate'];
+  ok('quote-task 单条字段与旧版契约一致（9 键）',
+    !!task && task.items.every((it) => Object.keys(it).sort().join(',') === ITEM_KEYS.slice().sort().join(',')),
+    task && task.items && Object.keys(task.items[0] || {}));
+  ok('quote-task 关键词净化（五花肉 去规格/容量）',
+    !!task && task.items.find((it) => it.ingId === 'i1').keyword === '五花肉', task && task.items[0].keyword);
+  ok('quote-task taskDate = 今天', !!task && task.items.every((it) => it.taskDate === TODAY));
+  /* 耗材不参与比价（W4 决策 #4）+ 停用原料不参与（旧版 DB.ings.filter(g=>g.on)） */
+  const taskPartial = exp.quoteTaskPayload({
+    data: {
+      ings: [
+        { id: 'i1', name: '五花肉', on: true, unit: '斤', buy: '斤', conv: 1, avg: 18.5 },
+        { id: 'i9', name: '一次性手套', type: 'consumable', on: true, unit: '盒', buy: '盒', conv: 1, avg: 20 },
+        { id: 'i3', name: '停用菜', on: false, unit: '斤', buy: '斤', conv: 1, avg: 2 }
+      ],
+      quotes: [],
+    },
+  });
+  ok('quote-task 排除耗材与停用原料（只剩 1 种）',
+    taskPartial.items.length === 1 && taskPartial.items[0].ingId === 'i1',
+    taskPartial.items.map((x) => x.ingId));
+  ok('quote-task 无 data.rest 时回落默认店名',
+    exp.quoteTaskPayload({ data: { ings: [] } }).rest === '熊猫五福餐厅');
 
   /* ---- 红线①：五类导出全程只读 ---- */
   const bytesAfter = fs.readFileSync(path.join(dir, 'snapshot.json'), 'utf8');

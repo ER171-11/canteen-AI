@@ -8,6 +8,7 @@
  *   GET /api/export/dishes.csv   菜品成本毛利 CSV
  *   GET /api/export/sales.csv    销售应收实收 CSV
  *   GET /api/export/samples.csv  留样台账 CSV（含存放温度/封存人，支撑留存 ≥2 年可追溯）
+ *   GET /api/export/quote-task.json  待比价任务 JSON（W2-03 / FP-PRICE-11，panda-quote-task v1）
  *
  * 红线①：**只读**——不写快照、不写文件、不入队、不碰任何业务库；纯计算 + 响应下发。
  * 响应：text/csv; charset=utf-8（带 UTF-8 BOM，Excel 友好）/ application/json；
@@ -23,6 +24,8 @@
  */
 const { loadSnapshot } = require('./snapshot');
 const foodsafety = require('../lib/foodsafety');
+/* W2-03：待比价任务清单复用比价只读聚合（口径唯一源，不再另写一份筛选逻辑） */
+const price = require('../lib/price');
 /* ADR-008：销售应收模型的**唯一口径源**（防御性取值 + 派生欠款），本文件只做行级组装 */
 const model = require('../lib/sales_model');
 
@@ -372,6 +375,51 @@ function backupJSON(snap) {
   return JSON.stringify(snap, null, 1);
 }
 
+/* ------------------------------------------------------------------ */
+/* W2-03 / FP-PRICE-11 待比价任务导出（panda-quote-task v1）            */
+/* ------------------------------------------------------------------ */
+
+/** 外部比价脚本契约（旧版 HTML:5052-5059 逐字）：type/version 不可改，否则 fetch_quotes.py 对不上 */
+const QUOTE_TASK_TYPE = 'panda-quote-task';
+const QUOTE_TASK_GUIDE = '把本文件放到 比价脚本/ 目录后运行 运行比价.bat（或 python fetch_quotes.py），'
+  + '脚本会读取 items 逐条抓价，产出 比价结果.json；'
+  + '脚本输出的 price 必须是「1 个采购单位(buy)」的价格，且与该原料的 conv 口径一致。';
+
+/**
+ * 比价任务清单：口径复用 `lib/price.js::pricePlan`（在售 & 非耗材 & 关键词净化），
+ * 本函数只做「契约字段投影」——不重算比价、不写任何库。
+ * 零写库红线：纯计算 + 响应下发。
+ */
+function quoteTaskPayload(snap) {
+  const data = (snap && snap.data) || {};
+  const plan = price.pricePlan(snap);
+  const taskDate = todayStr();
+  const items = plan.items.map((it) => ({
+    ingId: it.ingId,
+    ingName: it.name,
+    cat: it.cat,
+    unit: it.unit,
+    buy: it.buy,
+    conv: it.conv,
+    avg: r2(it.avg),
+    keyword: it.keyword,
+    taskDate,
+  }));
+  return {
+    type: QUOTE_TASK_TYPE,
+    version: 1,
+    rest: typeof data.rest === 'string' && data.rest.trim() ? data.rest.trim() : '熊猫五福餐厅',
+    generatedAt: new Date().toISOString(),
+    guide: QUOTE_TASK_GUIDE,
+    items,
+  };
+}
+
+/** FP-PRICE-11 待比价任务 JSON（缩进 1 空格，与旧版 download(JSON.stringify(payload,null,1)) 一致） */
+function quoteTaskJSON(snap) {
+  return JSON.stringify(quoteTaskPayload(snap), null, 1);
+}
+
 /** 时间格式化：本地 YYYY-MM-DD HH:mm:ss（无逗号，保证 CSV 列对齐） */
 function fmtTime(iso) {
   if (iso == null) return '';
@@ -437,6 +485,10 @@ const PATHS = {
   '/api/export/samples.csv': (snap) => ({
     type: CSV_TYPE, filename: '留样台账_' + todayStr() + '.csv', body: csv(samplesRows(snap)),
   }),
+  /* W2-03：待比价任务（只读；外部 fetch_quotes.py 直接消费 items） */
+  '/api/export/quote-task.json': (snap) => ({
+    type: JSON_TYPE, filename: '待比价任务_' + todayStr() + '.json', body: quoteTaskJSON(snap),
+  }),
 };
 
 async function handle(req, res, ctx, pathname) {
@@ -460,6 +512,8 @@ module.exports = {
   salesList,
   samplesRows,
   backupJSON,
+  quoteTaskPayload,
+  quoteTaskJSON,
   dishCostMap,
   near30Agg,
   dishSalesAgg,

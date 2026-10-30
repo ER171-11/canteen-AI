@@ -19,15 +19,35 @@
  */
 const crypto = require('crypto');
 const store = require('../lib/store');
+const { getAdapter } = require('../lib/store-adapter');
+const { applyAction } = require('../lib/action-runner');
 const { WRITE_ROLES, mayWriteActions } = require('../lib/auth');
-const { loadSnapshot } = require('./snapshot');
 const policy = require('../lib/policy');
 const siAudit = require('../lib/si_audit');
 const provider = require('../lib/provider');
 
-const FILE = 'actions_queue.json';
 const EXPIRE_MS = 24 * 3600 * 1000;
 const OPEN_STATES = ['queued', '待执行'];
+/*
+ * 高危动作门禁（ADR-013 D4-1）：仅老板/店长可发起（enqueue 时校验角色）、也可确认（confirm 时再校验）。
+ * W2-01 回滚 + W4 三项（导入恢复 / 重置基线 / 清空）全部在此清单。
+ */
+const HIGH_RISK_TYPES = [
+  'snapshot.rollback',
+  'snapshot.import',
+  'snapshot.reset_baseline',
+  'snapshot.clear'
+];
+/*
+ * 双人确认开关（ADR-013 D4-1）：测试期默认关闭（单人确认 + Popconfirm + 确认词）；
+ * 打开（CANTEEN_DUAL_APPROVAL=1）后服务端校验「确认人 ≠ 提交人」，正式多账号环境再启用。
+ */
+const DUAL_APPROVAL = process.env.CANTEEN_DUAL_APPROVAL === '1';
+function isHighRisk(type) { return HIGH_RISK_TYPES.indexOf(String(type || '')) >= 0; }
+function isBossRole(ctx) {
+  const role = ctx && ctx.auth ? ctx.auth.role : null;
+  return role === '老板' || role === '店长';
+}
 /*
  * 事后幂等窗口：同一指纹的动作「已执行」之后，在此窗口内再次提交视为**同一次操作**，复用原动作不新建。
  * 取值权衡：太短挡不住重投；太长会把「同一操作人过一会儿确实想再做一次同样的写操作」误判成重复。
@@ -36,12 +56,11 @@ const OPEN_STATES = ['queued', '待执行'];
  */
 const EXECUTED_DEDUP_MS = 5 * 60 * 1000;
 
-function loadQueue() {
-  const q = store.readJSON(FILE, []);
-  return Array.isArray(q) ? q : [];
-}
+/* Phase 0 接缝（ADR-010）：队列读写统一走 StoreAdapter；默认 json 实现与旧行为逐字一致。
+ * 保持同步：scheduler / si_mission 在同步上下文调用 propose/enqueue，不能被异步传染。 */
+function loadQueue() { return getAdapter().loadQueue(); }
 
-function saveQueue(q) { store.writeJSON(FILE, q); }
+function saveQueue(q) { getAdapter().saveQueue(q); }
 
 // 过期清扫：queued/待执行 超 24h → 已过期；返回是否有变更
 function sweep(q) {
@@ -97,7 +116,7 @@ function enqueue(type, payload, operator, traceId, meta) {
     flush();
     return { action: done, dedup: true, dedup_of: 'executed' };
   }
-  const snap = loadSnapshot();
+  const snap = getAdapter().readSnapshot();
   const now = new Date().toISOString();
   const m = meta || {};
   const fh = provider.isFrontHouseAction(type);
@@ -201,7 +220,7 @@ function maybeAutoExecute(action) {
   const q = loadQueue();
   const a = q.find((x) => x.id === action.id);
   if (!a || a.status !== 'queued') return { auto: false, reason: '状态已变化' };
-  const snap = loadSnapshot();
+  const snap = getAdapter().readSnapshot();
   saveRollback(a, snap);
   const now = new Date().toISOString();
   a.status = '待执行';
@@ -251,6 +270,7 @@ function propose(type, payload, meta) {
  * @returns {Promise<{status:number, body:object}>} HTTP 状态码 + 响应体
  */
 async function applyToSnapshot(id, ctx) {
+  const adapter = getAdapter();
   const q = loadQueue();
   if (sweep(q)) saveQueue(q);
   const a = q.find((x) => x.id === id);
@@ -269,41 +289,38 @@ async function applyToSnapshot(id, ctx) {
       }
     };
   }
-  const { executeAction } = require('../lib/algorithms/execute');
-  const snap = loadSnapshot();
-  if (!snap) return { status: 409, body: { ok: false, error: 'no snapshot', id } };
-  /* await 兼容异步算法（如 safety.ai_judge 需调用视觉模型）；同步算法返回值直接可用 */
-  const out = await executeAction(snap, a);
-  if (!out.handled) {
+  /* Phase 0 接缝：执行 + 乐观锁落库统一交给 action-runner（与独立 worker 共用）。
+   * 旧实现是「读快照 → 盲写 rev+1」；现改为 casWrite(读到的 rev)，冲突返回 409 —— 对齐红线「乐观锁 rev」。 */
+  const res = await applyAction(adapter, a);
+  if (res.outcome === 'need-manual') {
     // 未登记的算法：交回店内消费者（need-manual），不静默丢弃
-    return { status: 422, body: { ok: false, error: out.error, id, status: a.status, route: 'store-consumer' } };
+    return { status: 422, body: { ok: false, error: res.error, id, status: a.status, route: 'store-consumer' } };
   }
-  if (!out.ok) {
+  if (res.outcome === 'no-snapshot') {
+    return { status: 409, body: { ok: false, error: 'no snapshot', id } };
+  }
+  if (res.outcome === 'conflict') {
+    return { status: 409, body: { ok: false, error: 'rev conflict', id, current_rev: res.rev } };
+  }
+  if (!res.ok) {
     a.status = '已驳回';
-    a.error = out.error;
+    a.error = res.error;
     a.executed_at = new Date().toISOString();
     a.updated_at = a.executed_at;
     saveQueue(q);
     return { status: 200, body: { ok: false, id, status: a.status, error: a.error } };
   }
-  // 落库新快照：rev 自增，保证 confirm 的 rev 校验语义
-  const newRev = typeof snap.rev === 'number' ? snap.rev + 1 : 1;
-  const next = Object.assign({}, out.snapshot, {
-    rev: newRev,
-    generated_at: new Date().toISOString()
-  });
-  store.writeJSON('snapshot.json', next);
   a.status = '已执行';
-  a.executed_rev = newRev;
+  a.executed_rev = res.rev;
   a.via = 'bff';
-  a.result = out.result == null ? null : out.result;
+  a.result = res.result == null ? null : res.result;
   a.error = null;
-  a.executed_at = next.generated_at;
+  a.executed_at = new Date().toISOString();
   a.updated_at = a.executed_at;
   saveQueue(q);
   return {
     status: 200,
-    body: { ok: true, id, status: a.status, rev: newRev, executed_at: a.executed_at, result: a.result }
+    body: { ok: true, id, status: a.status, rev: res.rev, executed_at: a.executed_at, result: a.result }
   };
 }
 
@@ -336,6 +353,20 @@ async function handle(req, res, ctx, pathname) {
       return true;
     }
     const operator = body.operator || ctx.auth.account || ctx.auth.role;
+    /* 高危动作门禁（ADR-013 D4-1）：仅老板/店长可发起；沿用 snapshot.js 角色门槛。
+     * W2-01 回滚在此拦截，避免员工（收银/厨房/财务/只读）越权入队高危写。
+     * 注意：必须在 readBody 之后判定——曾经把这段放到解析前，导致 `body` 暂时性死区，
+     * 所有 POST /api/actions 都抛 ReferenceError（红线①唯一写入口整体不可用）。 */
+    if (isHighRisk(body.type)) {
+      const role = ctx.auth ? (ctx.auth.role || null) : null;
+      if (role !== '老板' && role !== '店长') {
+        ctx.sendJSON(res, 403, {
+          ok: false,
+          error: 'forbidden: 高危动作仅老板/店长可发起（当前角色 ' + (role || '未登录') + '）'
+        });
+        return true;
+      }
+    }
     const { action, dedup, dedup_of: dupOf } = enqueue(body.type, body.payload, operator, ctx.traceId, {
       origin: body.origin,
       policy_id: body.policy_id,
@@ -412,6 +443,26 @@ async function handle(req, res, ctx, pathname) {
         ctx.sendJSON(res, 409, { ok: false, error: 'invalid state: ' + a.status, id, status: a.status });
         return true;
       }
+      /* 高危动作「确认」也须老板/店长（ADR-013 D4-1）：发起人已拦，确认端不能成漏口 */
+      if (isHighRisk(a.type) && !isBossRole(ctx)) {
+        ctx.sendJSON(res, 403, {
+          ok: false,
+          error: 'forbidden: 高危动作仅老板/店长可确认（当前角色 '
+            + ((ctx.auth && ctx.auth.role) || '未登录') + '）'
+        });
+        return true;
+      }
+      /* 双人确认（默认关闭；CANTEEN_DUAL_APPROVAL=1 时生效）：确认人不得是提交人 */
+      if (DUAL_APPROVAL && isHighRisk(a.type)) {
+        const who = body.operator || (ctx.auth.account || ctx.auth.role) || null;
+        if (who != null && String(who) === String(a.operator || '')) {
+          ctx.sendJSON(res, 403, {
+            ok: false,
+            error: 'forbidden: 已开启双人确认，确认人不得与提交人相同（提交人 ' + a.operator + '）'
+          });
+          return true;
+        }
+      }
       // 前厅动作在美团承接模式下禁止确认（切换 self 后才允许）
       if (a.front_house && !provider.isSelf()) {
         ctx.sendJSON(res, 423, {
@@ -421,12 +472,13 @@ async function handle(req, res, ctx, pathname) {
         });
         return true;
       }
-      const snap = loadSnapshot();
+      const snap = getAdapter().readSnapshot();
       const curRev = snap ? snap.rev : null;
-      // 准入提示锁：比对「云端快照 rev」（pusher 透传的店内 rev 滞后副本）。
-      // 它只给出「你确认时基于的云端视图是否过期」的早期反馈，不是数据安全边界；
-      // 真正的落库乐观锁在消费器 /api/sync 的 baseRev 三方合并（见 store-node/consumer.js）。
-      // 两把锁不能合一：BFF 不直连店内 DB（红线②③⑤），confirm 只能看云端快照。
+      // 准入提示锁：比对「当前主存 rev」。
+      // 它只给出「你确认时基于的视图是否过期」的早期反馈，不是数据安全边界；
+      // 真正的落库乐观锁：BFF 本地执行走 action-runner 的 casWrite(rev)，
+      // 店内节点走 /api/sync 的 baseRev 三方合并（见 store-node/consumer.js）。
+      // 两把锁不能合一：BFF 不直连店内 DB（红线②③⑤），confirm 只能看主存快照。
       if (String(body.rev) !== String(curRev)) {
         ctx.sendJSON(res, 409, {
           ok: false, error: 'rev mismatch', id,
@@ -531,14 +583,14 @@ async function handle(req, res, ctx, pathname) {
       const all = store.readJSON(ROLLBACK_FILE, {});
       const rb = all[a.id];
       if (!rb || rb.data == null) return deny('未找到回滚快照');
-      const cur = loadSnapshot();
+      const cur = getAdapter().readSnapshot();
       const curRev = cur ? cur.rev : null;
       if (a.executed_rev != null && String(curRev) !== String(a.executed_rev)) {
         return deny('执行后已有新变更（rev ' + curRev + ' ≠ ' + a.executed_rev + '），禁止自动回滚');
       }
       const now = new Date().toISOString();
       const nextRev = (typeof curRev === 'number' ? curRev : 0) + 1;
-      store.writeJSON('snapshot.json', {
+      getAdapter().writeSnapshot(null, {
         rev: nextRev,
         generated_at: now,
         machine: 'SI-ROLLBACK',
@@ -564,4 +616,4 @@ async function handle(req, res, ctx, pathname) {
   return false;
 }
 
-module.exports = { handle, enqueue, propose };
+module.exports = { handle, enqueue, propose, HIGH_RISK_TYPES, isHighRisk };

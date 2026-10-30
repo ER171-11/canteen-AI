@@ -166,7 +166,8 @@ function parseAdrs() {
   for (const f of fs.readdirSync(DIR_ADR).filter((x) => /^ADR-\d+.*\.md$/.test(x)).sort()) {
     const md = readUtf8(path.join(DIR_ADR, f));
     const first = (md.split(/\r?\n/).find((l) => /^#\s/.test(l)) || '').replace(/^#\s*/, '');
-    const st = /^\|\s*状态\s*\|\s*(.+?)\s*\|\s*$/m.exec(md);
+    // 状态行两种写法都要认：表格行 `| 状态 | x |`，以及列表行 `- 状态：x`（ADR-008/009/010/011 用后者）
+    const st = /^\|\s*状态\s*\|\s*(.+?)\s*\|\s*$/m.exec(md) || /^\s*[-*]?\s*状态\s*[：:]\s*(.+?)\s*$/m.exec(md);
     out.push({ num: (/^ADR-(\d+)/.exec(f) || [, '?'])[1], file: f, title: plain(first), status: st ? plain(st[1]) : '(未标注状态)' });
   }
   return out.sort((a, b) => parseInt(a.num, 10) - parseInt(b.num, 10));

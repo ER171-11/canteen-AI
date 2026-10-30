@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, DatePicker, Input, Modal, Space, Typography, message } from 'antd'
+import { Alert, Button, DatePicker, Input, Modal, Space, Typography, message } from 'antd'
 import type { InventoryDoc, SettleTemplate } from '../../../api/types'
 import dayjs, { type Dayjs } from 'dayjs'
-import { buildSettleData, fmt, numToCn, settleNo, today, type IngLookup } from './data'
+import { buildSettleData, fmt, numToCn, pendingNotice, settleNo, today, type IngLookup } from './data'
 import { download } from './download'
 import { buildSettleHtml, printHtmlDoc, type SettleOpts } from './html'
 import { exportSettleCsv, exportSettleHtmlFileName } from './export'
@@ -128,6 +128,16 @@ export default function SettleModal({
         </span>
       </Space>
 
+      {/* 待审核提示：与打印件 / PDF / CSV 同一句文案（data.ts::pendingNotice 唯一出口），
+          避免「系统里看着正常、打出来多一行」的不一致 */}
+      {pendingNotice(doc, data) && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message={pendingNotice(doc, data)}
+        />
+      )}
       <div>
         明细 <b>{data.count}</b> 项{'\u3000'}应付全额 <b>¥{fmt(data.payable)}</b>
         {'\u3000'}已付 ¥{fmt(data.paid)}
