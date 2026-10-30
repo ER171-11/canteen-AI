@@ -1,6 +1,6 @@
 {
   "name": "canteenai-desktop",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "熊猫五福餐厅 · 电脑版（Electron 封装 admin-web + 零依赖 BFF）",
   "private": true,
   "main": "electron-main.js",
