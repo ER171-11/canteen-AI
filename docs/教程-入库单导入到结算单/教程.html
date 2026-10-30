@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>入库单导入 → 生成结算单 · 图文操作教程</title>
+<style>
+  @page { size: A4; margin: 14mm 13mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    color: #1f2329; font-size: 10.5pt; line-height: 1.62;
+  }
+  code { font-family: Consolas, "Courier New", monospace; background: #f2f3f5; padding: 0 3px; border-radius: 3px; font-size: 0.94em; }
+  b { color: #111; }
+
+  /* ---------- 封面 ---------- */
+  .cover { height: 262mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+  .cover .kicker { font-size: 11pt; color: #e8112d; letter-spacing: 2px; font-weight: 700; }
+  .cover h1 { font-size: 30pt; line-height: 1.28; margin: 8mm 0 4mm; }
+  .cover h1 small { display: block; font-size: 15pt; font-weight: 400; color: #4e5969; margin-top: 4mm; }
+  .cover .lead { font-size: 11.5pt; color: #4e5969; max-width: 150mm; }
+  .cover .rule { height: 3px; background: #e8112d; width: 46mm; margin: 10mm 0; }
+  .cover .facts { display: flex; gap: 6mm; margin-top: 6mm; }
+  .cover .fact { flex: 1; border: 1px solid #e5e6eb; border-radius: 4mm; padding: 4mm; }
+  .cover .fact .k { font-size: 9pt; color: #86909c; }
+  .cover .fact .v { font-size: 12pt; font-weight: 700; margin-top: 1mm; }
+  .cover .foot { margin-top: 14mm; font-size: 9pt; color: #86909c; }
+
+  /* ---------- 通用标题 ---------- */
+  h2.sec { font-size: 17pt; margin: 0 0 5mm; padding-bottom: 2.5mm; border-bottom: 2px solid #1f2329; }
+  .page-break { page-break-after: always; }
+
+  /* ---------- 目录 ---------- */
+  .toc { columns: 2; column-gap: 10mm; font-size: 10.5pt; }
+  .toc div { break-inside: avoid; padding: 1.6mm 0; border-bottom: 1px dashed #e5e6eb; }
+  .toc .n { display: inline-block; width: 17mm; color: #e8112d; font-weight: 700; }
+
+  /* ---------- 步骤 ---------- */
+  .step { page-break-after: always; }
+  .step:last-of-type { page-break-after: auto; }
+  .step-head { display: flex; align-items: center; gap: 3mm; margin-bottom: 3mm; }
+  .step-head .no {
+    background: #e8112d; color: #fff; font-weight: 700; font-size: 10pt;
+    padding: 1mm 3mm; border-radius: 20mm; white-space: nowrap;
+  }
+  .step-head h3 { font-size: 15.5pt; margin: 0; }
+  figure { margin: 0 0 3mm; }
+  figure img { width: 100%; display: block; border: 1px solid #d9dbe0; border-radius: 2mm; }
+  .figs { display: flex; gap: 4mm; margin-bottom: 2mm; }
+  .figs figure { flex: 1; margin: 0; }
+  figcaption { font-size: 8.5pt; color: #86909c; margin-top: 1.2mm; }
+  ol.marks { margin: 0 0 3mm; padding-left: 0; list-style: none; }
+  ol.marks li { margin: 0 0 1.6mm; padding-left: 8mm; position: relative; }
+  ol.marks li .b {
+    position: absolute; left: 0; top: 0.4mm; width: 5.6mm; height: 5.6mm; border-radius: 50%;
+    background: #e8112d; color: #fff; font-size: 8.5pt; font-weight: 700; text-align: center; line-height: 5.6mm;
+  }
+  .see, .trap { border-radius: 2mm; padding: 2.4mm 3mm; font-size: 9.5pt; margin-top: 2mm; }
+  .see { background: #f0f9f4; border: 1px solid #b7e3c8; }
+  .trap { background: #fff7e8; border: 1px solid #f5d79b; }
+  .see b, .trap b { color: #1f2329; }
+
+  /* ---------- 示意图：窗口按钮 ---------- */
+  .win { border: 1px solid #c9cdd4; border-radius: 2mm; overflow: hidden; margin: 3mm 0 2mm; }
+  .win .bar { display: flex; align-items: center; justify-content: space-between; background: #f2f3f5; border-bottom: 1px solid #e5e6eb; padding: 0 0 0 4mm; height: 9mm; }
+  .win .bar .t { font-size: 9pt; color: #4e5969; }
+  .win .bar .btns { display: flex; }
+  .win .bar .btns span { width: 10mm; text-align: center; font-size: 10pt; color: #4e5969; line-height: 9mm; }
+  .win .bar .btns span.min { background: #ffe8e8; color: #e8112d; font-weight: 700; border: 2px solid #e8112d; border-radius: 1mm; margin: 1mm; line-height: 5mm; }
+  .win .body { height: 26mm; background: #fafbfc; }
+  .win-note { display: flex; gap: 4mm; font-size: 9pt; color: #4e5969; }
+  .win-note div { flex: 1; }
+  .win-note .r { color: #e8112d; font-weight: 700; }
+
+  /* ---------- 示意图：下载文件夹 ---------- */
+  .explorer { border: 1px solid #c9cdd4; border-radius: 2mm; overflow: hidden; font-size: 9pt; margin: 3mm 0; }
+  .explorer .top { background: #f2f3f5; padding: 2mm 3mm; border-bottom: 1px solid #e5e6eb; color: #4e5969; }
+  .explorer .row { display: flex; padding: 1.8mm 3mm; border-bottom: 1px solid #f2f3f5; }
+  .explorer .row.head { background: #fafbfc; color: #86909c; font-size: 8.5pt; }
+  .explorer .row .c1 { flex: 1; }
+  .explorer .row .c2 { width: 34mm; }
+  .explorer .row .c3 { width: 26mm; text-align: right; }
+  .explorer .row.hit { background: #fff7e8; }
+
+  /* ---------- 表格 ---------- */
+  table.t { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 3mm 0; }
+  table.t th, table.t td { border: 1px solid #e5e6eb; padding: 2mm 2.4mm; text-align: left; vertical-align: top; }
+  table.t th { background: #f7f8fa; font-weight: 700; }
+  table.t td.k { width: 42mm; background: #fafbfc; font-weight: 700; }
+
+  /* ---------- 结尾核对 ---------- */
+  .check li { margin-bottom: 2mm; }
+  .end-note { border-left: 4px solid #e8112d; padding: 2mm 0 2mm 4mm; color: #4e5969; font-size: 9.5pt; }
+</style>
+</head>
+<body>
+
+<!-- ============ 封面 ============ -->
+<div class="cover">
+  <div class="kicker">熊猫五福餐厅 · 管理后台</div>
+  <h1>
+    把供应商的送货单<br>变成一张结算单
+    <small>入库单导入 → 生成结算单 · 带截图的操作教程</small>
+  </h1>
+  <div class="rule"></div>
+  <div class="lead">
+    不用打字录原料，不用算金额。把供应商发来的 Excel 或送货单文件导进系统，
+    系统自动生成「进货单」，再一键打出「结算单」交给老板签字、财务付款。<br>
+    本教程每一步都有截图，<b>红框和数字就是你要点的地方</b>，照着做就行。
+  </div>
+  <div class="facts">
+    <div class="fact"><div class="k">需要时间</div><div class="v">约 10 分钟</div></div>
+    <div class="fact"><div class="k">需要会</div><div class="v">双击 · 点鼠标</div></div>
+    <div class="fact"><div class="k">用到账号</div><div class="v">老板 boss</div></div>
+  </div>
+  <div class="foot">
+    教程用真实界面截图制作（截图数据为示例数据，金额 92.50 元）。<br>
+    文中「你要点的字」一律用「」标出，和屏幕上的文字一模一样，找不到时按 Ctrl+F 在本文里搜。
+  </div>
+</div>
+
+<!-- ============ 目录 ============ -->
+<h2 class="sec">目录</h2>
+<div class="toc">
+  <div><span class="n">开始前</span>先认三个按钮（窗口右上角）</div>
+  <div><span class="n">第 1 步</span>打开程序，登录</div>
+  <div><span class="n">第 2 步</span>左边菜单：进销存 → 入库单</div>
+  <div><span class="n">第 3 步</span>认一下这个页面</div>
+  <div><span class="n">第 4 步</span>点「批量导入」，打开导入窗口</div>
+  <div><span class="n">第 5 步</span>选文件 → 看预览（最关键）</div>
+  <div><span class="n">第 6 步</span>点「确认导入 1 张」</div>
+  <div><span class="n">第 7 步</span>点「确认入库」（货已到就点）</div>
+  <div><span class="n">第 8 步</span>认一下导入后的那一行</div>
+  <div><span class="n">第 9 步</span>点「结算单」</div>
+  <div><span class="n">第 10 步</span>导出 PDF，发给老板</div>
+  <div><span class="n">成品</span>结算单长这样</div>
+  <div><span class="n">其他 ①</span>一次给多张单据出结算单</div>
+  <div><span class="n">其他 ②</span>.xls 文件不支持怎么办</div>
+  <div><span class="n">其他 ③</span>报错「未识别到表头」</div>
+  <div><span class="n">其他 ④</span>把品名/数量/单价指到列上</div>
+  <div><span class="n">排查</span>新手最容易卡住的 9 件事</div>
+  <div><span class="n">核对</span>做完对照这张清单</div>
+</div>
+
+<h2 class="sec" style="margin-top:9mm">开始前：先认三个按钮</h2>
+<p>程序窗口的<b>右上角</b>有三个小图标。找不到「最小化」就是因为它躲在这里（窗口最大化时在最右上角，不在标题文字旁边）。</p>
+<div class="win">
+  <div class="bar">
+    <div class="t">熊猫五福餐厅 · 管理后台</div>
+    <div class="btns"><span class="min">—</span><span>□</span><span>×</span></div>
+  </div>
+  <div class="body"></div>
+</div>
+<div class="win-note">
+  <div><span class="r">—</span> 最小化：收进屏幕最下面的任务栏，程序还在。想先干别的就点它。</div>
+  <div><span class="r">□</span> 最大化 / 还原：把窗口放大或变回原来大小。</div>
+  <div><span class="r">×</span> 关闭：退出程序（后台服务也会停）。<b>不要随手点这个。</b></div>
+</div>
+<p style="margin-top:6mm"><b>还有一条最省事的退路：</b>不管点到哪儿、弹窗关不掉，按一下键盘左上角的 <code>Esc</code> 键，弹窗就会关上，页面上已导入的数据不会丢。</p>
+
+<div class="page-break"></div>
+
+<!-- ============ 第 1 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 1 步</span><h3>打开程序，登录</h3></div>
+  <figure>
+    <img src="截图/01-登录页.png" alt="登录页">
+    <figcaption>双击桌面上的「熊猫五福餐厅管理后台」图标后出现的登录页（可能先黑屏几秒，属正常）</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 账号框（有人形图标）：输入 <code>boss</code>（全小写）。</li>
+    <li><span class="b">2</span> 密码框（有锁图标）：输入 <code>wufu123</code>。</li>
+    <li><span class="b">3</span> 点蓝色「登 录」按钮。</li>
+    <li><span class="b">4</span> 更省事的办法：直接点下面的「老板」小按钮，不用输账号密码。</li>
+  </ol>
+  <div class="see"><b>你会看到：</b>屏幕上方闪过绿色「登录成功 · ……」，页面跳到首页，左边出现一竖排菜单。</div>
+  <div class="trap"><b>卡住了？</b>提示「登录失败」：检查账号是不是全小写、密码里的 123 是数字；键盘 CapsLock 灯亮着就按一下关掉。窗口一直不出现：看屏幕最下面任务栏有没有程序图标，点一下。</div>
+</div>
+
+<!-- ============ 第 2 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 2 步</span><h3>左边菜单：进销存 → 入库单</h3></div>
+  <figure>
+    <img src="截图/02-左侧菜单.png" alt="左侧菜单">
+    <figcaption>屏幕左边这一竖排就是菜单，所有功能都在这里找</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 点「进销存」（图标像个小方盒），它下面会展开 7 个子项。</li>
+    <li><span class="b">2</span> 再点「入库单」。</li>
+  </ol>
+  <div class="see"><b>你会看到：</b>页面变成「进货入库（JH 进货单）」，最上面 4 个金额卡片，下面一张大表格。</div>
+  <div class="trap"><b>卡住了？</b>左边没有「进销存」：说明登录的不是老板/店长，重新登录换「老板」。菜单太长看不全：用鼠标滚轮在菜单上滚一下。</div>
+</div>
+
+<!-- ============ 第 3 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 3 步</span><h3>认一下这个页面</h3></div>
+  <figure>
+    <img src="截图/03-入库单页面.png" alt="入库单页面">
+    <figcaption>以后每次导入都从这里开始</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 右上角这排按钮里点「<b>批量导入</b>」——本教程只用这一个。</li>
+    <li><span class="b">2</span> 表格最右边这一列叫「<b>操作</b>」，每张单据的「结算单」按钮都在这一列里（第 8 步要用）。</li>
+  </ol>
+  <div class="see"><b>你会看到：</b>表格里已有的旧单据，一张一行；最上面 4 个卡片是累计金额。</div>
+  <div class="trap"><b>卡住了？</b>「批量导入」是灰的、点不动：① 账号不是老板/店长；② 页面最上面有黄色「Mock」提示条，说明后台没连上——把程序窗口关掉重新双击图标。右侧按钮被挡住：把窗口拉宽，或按 <code>Ctrl</code> + 鼠标滚轮向下缩小一点。</div>
+</div>
+
+<!-- ============ 第 4 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 4 步</span><h3>点「批量导入」，打开导入窗口</h3></div>
+  <figure>
+    <img src="截图/04-导入弹窗.png" alt="导入弹窗">
+    <figcaption>弹窗打开时什么都还没动，可以放心反复开关</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 点蓝色「选择文件」，去电脑里挑文件（下一步）。</li>
+    <li><span class="b">2</span> 「下载导入模板」：不知道文件该长什么样时，先点它下载一个空表格照着填。</li>
+    <li><span class="b">3</span> 这段浅蓝色说明是「支持什么文件、必须有哪些列」，不用背，出问题时回来看。</li>
+    <li><span class="b">4</span> 中部灰字：还没选文件，所以这里空着。</li>
+    <li><span class="b">5</span> 右下角「确认导入」现在是灰的——没预览过不能提交，这是防误操作。</li>
+  </ol>
+  <div class="see"><b>你会看到：</b>一个白框，标题写「批量导入进货单」。</div>
+  <div class="trap"><b>卡住了？</b>想退出：点右下「取消」或按 <code>Esc</code>，什么都没变。</div>
+</div>
+
+<!-- ============ 第 5 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 5 步</span><h3>选文件 → 看预览（最关键的一步）</h3></div>
+  <figure>
+    <img src="截图/05-预览.png" alt="导入预览">
+    <figcaption>选完文件 1~3 秒后，弹窗里出现这样的预览；此刻数据还没进系统</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 先核对这一行彩色标签：<b>「单据 1 张」「明细 3 行」「合计应付 ¥92.50」</b>——金额对不上就别往下点。</li>
+    <li><span class="b">2</span> 明细表：逐行核对原料、数量、单价、金额。带橙色「新增」标签的，是系统里还没有的原料，会自动建一条「待完善」草稿，不影响导入。</li>
+    <li><span class="b">3</span> 只有 1 张单据时，这里可以改「供应商」「单据日期」「备注」；显示「未指定供应商」就手动填上。</li>
+    <li><span class="b">4</span> 这个勾选框<b>保持不勾</b>：不勾＝这单还欠着钱（等下就是要打结算单去付款）；勾了系统会记成「已付清」。</li>
+    <li><span class="b">5</span> 核对无误，点右下角「<b>确认导入 1 张</b>」。</li>
+  </ol>
+  <div class="see"><b>你会看到：</b>选文件后右上角绿色「已预览：1 张单据 / 3 行」。</div>
+  <div class="trap"><b>卡住了？</b>金额不对：点「取消」，回 Excel 检查单价列有没有多余文字、数量是不是数字，另存后重来。<br>列名太怪认不出来（比如写「货名、件数」）：弹窗会自动展开「手动指定列」面板，做法见本文最后的「其他 ③ / ④」。</div>
+</div>
+
+<!-- ============ 第 6 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 6 步</span><h3>点「确认导入 1 张」</h3></div>
+  <figure>
+    <img src="截图/06-导入完成待审核.png" alt="导入完成，待审核">
+    <figcaption>单据已经进系统，状态是黄色的「待审核」——此时能打结算单，但账还没记</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 屏幕上方绿色提示：「已登记 1 张「待审核」进货单 → 可在列表打印结算单；确认入库后库存/应付才变化」。3 秒后消失，没看到也不要紧。</li>
+    <li><span class="b">2</span> 表格最上面多了一行，单号是 <b>JH + 日期 + -01</b>（如 JH20261030-01）。</li>
+    <li><span class="b">3</span> 状态列是黄色「<b>待审核</b>」——说明单据已登记，但库存和欠款还没动。</li>
+    <li><span class="b">4</span> 蓝色提示条也在提醒你这件事，并告诉你下一步点哪里。</li>
+  </ol>
+  <div class="see"><b>注意：</b>这时顶部「累计应付」不会增加。这是<b>故意的</b>，不是导入失败——待审核的单据不计入应付，防止没核对的金额先跑进账里。</div>
+  <div class="trap"><b>卡住了？</b>列表里没有新单：按 <code>F5</code> 刷新；供应商筛选选了别家就切回「全部供应商」。提示变成橙色「确认未通过」：去左边「平台 → 审批中心」看驳回原因。</div>
+</div>
+
+<!-- ============ 第 7 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 7 步</span><h3>点「确认入库」（货已经到了就点）</h3></div>
+  <figure>
+    <img src="截图/07-确认入库弹窗.png" alt="确认入库弹窗">
+    <figcaption>这一步让库存和欠款真正记上账</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 核对弹窗里的三个信息：供应商、明细行数、应付金额。本教程示例是「海南菜篮子实业有限公司 · 明细 3 行 · 应付 ¥92.5」。</li>
+    <li><span class="b">2</span> 点右下角「<b>确认入库</b>」。</li>
+  </ol>
+  <div class="see"><b>你会看到：</b>绿色「已确认入库：库存与应付已更新」，那一行状态变成绿色的「<b>已入库</b>」。</div>
+  <div class="trap"><b>为什么必须做这步？</b>不做也能打结算单，但纸上会多一行红字「本单为待审核凭证…尚未计入系统应付」，财务看了会犹豫。货确实到了，就该点这一下。</div>
+  <div class="trap"><b>找不到「确认入库」按钮：</b>它在「操作」列里，按钮多的时候要往右拖——把鼠标放到表格上，滚轮按住 <code>Shift</code> 向下滚，或拖表格底部的横向滚动条。</div>
+</div>
+
+<!-- ============ 第 8 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 8 步</span><h3>认一下导入后的那一行</h3></div>
+  <figure>
+    <img src="截图/08-已入库.png" alt="已入库">
+    <figcaption>三个地方确认这次导入成功</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 状态：绿色「<b>已入库</b>」——账已记上。</li>
+    <li><span class="b">2</span> 欠款：红色 <b>¥92.5</b>——这单还没付钱。同时顶部「累计应付」「欠供应商」各增加 92.5。</li>
+    <li><span class="b">3</span> 「操作」列里的「<b>结算单</b>」——下一步点它。</li>
+  </ol>
+  <div class="see"><b>你会看到：</b>顶部卡片数字变动，说明库存和欠款已经生效。</div>
+  <div class="trap"><b>卡住了？</b>如果欠款显示「—」：说明第 5 步把「登记付款」勾上了，系统认为已付清。金额错了就点行内「作废」重来。</div>
+</div>
+
+<!-- ============ 第 9 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 9 步</span><h3>点「结算单」，核对三个数</h3></div>
+  <figure>
+    <img src="截图/09-结算单弹窗.png" alt="生成结算单弹窗">
+    <figcaption>结算单是「只读输出」：打开、关闭、导出都不会改动任何数据，可以反复点</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 报表日期（默认今天）、支出用途（默认「采购货款」）——需要就改，不改直接导出也行。</li>
+    <li><span class="b">2</span> 核对：<b>明细 3 项　应付全额 ¥92.50　已付 ¥0.00　欠款 ¥92.50</b>。</li>
+    <li><span class="b">3</span> 核对单据编号（<b>JS-</b> 开头）和人民币大写「<b>玖拾贰元伍角</b>」——大写和数字必须对得上。</li>
+    <li><span class="b">4</span> 点「<b>导出 PDF（微信可传）</b>」。</li>
+  </ol>
+  <div class="see"><b>你会看到：</b>按钮转圈 1~3 秒（在生成图片，不是卡死），然后上方提示「已导出 PDF：结算单_JS-JH20261030-01_2026-10-30.pdf（可直接发微信）」。</div>
+  <div class="trap"><b>卡住了？</b>转圈超过 10 秒：等，别连点（连点会导出好几份）。提示「生成 PDF 失败」：改用同一个弹窗里的「打印 / 另存为 PDF」或「导出电子版（HTML）」。</div>
+</div>
+
+<!-- ============ 第 10 步 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">第 10 步</span><h3>导出 PDF，发给老板</h3></div>
+  <figure>
+    <img src="截图/10-导出PDF.png" alt="导出PDF成功" style="width:94%">
+    <figcaption>绿框里就是生成好的文件名</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 记下提示里的文件名，例如 <code>结算单_JS-JH20261030-01_2026-10-30.pdf</code>。</li>
+  </ol>
+  <p style="margin:2mm 0 1.5mm"><b>文件存到「下载」文件夹。</b>打开方法：按 <code>Win</code> + <code>E</code>，点左边「下载」，按「修改日期」排序，最上面那个就是。</p>
+  <div class="explorer">
+    <div class="top">此电脑 › 下载</div>
+    <div class="row head"><div class="c1">名称</div><div class="c2">修改日期</div><div class="c3">大小</div></div>
+    <div class="row hit"><div class="c1">结算单_JS-JH20261030-01_2026-10-30.pdf</div><div class="c2">刚刚</div><div class="c3">312 KB</div></div>
+    <div class="row"><div class="c1">结算单_JH20261030-01.csv</div><div class="c2">刚刚</div><div class="c3">2 KB</div></div>
+  </div>
+  <div class="see"><b>怎么看/怎么发：</b>双击 PDF 就能看（没装阅读器时右键 →「打开方式」→ 选浏览器）。发微信：把它拖进聊天窗口，或点「+」→ 文件 → 选它。</div>
+  <div class="trap"><b>小提示：</b>PDF 是<b>图片式</b>排版，清晰但不能选中复制（中文才不会乱）。要能编辑的内容用「导出 Excel（CSV）」。</div>
+</div>
+
+<!-- ============ 成品 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">成品</span><h3>打出来的结算单长这样</h3></div>
+  <figure>
+    <img src="截图/15-结算单成品.png" alt="结算单成品">
+    <figcaption>示例单：3 行明细、小写合计 ¥92.50、大写「玖拾贰元伍角」、三个签字栏</figcaption>
+  </figure>
+  <table class="t">
+    <tr><td class="k">抬头</td><td>餐厅名 +「进货付款审批单」（可在「平台 → 系统配置 → 结算单模板」里改）</td></tr>
+    <tr><td class="k">单据编号</td><td>JS- + 进货单号，例 JS-JH20261030-01</td></tr>
+    <tr><td class="k">金额</td><td>小写合计 / 人民币大写 = <b>应付全额</b>；另附已付、欠款供参考</td></tr>
+    <tr><td class="k">签字栏</td><td>经办人 / 审核人 / 审批人（模板里可改）</td></tr>
+    <tr><td class="k">页脚</td><td>「本单一式两联…」+ 制单时间</td></tr>
+  </table>
+  <div class="see"><b>关系记一句就够：</b>一张进货单 → 一张结算单。不做「多张合并成一张」，要批量就一批出多页。</div>
+</div>
+
+<!-- ============ 其他情况 ① ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">其他 ①</span><h3>一次给多张单据出结算单</h3></div>
+  <figure>
+    <img src="截图/11-批量结算单.png" alt="批量结算单">
+    <figcaption>页面右上角「批量结算单」：勾选多张 → 导出选中 · PDF（每张一页，合成一个文件）</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 「已选 N / M 张 · 应付合计 · 欠款」：先看合计对不对（默认全部勾选）。</li>
+    <li><span class="b">2</span> 「仅选有欠款」：一键只勾还没结清的单，省得一张张点。</li>
+    <li><span class="b">3</span> 「导出选中 · PDF」：生成一个文件，每张一页，页脚印「第 n/N 张」。</li>
+  </ol>
+  <div class="see"><b>要记住：</b>这是「N 张单打包成一个文件」，<b>不是</b>把多张合并成一张单，每张单的金额各自独立。</div>
+</div>
+
+<!-- ============ 其他情况 ② ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">其他 ②</span><h3>报错「暂不支持旧版二进制 .xls」</h3></div>
+  <figure>
+    <img src="截图/12-xls报错.png" alt="xls 报错">
+    <figcaption>年份很早的 .xls 文件不支持，系统会明确告诉你怎么办（红色提示条）</figcaption>
+  </figure>
+  <p style="margin:0 0 2mm"><b>三步解决：</b></p>
+  <ol class="marks">
+    <li><span class="b">1</span> 用 Excel 打开这个文件 → 左上角「文件」→「另存为」。</li>
+    <li><span class="b">2</span> 「保存类型」选 <b>Excel 工作簿 (*.xlsx)</b>（或「CSV UTF-8(逗号分隔)(*.csv)」）。</li>
+    <li><span class="b">3</span> 保存后回到系统，重新点「批量导入」选新文件。</li>
+  </ol>
+  <div class="trap"><b>别急着改文件：</b>如果这个 .xls 其实是供应商系统「导出 Excel」生成的网页文件（用记事本打开第一行是 <code>&lt;html&gt;</code>），系统<b>可以直接导入</b>，不用另存。</div>
+</div>
+
+<!-- ============ 其他情况 ③ ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">其他 ③</span><h3>报错「未识别到进货单表头」</h3></div>
+  <figure>
+    <img src="截图/13-手动指定列.png" alt="手动指定列上半">
+    <figcaption>列名太怪（例如「货名 / 件数」）时，系统把原始表格整个摊在弹窗里，让你自己指</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 红色提示条说明「没认出表头」，并告诉你可以自己指。</li>
+    <li><span class="b">2</span> 在原始表格里点一行当「表头行」——通常是写着「货名 / 件数 / 单价」的那一行，点了它会变底色。</li>
+    <li><span class="b">3</span> 往下的下拉框（下一张图）就是用来把字段对到列的。</li>
+  </ol>
+  <div class="see"><b>先别慌：</b>这只说明列名不是常见的写法，数据本身没坏，手动指一次就好。</div>
+</div>
+
+<!-- ============ 其他情况 ④ ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">其他 ④</span><h3>把「品名 / 数量 / 单价」指到具体的列</h3></div>
+  <figure>
+    <img src="截图/14-手动指定列-下半.png" alt="手动指定列下半">
+    <figcaption>这个面板在弹窗下半部分，往下滚一点就能看到</figcaption>
+  </figure>
+  <ol class="marks">
+    <li><span class="b">1</span> 「品名 / 原料名称」「数量」「单价」三个下拉框，各选一列对应上；其余字段留「不指定」即可。</li>
+    <li><span class="b">2</span> 点「<b>按此重新解析</b>」，等它重新读一遍。</li>
+    <li><span class="b">3</span> 出现正常预览后，「确认导入」按钮才会变蓝可用。</li>
+  </ol>
+  <div class="trap"><b>更省事的办法：</b>不要跟古怪的表格较劲——点「下载导入模板」，把数据复制进模板（列名标准），另存为 CSV 再导入。绝大多数导入问题，都是列名对不上。</div>
+</div>
+
+<!-- ============ 排查 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">排查</span><h3>新手最容易卡住的 9 件事</h3></div>
+  <table class="t">
+    <tr><th style="width:38%">看到的现象</th><th>怎么办（按顺序试）</th></tr>
+    <tr><td>找不到「最小化」</td><td>看<b>屏幕最右上角</b>，三个图标里最左边那个「—」；窗口最大化时不在标题文字旁边</td></tr>
+    <tr><td>找不到「批量导入」</td><td>左侧「进销存 → 入库单」；窗口窄时按钮会折成两行，往右看；灰色点不动＝账号不对或后台没连上</td></tr>
+    <tr><td>找不到「结算单」按钮</td><td>在表格最右「操作」列，窗口窄时被挡在可视区外：拖表格底部横向滚动条，或 <code>Ctrl</code>+滚轮缩小页面</td></tr>
+    <tr><td>弹窗被关掉了，白做</td><td>重新点「批量导入」再来一次；已经导入成功的单据不会消失</td></tr>
+    <tr><td>导入后「累计应付」没变</td><td>正常：单据是「待审核」，点行内「确认入库」后才计入</td></tr>
+    <tr><td>结算单上多了一行红字</td><td>说明单据还是「待审核」，先「确认入库」再打</td></tr>
+    <tr><td>提示导出成功但找不到文件</td><td><code>Win</code>+<code>E</code> → 左侧「下载」→ 按修改日期排序</td></tr>
+    <tr><td>PDF 里字不能选中</td><td>设计如此（图片式排版，保证中文字体不乱）；要编辑用「导出 Excel（CSV）」</td></tr>
+    <tr><td>同一个文件导了两次，多出一张单</td><td>系统不去重。多出来的那张点行内「作废」→「确认作废」，原单保留可查</td></tr>
+  </table>
+  <div class="end-note">
+    <b>一条通用自救规则：</b>任何弹窗都能按 <code>Esc</code> 关掉；页面乱了按 <code>F5</code> 刷新；
+    还不正常就把程序窗口关掉（×）重新双击图标——已经保存的数据都在，不会因为关程序丢失。
+  </div>
+</div>
+
+<!-- ============ 核对清单 ============ -->
+<div class="step">
+  <div class="step-head"><span class="no">核对</span><h3>做完对照这张清单</h3></div>
+  <p>全部打勾，就说明这条链路你已经完整走通了。</p>
+  <ul class="check">
+    <li>☐ 登录成功，能在左侧找到「进销存 → 入库单」</li>
+    <li>☐ 点「批量导入」能打开导入窗口，并成功选中文件</li>
+    <li>☐ 预览里的「单据张数 / 明细行数 / 合计应付」与文件一致（示例：1 张 / 3 行 / ¥92.50）</li>
+    <li>☐ 点「确认导入」后，列表最上面出现新单，状态黄色「待审核」</li>
+    <li>☐ 点「确认入库」后，状态变绿色「已入库」，欠款出现红色金额，顶部累计应付增加</li>
+    <li>☐ 点「结算单」后，弹窗里的应付金额、人民币大写、JS- 编号都正确</li>
+    <li>☐ 成功导出 PDF，并在「下载」文件夹找到它，能打开、中文不乱码</li>
+    <li>☐ 打印（或另存为 PDF）出来是一页 A4，有明细、合计、大写、三个签字栏</li>
+  </ul>
+  <div class="see" style="margin-top:6mm">
+    <b>常见但正常的现象（不用管）：</b><br>
+    · 预览里出现「新增原料 N 种」——系统里没这个原料，自动建了草稿，去「原料档案 → 待完善」补分类/单位再「确认转正」即可；<br>
+    · 顶部「累计实付」不变——这单还没付钱；<br>
+    · 导出的 PDF 打不开——电脑缺阅读器，右键选浏览器打开。
+  </div>
+  <p style="margin-top:10mm;color:#86909c;font-size:9pt">
+    教程版本：2026-10-30 ｜ 对应页面：管理后台 › 进销存 › 入库单 ｜ 示例数据为演示数据，实际以门店数据为准。
+  </p>
+</div>
+
+</body>
+</html>

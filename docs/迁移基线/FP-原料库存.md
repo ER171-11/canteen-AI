@@ -17,15 +17,15 @@
 | FP-ING-02 | 编辑原料主数据（名称/分类/库存单位/采购单位/换算率/规格/包规/MOQ/默认供应商） | HTML:1416 `data-ingedit` → `openIng()` :1455；字段 :1430-1438 | `StockPage.tsx`:207 编辑按钮 → Modal :289-370（unit :327、buy :332、conv :338、spec :342、sup :346、moq :349） | ⬆️ 已移植 | 验证：编辑任意原料并提交 |
 | FP-ING-03 | 设置原料安全库存 | HTML:1441 `fSafe`；说明 :255 | `StockPage.tsx`:354「安全线」字段；列表列 :153-159 | ⬆️ 已移植 | 验证：编辑 → 安全线 → 入队 |
 | FP-ING-04 | 设置出成率（毛料→净料 %） | HTML:1442 `fYld`；批量 :1369 `data-yld` | `StockPage.tsx` 编辑弹窗「出成率 %」字段 :372、列表「出成率」列 :182；`inventory.js` `applyIngUpsert` 白名单 `yld`（钳制 0.05~1，缺省 1，Node/Python 平价同步）；`recipe_cost.js`:140-142 毛料还原 `qty/yld` | ⬆️ 已移植 | 验证：编辑出成率 → 入队消费 → 列表/配方成本按出成率还原 |
-| FP-ING-05 | 手工校准库存/均价并自动生成「手工调整」流水 | HTML:1461-1464（`mkAdjLog` :865） | 无写入口；`LedgerPage.tsx`:17 仅能**展示**「手工调整」类型 | ⬜ 待补 | 写类：`ing.adjust` 建议动作 + 留痕 |
-| FP-ING-06 | 批量设置安全库存/出成率（一屏多原料） | HTML:235 `#btnIngBatch` → `openIngBatch()` :1352 | 无 | ⬜ 待补 | 写类：批量 `ing.upsert` |
+| FP-ING-05 | 手工校准库存/均价并自动生成「手工调整」流水 | HTML:1461-1464（`mkAdjLog` :865） | 独立「校准」弹窗 `StockCalibrateModal.tsx`（库存/均价可分别或同时改，**均价可单独改**，原因必填）→ `stock.count`（`applyStockCount` 支持 `avg`：流水 `inCost = 传入均价 ?? 现有均价`，修掉「盘点把均价清 0」）；`LedgerPage.tsx`:17 按「手工调整」类型展示 | ⬆️ 已移植 | 写类：`stock.count` 走审批队列留痕；**禁止**用 `ing.upsert` 改存量（会被 `rebuildStock` 冲回）。验证：`bff/lib/algorithms/ing_calibrate_batch_delete.test.js` + `scripts/verify-adr013-batch3.js`（ADR-013 D3） |
+| FP-ING-06 | 批量设置安全库存/出成率（一屏多原料） | HTML:235 `#btnIngBatch` → `openIngBatch()` :1352 | 列表多选（`rowSelection`）+「批量设置」→ `StockBatchModal.tsx`（安全线/出成率，留空不改）→ 单个动作 `ing.batch`（`applyIngBatch`：整批一次改写、零命中显式报错、yld 钳制 0.05~1） | ⬆️ 已移植 | 写类：勾 N 个原料只产生 **1 条**队列动作（1 次审批）。验证：`verify-adr013-batch3.js` 步骤 5 |
 | FP-ING-07 | 原料名称搜索 | HTML:236 `#ingSearch` → :1397（取值 trim） | `StockPage.tsx`:258-264 搜索框（placeholder「搜索原料名称…」）、:83-86 过滤（`q.trim()` + `name.includes`） | ⬆️ 已移植 | 验证：输入「面」列表收敛，清空恢复全量 |
 | FP-ING-08 | 分类 chips 筛选 | HTML:237 `#ingCats` → `renderIngCats()` :1391、:1396 | `StockPage.tsx`:265-274「全部分类」+ 分类 chips、:78-81 分类去重（`filter(Boolean)` 同源） | ⬆️ 已移植 | 验证：点任一分组仅显示该分类；点「全部分类」复位 |
 | FP-ING-09 | 列表展示库存均价 / 最近采购价 / 库存总值 / 换算率 | HTML:1404-1415（换算 :1405、均价 :1412、最近采购价 :1413、总值 :1414） | `StockPage.tsx`:136-144 换算率、:160-166 库存均价、:167-173 最近采购价、:174-180 库存总值；`utils.ts`:28-33 `fmtNum` | ⬆️ 已移植 | 验证：与快照逐项核对（真实库 rev=279：96 项原料 69 项有 `last`） |
 | FP-ING-10 | 低库存标红预警（低于安全库存） | HTML:1403 `low` 标红、`updateBadges()` :1383、`lowStocks()` :1142 | `StockPage.tsx`:181-195 状态 Tag「告急/偏低」+ :217-244 统计卡；停用原料不计入统计 :69-70（对齐 `lowStocks()` 的 `g.on`） | ⬆️ 已移植 | 验证：告急原料显示红色 Tag |
-| FP-ING-11 | 删除原料（带引用保护：已用于单据/配方则禁删） | HTML:1417 `data-ingdel` → `delIng()` :1470（保护判断 :1471-1474） | 无（`StockPage.tsx` 无删除） | ⬜ 待补 | 写类：`ing.delete` 建议动作，须带引用校验 |
+| FP-ING-11 | 删除原料（带引用保护：已用于单据/配方则禁删） | HTML:1417 `data-ingdel` → `delIng()` :1470（保护判断 :1471-1474） | 列表行内「删」（Popconfirm）→ `ing.delete`（`applyIngDelete` + `ingRefsOf`：库存流水/进货单/采购单/出餐销售/报价/配方任一命中即禁删，错误信息直接给正解「改为停用」，并弹一步「改为停用」确认） | ⬆️ 已移植 | 写类：走审批队列；无引用才物理摘除，有引用一律 `on:false` 停用（红线 #6）。验证：`verify-adr013-batch3.js` 步骤 7-10 |
 | FP-ING-12 | 原料启用/停用开关 | HTML:1433 `fOn`；停用行样式 :1406（`tr.off{opacity:.45}` :71） | `StockPage.tsx`:360-367 表单「是否启用」→ `ing.upsert`、:196-201「启用」列、:282 停用行加 `ing-off-row`；`index.css`:4-8；`bff` 写入白名单 `payload.on`（`inventory.js`:261） | ⬆️ 已移植 | 验证：编辑为「停用」入队消费后该行变淡并标「停用」 |
-| FP-ING-13 | 原料行「比价」入口（录入/查看报价 + 跳转外部平台搜索） | HTML:1416 `pricePop()` :1178（:1185 录入报价、:1180 外链）、`openQuote()` :4989 | 部分：`VendorsPage.tsx`:151「录入报价」（独立页，非行内入口）；无外部平台跳转 | ⬜ 待补 | 写类 `quote.upsert` 已有（`VendorsPage.tsx`:179）；缺行内入口与外链 |
+| FP-ING-13 | 原料行「比价」入口（录入/查看报价 + 跳转外部平台搜索） | HTML:1416 `pricePop()` :1178（:1185 录入报价、:1180 外链）、`openQuote()` :4989 | `StockPage.tsx` 行内「比价」按钮 → 共享组件 `QuoteEntryModal.tsx`（与供应商比价页同一弹窗：原料/供应商/口径/金额/实时折算提示 + 底部外部平台外链 `comparePlatforms.ts`）→ `POST /api/supply/quote` → `quote.upsert` | ⬆️ 已移植 | 写类：入队 → 审批中心 → 落 `data.quotes`；外链口径照抄旧版 `pricePop`（`{kw}` → 原料名） |
 | FP-ING-14 | 库存流水查询（按原料/类型筛选、变动、结存、关联单据） | HTML:542-563 `#tab-stock`（`#logIng` :546、`#logType` :547、`#logBody` :562）※相邻页 | `LedgerPage.tsx`:180-187 原料筛选、:188-195 类型筛选、:141-147 结存、:148 参考 | ⬆️ 已移植 | 验证：/inventory/ledger 切换筛选 |
 | FP-ING-15 | 库存总值概览（全部原料合计金额） | HTML:552 `#stockVal`、表格 :555-558（当前库存/均价/总值）、渲染 `renderStock()` :5176-5180 | `StockPage.tsx`:233-243「库存总值」卡（`stats.value` :75）；`LedgerPage.tsx`:156-175「库存现值」卡 + 「库存总值：X 元 · 共 N 种原料」、:76-107 现值列、:65-74 按总值倒序；`utils.ts`:35-39 `stockValue` | ⬆️ 已移植 | 验证：两页数值一致（同用 `stockValue()`＝Σ 库存×均价） |
 
@@ -34,21 +34,20 @@
 | 项 | 数 |
 |---|---|
 | FP 总数 | 15 |
-| ⬆️ 已移植 | 11 |
+| ⬆️ 已移植 | 15 |
 | 🔄 等价替代 | 0 |
-| ⬜ 待补 | 4 |
+| ⬜ 待补 | 0 |
 | ⚰️ 废弃 | 0 |
 
-**结论**：原料库存页只读展示口径已补齐（搜索/分类/均价/最近价/总值/换算率 + 库存总值卡），
-停用开关与出成率已打通写入链路；**剩余写类能力缺口**：手工校准与批量设置（FP-ING-05/06）、
-删除（FP-ING-11）与行内比价（FP-ING-13）。
+**结论**：原料库存页 **15/15 全部收口**（只读展示 + 停用开关 + 出成率 + 行内比价 + 手工校准 + 批量设置 + 删除引用保护），
+写类能力一律经 `/api/actions` 审批队列落库。
 
 ## 建议补齐顺序
 
 1. ~~**FP-ING-04** 出成率~~ ✅ 已完成（W3，2026-10-10；与 FP-DISH-08 联动）
-2. **FP-ING-05 / 06** 手工校准与批量设置（写类走队列）
-3. **FP-ING-11** 删除（须带引用校验）
-4. **FP-ING-13** 行内比价入口 + 外链
+2. ~~**FP-ING-05 / 06** 手工校准与批量设置（写类走队列）~~ ✅ 已完成（ADR-013 第 3 批，2026-10-30）
+3. ~~**FP-ING-11** 删除（须带引用校验）~~ ✅ 已完成（ADR-013 第 3 批，2026-10-30）
+4. ~~**FP-ING-13** 行内比价入口 + 外链~~ ✅ 已完成（ADR-013 第 1 批，2026-10-29）
 
 ## 备注
 

@@ -67,8 +67,24 @@
 
 ## 5. 落点迁移（本地 → 云端）与偏离登记
 
-- ADR-009 已定案「服务端 `snapshot.json` 为真、单一数据源在服务端、双机同步四件套废弃」。
-- 但当前代码仍以店内 SQLite 为账本、云端 `snapshot.json` 为投影（`consumer.js` 写店内库 + `pusher.js` 推快照），
+- ADR-009 已定案「服务端主存为真、单一数据源在服务端、双机同步四件套废弃」。
+- 现状（经代码核实）：桌面端主存为**每台终端本地 `snapshot.json`**（BFF `CANTEEN_LOCAL_APPLY=1` 直接落盘），
+  `store-node` / SQLite 四件套在桌面端**休眠未运行**；偏差点是「主存分散在终端、无中心化」，非「店内 SQLite 在当主」。
   属 **ADR-009 的「有意偏离 / 迁移未完成」**，按 ADR-004 §7 第 7 项要求显式登记。
-- 收敛路径：执行器上移（算法写云端库）+ 云端存储升级（`snapshot.json` 文件 → 真持久化库）+ 店内四件套退场。
-- 收敛后红线五项**不松**，仅落点随账本从店内 SQLite 移到云端库；完整迁移任务书见 ADR-010（草案）：`docs/decisions/ADR-010-本地SQLite退场与云端单一主存.md`。
+- 收敛已拍板：ADR-010 于 2026-10-28 定 D0–D3（建腾讯云中心服务 / 云端 PostgreSQL / 独立 worker / 按店迁移严禁双写），**不再处于「待拍板」**；断网降级按 ADR-010 §9 沿用 ADR-009 §2.1「只读」（localStorage 热备、过期即弃，不做离线写）。
+- 收敛路径（分期）：Phase 0 接缝层（无云权限可做，本地验红线）→ Phase 1 云端建库（腾讯云 PostgreSQL）→ Phase 2 按店迁移切流（严禁双写）→ Phase 3 本地退场。**Phase 0 已于 2026-10-28 完成**（`store-adapter` / `action-runner` / 独立 `worker` / 契约测试双绿；默认仍是 json 适配器，运行时读写行为不变）。
+- 收敛后红线五项**不松**，仅落点随账本从终端本地移到云端库；完整迁移任务书见 ADR-010（分期版）：`docs/decisions/ADR-010-本地SQLite退场与云端单一主存.md`。
+
+---
+
+## 6. 受保护文件哈希基线（R3/R4）变更记录
+
+> 规则：`db.js` / `merge.js` / `stock.js` 属被锁定的账本底座。**任何改动必须同时重算 `ci/redline_baseline.sha256` 并在此登记理由**，
+> 否则 R3/R4 必然报红——这正是该检查的用途（防止「悄悄改了底座还全绿」）。
+
+| 日期 | 文件 | 原因 | 结论 |
+|---|---|---|---|
+| 2026-10-29 | `bff/store-node/merge.js` | 受控词表 Phase 2：三向合并的 `COLL_KEY` 纳入 `vendor_terms:'id'`（与 `old/store-inventory-legacy/python-runtime/merge.py` 同步；`merge.test.js` 23/23 与 Python 一致）。改动随提交 `10e1b82` 落地，但当时漏刷基线，导致 R3/R4 自 10-28 起持续报红 | **补登记并重算哈希**（新增 2 行，无其他语义变更），基线更新为 `4bd611f6…` |
+| 2026-10-30 | `bff/lib/algorithms/stock.js` | ADR-004 §2.5 两段式：`rebuildStock` 里内联的「草稿/待收/作废」状态判断改为调用 `lib/recv_status.js::isEffective()`，作为进货单生效口径的**唯一出口**（原来 stock/report/modules/workbench 四处各写一份，加「待审核」必然漂移）。**算法语义未变**：新状态「待审核」按既有规则同样不进货（含「待」字样），28/28 算法层用例全绿 | **重算哈希**（基线更新为 `b2dd8ce1…`）；口径收敛后新增 `recv_pending.test.js` 覆盖 |
+
+
