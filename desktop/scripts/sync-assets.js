@@ -176,6 +176,16 @@ function warnIfDistStale() {
 
 function main() {
   const picked = TASKS.filter((t) => !ONLY || ONLY.indexOf(t.name) >= 0);
+  /* shared 里有 ESM 源（index.mjs），桌面端 Electron 内置 Node 20.18 不支持 require(ESM)，
+     同步前先由 scripts/gen-shared-cjs.js 生成真正的 CJS 孪生（index.cjs）。 */
+  if (!DRY && picked.some((t) => t.name === 'shared')) {
+    try {
+      require(path.join(ROOT, 'scripts', 'gen-shared-cjs.js'));
+    } catch (e) {
+      console.error('[sync-assets] 生成 shared CJS 失败：' + ((e && e.message) || e));
+      process.exit(1);
+    }
+  }
   if (!picked.length) {
     console.error('[sync-assets] --only 未命中任何块，可用：' + TASKS.map((t) => t.name).join(','));
     process.exit(1);

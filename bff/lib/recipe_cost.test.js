@@ -22,6 +22,22 @@ function ok(name, cond, got) {
   console.error('  ✗ ' + name + '  got=' + JSON.stringify(got));
 }
 
+/* 桌面端兼容闸门：Electron 31 内置 Node 20.18 不支持 require(ESM)。
+   shared/recipe-cost/index.cjs 必须是 scripts/gen-shared-cjs.js 生成的真正 CJS，
+   不能是 `module.exports = require('./index.mjs')` 薄壳，否则桌面包 BFF 启动即 ERR_REQUIRE_ESM。 */
+const fs = require('fs');
+const pathMod = require('path');
+const SHARED_DIR = pathMod.join(__dirname, '../../shared/recipe-cost');
+const cjsSrc = fs.readFileSync(pathMod.join(SHARED_DIR, 'index.cjs'), 'utf8');
+ok('index.cjs 不是 require(ESM) 薄壳', !/require\(\s*['"]\.\/index\.mjs['"]\s*\)/.test(cjsSrc));
+const mjsExports = Array.from(
+  fs.readFileSync(pathMod.join(SHARED_DIR, 'index.mjs'), 'utf8')
+    .matchAll(/^export\s+(?:const|let|function|class)\s+([A-Za-z_$][\w$]*)/gm)
+).map((m) => m[1]).sort();
+ok('index.cjs 导出与 index.mjs 一致（需重跑 node scripts/gen-shared-cjs.js）',
+  JSON.stringify(Object.keys(core).sort()) === JSON.stringify(mjsExports),
+  { cjs: Object.keys(core).sort(), mjs: mjsExports });
+
 // 原料定价：avg 为「元/斤」，unit='斤' → 500g/斤
 const INGS = [
   { id: 'I-PORK', name: '猪肉', unit: '斤', avg: 20, yld: 1 },
