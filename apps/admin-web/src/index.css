@@ -93,3 +93,17 @@ body,
     overflow: hidden;
   }
 }
+
+/* 手机端（E 移动适配）：卡片内操作按钮加大触控区，≥40px 高，避免手指误触。
+ * 只作用于显式标注 .m-card-actions 的工具栏/操作行，不影响 PC 表格里的 link 小按钮。 */
+@media (max-width: 768px) {
+  .m-card-actions .ant-btn {
+    min-height: 40px;
+    padding-inline: 14px;
+  }
+  /* 手机端弹窗贴近屏幕边缘，内容区收紧留白，多留可点空间 */
+  .ant-modal {
+    max-width: calc(100vw - 16px);
+    top: 8px;
+  }
+}

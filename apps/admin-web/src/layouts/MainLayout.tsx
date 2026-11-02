@@ -7,6 +7,7 @@ import {
 import {
   Breadcrumb,
   Button,
+  Drawer,
   Input,
   Layout,
   Menu,
@@ -18,7 +19,14 @@ import {
   message,
 } from 'antd'
 import type { MenuProps } from 'antd'
-import { LogoutOutlined, MobileOutlined, SearchOutlined, ShopOutlined, SyncOutlined } from '@ant-design/icons'
+import {
+  LogoutOutlined,
+  MenuOutlined,
+  MobileOutlined,
+  SearchOutlined,
+  ShopOutlined,
+  SyncOutlined,
+} from '@ant-design/icons'
 import { useAuthStore } from '../store/auth'
 import EnvBanner from '../components/EnvBanner'
 import { canAccess, firstAccessiblePath } from '../rbac/roles'
@@ -26,6 +34,7 @@ import { MENU, findLeaf } from '../config/menu'
 import { fetchHealth, fetchOrg } from '../api'
 import type { Health, OrgStore } from '../api/types'
 import { COLORS } from '../theme'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 const { Sider, Header, Content } = Layout
 
@@ -44,6 +53,14 @@ export default function MainLayout() {
   const { role, account, logout, storeId, storeName, setStore, canWrite } = useAuthStore()
   const [health, setHealth] = useState<Health | null>(null)
   const [stores, setStores] = useState<OrgStore[]>([])
+  /* 手机端：侧边栏改为抽屉，顶栏只留汉堡 + 当前页 + 退出（E1 手机壳） */
+  const isMobile = useIsMobile()
+  const [navOpen, setNavOpen] = useState(false)
+
+  /* 换页自动收起抽屉，避免挡住内容 */
+  useEffect(() => {
+    setNavOpen(false)
+  }, [location.pathname])
 
   useEffect(() => {
     let alive = true
@@ -114,46 +131,101 @@ export default function MainLayout() {
     message.success(`已切换门店：${s.name}`)
   }
 
+  /* 侧边栏内容两端共用：桌面直出、手机装进抽屉 */
+  const brandNode = (
+    <div
+      className="ai-gradient-text"
+      style={{
+        height: 56,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 17,
+        fontWeight: 700,
+        background: '#111',
+      }}
+    >
+      熊猫五福 · SaaS
+    </div>
+  )
+  const navMenu = (
+    <Menu
+      theme="dark"
+      mode="inline"
+      items={menuItems}
+      selectedKeys={[location.pathname]}
+      openKeys={openKeys}
+      onOpenChange={(keys) => setOpenKeys(keys as string[])}
+      onClick={({ key }) => {
+        navigate(key)
+        setNavOpen(false)
+      }}
+    />
+  )
+
   return (
     <>
       {/* 演练环境横幅：仅当 BFF /api/health 返回 env=sandbox 时展示 */}
       <EnvBanner env={health?.env} />
       <Layout style={{ minHeight: '100vh' }}>
-      <Sider width={220} theme="dark">
-        <div
-          className="ai-gradient-text"
-          style={{
-            height: 56,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 17,
-            fontWeight: 700,
-            background: '#111',
-          }}
+      {/* 手机端不占屏：侧边栏收进抽屉，内容区拿回 220px */}
+      {isMobile ? (
+        <Drawer
+          placement="left"
+          open={navOpen}
+          onClose={() => setNavOpen(false)}
+          width={248}
+          closable={false}
+          styles={{ body: { padding: 0, background: '#001529' } }}
         >
-          熊猫五福 · SaaS
-        </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          items={menuItems}
-          selectedKeys={[location.pathname]}
-          openKeys={openKeys}
-          onOpenChange={(keys) => setOpenKeys(keys as string[])}
-          onClick={({ key }) => navigate(key)}
-        />
-      </Sider>
+          {brandNode}
+          {navMenu}
+        </Drawer>
+      ) : (
+        <Sider width={220} theme="dark">
+          {brandNode}
+          {navMenu}
+        </Sider>
+      )}
       <Layout>
         <Header
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0 20px',
+            gap: 8,
+            padding: isMobile ? '0 8px' : '0 20px',
             borderBottom: '1px solid #f0f0f0',
+            background: isMobile ? '#fff' : undefined,
+            position: isMobile ? 'sticky' : undefined,
+            top: isMobile ? 0 : undefined,
+            zIndex: isMobile ? 20 : undefined,
           }}
         >
+          {/* 手机端：汉堡开抽屉 + 只显示当前页名，其余头部信息收起，避免挤成竖排 */}
+          {isMobile && (
+            <Button
+              type="text"
+              icon={<MenuOutlined />}
+              onClick={() => setNavOpen(true)}
+              aria-label="打开菜单"
+            />
+          )}
+          {isMobile ? (
+            <Typography.Text
+              strong
+              style={{
+                fontSize: 15,
+                flex: 1,
+                minWidth: 0,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {matched ? matched.leaf.title : '熊猫五福'}
+            </Typography.Text>
+          ) : (
           <Breadcrumb
             items={[
               { title: '熊猫五福' },
@@ -162,6 +234,15 @@ export default function MainLayout() {
                 : []),
             ]}
           />
+          )}
+          {isMobile ? (
+            <Space size={4} style={{ flexShrink: 0 }}>
+              <Tag color={ROLE_TAG_COLOR[role ?? ''] ?? 'default'} style={{ marginInlineEnd: 0 }}>
+                {role ?? '-'}
+              </Tag>
+              <Button type="text" icon={<LogoutOutlined />} onClick={onLogout} aria-label="退出" />
+            </Space>
+          ) : (
           <Space size="middle" wrap>
             <Input.Search
               allowClear
@@ -205,15 +286,24 @@ export default function MainLayout() {
             </Tag>
             <Tag color={canWrite ? 'blue' : 'default'}>{canWrite ? '可写' : '只读'}</Tag>
             <Typography.Text type="secondary">{account}</Typography.Text>
-            <Button type="primary" ghost size="small" icon={<MobileOutlined />} onClick={() => navigate('/m')}>
+            {/* E 移动端适配完成前，手机入口直接落到手机可用的业务页（入库单），
+                不再指向 /m 预览壳（只有文案、无真数据）。适配到位后可改回 /m。 */}
+            <Button
+              type="primary"
+              ghost
+              size="small"
+              icon={<MobileOutlined />}
+              onClick={() => navigate('/inventory/inbound')}
+            >
               手机版
             </Button>
             <Button type="text" icon={<LogoutOutlined />} onClick={onLogout}>
               退出
             </Button>
           </Space>
+          )}
         </Header>
-        <Content style={{ padding: 20, background: '#f5f5f5' }}>
+        <Content style={{ padding: isMobile ? 12 : 20, background: '#f5f5f5' }}>
           {allowed ? (
             <Outlet />
           ) : (

@@ -119,9 +119,9 @@ export default function LoginPage() {
               size="small"
               type="dashed"
               disabled={loading}
-              onClick={() => doLogin('boss', QUICK_LOGIN_PASSWORD, '/m')}
+              onClick={() => doLogin('manager', QUICK_LOGIN_PASSWORD, '/inventory/inbound')}
             >
-              手机版 UI 测试（老板账号，登录后直接进入 /m）
+              手机版入口 · 店长（进销存 → 入库单）
             </Button>
           </div>
         </div>

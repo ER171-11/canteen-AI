@@ -50,6 +50,7 @@ import PayModal from './PayModal'
 import RecvFormModal from './RecvFormModal'
 import RecvImportModal from './RecvImportModal'
 import { downloadRecvTemplate } from './recvTemplate'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { DEFAULT_SETTLE_TPL, loadSettleTpl } from './settle/template'
 import { exportSettlePdf } from './settle/pdf'
 import type { SettleOpts } from './settle/html'
@@ -157,6 +158,9 @@ export default function InboundPage() {
   const [postDoc, setPostDoc] = useState<InventoryDoc | null>(null)
   const [postWord, setPostWord] = useState('')
   const [postBusy, setPostBusy] = useState(false)
+  /* 手机端：窄屏用卡片列表替代 1456px 宽表格（E2），首屏先给 20 张 */
+  const isMobile = useIsMobile()
+  const [cardLimit, setCardLimit] = useState(20)
 
   const load = useCallback((d: Dayjs) => {
     setLoading(true)
@@ -381,6 +385,75 @@ export default function InboundPage() {
     setAcceptOpen(true)
   }
 
+  /* ---- 状态 / 结算 / 操作：PC 表格与手机卡片共用同一份口径，避免两套渲染漂移 ---- */
+  const renderStatusTag = (r: InventoryDoc) =>
+    isVoided(r) ? (
+      <Tag color="default">已作废</Tag>
+    ) : isPendingReview(r) ? (
+      <Tooltip title="已登记、未计入库存与应付；老板确认入库后才生效">
+        <Tag color={COLORS.yellow}>待审核</Tag>
+      </Tooltip>
+    ) : (
+      <Tag color={COLORS.green}>已入库</Tag>
+    )
+
+  const renderSettleTag = (r: InventoryDoc) =>
+    isVoided(r) ? (
+      <Tag color="default">已作废</Tag>
+    ) : isPendingReview(r) ? (
+      <Tag color={COLORS.yellow}>待入库</Tag>
+    ) : docDebt(r) > 0.01 ? (
+      <Tag color={COLORS.yellow}>有欠款</Tag>
+    ) : (
+      <Tag color={COLORS.green}>已结清</Tag>
+    )
+
+  /* 行内操作按钮：手机端放大触控区（≥40px 高），桌面端保持 link 小按钮 */
+  const opButton = (label: string, onClick: () => void, danger = false) => (
+    <Button
+      type={isMobile ? 'default' : 'link'}
+      size={isMobile ? 'middle' : 'small'}
+      danger={danger}
+      onClick={onClick}
+    >
+      {label}
+    </Button>
+  )
+
+  const renderOps = (r: InventoryDoc) => (
+    <Space className="m-card-actions" size={isMobile ? 8 : 0} wrap={isMobile}>
+      {opButton('验收明细', () => setDrawerDoc(r))}
+      {/* FP-RECV-04 行内结算单（只读输出层，不写库） */}
+      {opButton('结算单', () => setSettleDoc(r))}
+      {/* 两段式第二段：待审核单「确认入库」—— 库存与应付到这一步才变化 */}
+      {canWrite && !isMock && isPendingReview(r) && (
+        opButton('确认入库', () => { setPostDoc(r); setPostWord('') })
+      )}
+      {/* FP-RECV-07 补付：仅已记账且有欠款的单显示（待审核单未计入应付，不能先付） */}
+      {canWrite && !isMock && isEffective(r) && docDebt(r) > 0.01 && (
+        opButton('补付', () => setPayDoc(r))
+      )}
+      {canWrite && !isMock && opButton('补录', () => openAcceptModal(r))}
+      {/* FP-RECV-08 编辑：走 recv.update 审批队列；已作废单不可编辑 */}
+      {canWrite && !isMock && !isVoided(r) && (
+        opButton('编辑', () => { setEditDoc(r); setEditOpen(true) })
+      )}
+      {/* FP-RECV-09 作废：走 recv.void 审批队列；只留痕不物理删除；已作废单不再显示 */}
+      {canWrite && !isMock && !isVoided(r) && (
+        <Popconfirm
+          title="作废进货单"
+          description="原单保留可查（不删除），确认后库存按台账自动回退，确定？"
+          okText="确认作废"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+          onConfirm={() => voidRecv(r)}
+        >
+          {opButton('作废', () => {}, true)}
+        </Popconfirm>
+      )}
+    </Space>
+  )
+
   const columns: ColumnsType<InventoryDoc> = [
     { title: '单号', dataIndex: 'no', width: 150, render: (v) => v ?? '-' },
     { title: '日期', dataIndex: 'date', width: 110 },
@@ -388,16 +461,7 @@ export default function InboundPage() {
       title: '状态',
       key: 'status',
       width: 96,
-      render: (_, r) =>
-        isVoided(r) ? (
-          <Tag color="default">已作废</Tag>
-        ) : isPendingReview(r) ? (
-          <Tooltip title="已登记、未计入库存与应付；老板确认入库后才生效">
-            <Tag color={COLORS.yellow}>待审核</Tag>
-          </Tooltip>
-        ) : (
-          <Tag color={COLORS.green}>已入库</Tag>
-        ),
+      render: (_, r) => renderStatusTag(r),
     },
     { title: '供应商', dataIndex: 'supplier', width: 140, ellipsis: true },
     {
@@ -476,75 +540,14 @@ export default function InboundPage() {
       title: '结算',
       key: 'settle',
       width: 90,
-      render: (_, r) =>
-        isVoided(r) ? (
-          <Tag color="default">已作废</Tag>
-        ) : isPendingReview(r) ? (
-          <Tag color={COLORS.yellow}>待入库</Tag>
-        ) : docDebt(r) > 0.01 ? (
-          <Tag color={COLORS.yellow}>有欠款</Tag>
-        ) : (
-          <Tag color={COLORS.green}>已结清</Tag>
-        ),
+      render: (_, r) => renderSettleTag(r),
     },
     {
       title: '操作',
       key: 'ops',
       width: 140,
       fixed: 'right',
-      render: (_, r) => (
-        <Space size={0}>
-          <Button type="link" size="small" onClick={() => setDrawerDoc(r)}>
-            验收明细
-          </Button>
-          {/* FP-RECV-04 行内结算单（只读输出层，不写库） */}
-          <Button type="link" size="small" onClick={() => setSettleDoc(r)}>
-            结算单
-          </Button>
-          {/* 两段式第二段：待审核单「确认入库」—— 库存与应付到这一步才变化 */}
-          {canWrite && !isMock && isPendingReview(r) && (
-            <Button
-              type="link"
-              size="small"
-              onClick={() => { setPostDoc(r); setPostWord('') }}
-            >
-              确认入库
-            </Button>
-          )}
-          {/* FP-RECV-07 补付：仅已记账且有欠款的单显示（待审核单未计入应付，不能先付） */}
-          {canWrite && !isMock && isEffective(r) && docDebt(r) > 0.01 && (
-            <Button type="link" size="small" onClick={() => setPayDoc(r)}>
-              补付
-            </Button>
-          )}
-          {canWrite && !isMock && (
-            <Button type="link" size="small" onClick={() => openAcceptModal(r)}>
-              补录
-            </Button>
-          )}
-          {/* FP-RECV-08 编辑：走 recv.update 审批队列；已作废单不可编辑 */}
-          {canWrite && !isMock && !isVoided(r) && (
-            <Button type="link" size="small" onClick={() => { setEditDoc(r); setEditOpen(true) }}>
-              编辑
-            </Button>
-          )}
-          {/* FP-RECV-09 作废：走 recv.void 审批队列；只留痕不物理删除；已作废单不再显示 */}
-          {canWrite && !isMock && !isVoided(r) && (
-            <Popconfirm
-              title="作废进货单"
-              description="原单保留可查（不删除），确认后库存按台账自动回退，确定？"
-              okText="确认作废"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => voidRecv(r)}
-            >
-              <Button type="link" size="small" danger>
-                作废
-              </Button>
-            </Popconfirm>
-          )}
-        </Space>
-      ),
+      render: (_, r) => renderOps(r),
     },
   ]
 
@@ -654,13 +657,73 @@ export default function InboundPage() {
     )
   }
 
+  /* 筛选 + 动作工具栏：桌面端放 Card extra，手机端放进卡片顶部（extra 在窄屏会挤成一条竖列） */
+  const toolbarNode = (
+    <Space className="m-card-actions" wrap size={isMobile ? 8 : undefined}>
+      {/* 有筛选时给出「筛选后 / 全部」两个数：避免把筛选态误读成「列表少了几条」 */}
+      <span>
+        共 {filtered.length}
+        {supplier ? ` / ${docs.length}` : ''} 张
+      </span>
+      <DatePicker
+        value={acceptDate}
+        allowClear={false}
+        onChange={(d) => d && setAcceptDate(d)}
+        title="验收记录日期"
+        style={isMobile ? { width: '100%' } : undefined}
+      />
+      {/* 首项固定「全部供应商」：不筛选=看全部单据，且随时一键退回全部 */}
+      <Select
+        allowClear
+        placeholder="供应商"
+        style={{ width: isMobile ? '100%' : 160 }}
+        options={withAll(
+          suppliers.map((s) => ({ value: s, label: s })),
+          '全部供应商',
+        )}
+        value={allValueOf(supplier)}
+        onChange={(v) => setSupplier(fromAll<string>(v))}
+      />
+      {/* FP-RECV-05 批量生成结算单（只读输出层） */}
+      <Button disabled={!filtered.length} onClick={() => setSettleBatchOpen(true)}>
+        批量结算单
+      </Button>
+      {/* FP-RECV-03 下载导入模板（只读：客户端生成 CSV，零写库） */}
+      <Button onClick={downloadRecvTemplate}>下载导入模板</Button>
+      {/* FP-RECV-02 批量导入：预览只读 → 提交投 recv.import（走审批队列，确认前零变化） */}
+      <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
+        <Button disabled={!canWrite || isMock} onClick={() => setImportOpen(true)}>
+          批量导入
+        </Button>
+      </Tooltip>
+      {/* FP-RECV-01 新建进货单：只投 recv.inbound 建议动作，确认前不改账面 */}
+      <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
+        <Button
+          type="primary"
+          disabled={!canWrite || isMock}
+          onClick={() => setRecvOpen(true)}
+        >
+          新建进货单
+        </Button>
+      </Tooltip>
+      <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
+        <Button
+          disabled={!canWrite || isMock}
+          onClick={() => openAcceptModal()}
+        >
+          补录验收
+        </Button>
+      </Tooltip>
+    </Space>
+  )
+
   return (
     <div>
       {isMock && <MockAlert endpoint="/api/snapshot/latest · data.recv" />}
       {/* FP-RECV-10 顶部汇总卡（口径同旧版 renderRecvKpi()，「本月」= 近 30 天） */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
-          <Card>
+        <Col span={isMobile ? 12 : 6}>
+          <Card size={isMobile ? 'small' : 'default'}>
             <Statistic
               title="本月进货应付"
               prefix="¥"
@@ -669,18 +732,18 @@ export default function InboundPage() {
             />
           </Card>
         </Col>
-        <Col span={6}>
-          <Card>
+        <Col span={isMobile ? 12 : 6}>
+          <Card size={isMobile ? 'small' : 'default'}>
             <Statistic title="累计应付" prefix="¥" value={kpi.totalPayable} />
           </Card>
         </Col>
-        <Col span={6}>
-          <Card>
+        <Col span={isMobile ? 12 : 6}>
+          <Card size={isMobile ? 'small' : 'default'}>
             <Statistic title="累计实付" prefix="¥" value={kpi.totalPaid} />
           </Card>
         </Col>
-        <Col span={6}>
-          <Card>
+        <Col span={isMobile ? 12 : 6}>
+          <Card size={isMobile ? 'small' : 'default'}>
             <Statistic
               title="欠供应商"
               prefix="¥"
@@ -692,64 +755,9 @@ export default function InboundPage() {
       </Row>
       <Card
         title="进货入库（JH 进货单）"
-        extra={
-          <Space wrap>
-            {/* 有筛选时给出「筛选后 / 全部」两个数：避免把筛选态误读成「列表少了几条」 */}
-            <span>
-              共 {filtered.length}
-              {supplier ? ` / ${docs.length}` : ''} 张
-            </span>
-            <DatePicker
-              value={acceptDate}
-              allowClear={false}
-              onChange={(d) => d && setAcceptDate(d)}
-              title="验收记录日期"
-            />
-            {/* 首项固定「全部供应商」：不筛选=看全部单据，且随时一键退回全部 */}
-            <Select
-              allowClear
-              placeholder="供应商"
-              style={{ width: 160 }}
-              options={withAll(
-                suppliers.map((s) => ({ value: s, label: s })),
-                '全部供应商',
-              )}
-              value={allValueOf(supplier)}
-              onChange={(v) => setSupplier(fromAll<string>(v))}
-            />
-            {/* FP-RECV-05 批量生成结算单（只读输出层） */}
-            <Button disabled={!filtered.length} onClick={() => setSettleBatchOpen(true)}>
-              批量结算单
-            </Button>
-            {/* FP-RECV-03 下载导入模板（只读：客户端生成 CSV，零写库） */}
-            <Button onClick={downloadRecvTemplate}>下载导入模板</Button>
-            {/* FP-RECV-02 批量导入：预览只读 → 提交投 recv.import（走审批队列，确认前零变化） */}
-            <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
-              <Button disabled={!canWrite || isMock} onClick={() => setImportOpen(true)}>
-                批量导入
-              </Button>
-            </Tooltip>
-            {/* FP-RECV-01 新建进货单：只投 recv.inbound 建议动作，确认前不改账面 */}
-            <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
-              <Button
-                type="primary"
-                disabled={!canWrite || isMock}
-                onClick={() => setRecvOpen(true)}
-              >
-                新建进货单
-              </Button>
-            </Tooltip>
-            <Tooltip title={canWrite ? undefined : '当前角色无写权限，仅可查看'}>
-              <Button
-                disabled={!canWrite || isMock}
-                onClick={() => openAcceptModal()}
-              >
-                补录验收
-              </Button>
-            </Tooltip>
-          </Space>
-        }
+        extra={isMobile ? undefined : toolbarNode}
       >
+        {isMobile && <div style={{ marginBottom: 12 }}>{toolbarNode}</div>}
         {kpi.pendingCount > 0 && (
           <Alert
             type="info"
@@ -763,6 +771,81 @@ export default function InboundPage() {
         )}
         {filtered.length === 0 && !loading ? (
           <Empty description="暂无进货单：货到了点右上角「新建进货单」登记（登记即可打结算单，确认入库后才扣账）" />
+        ) : isMobile ? (
+          /* E2 手机端：一张单一张卡，单号/供应商/金额/状态 + 行内操作全部在屏内，不再横向拖表格 */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {filtered.slice(0, cardLimit).map((r) => (
+              <Card
+                key={rk(r)}
+                size="small"
+                style={{
+                  borderLeft: `3px solid ${
+                    isVoided(r)
+                      ? '#d9d9d9'
+                      : isPendingReview(r)
+                        ? COLORS.yellow
+                        : COLORS.green
+                  }`,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                  }}
+                >
+                  <Typography.Text strong style={{ fontSize: 14 }}>
+                    {r.no ?? r.id ?? '-'}
+                  </Typography.Text>
+                  {renderStatusTag(r)}
+                </div>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                  {r.date ?? '-'} · {r.supplier ?? '未指定供应商'}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: '#555',
+                    marginTop: 6,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {formatLinesSummary(r.lines, ingName)}
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: 10,
+                    marginTop: 10,
+                    fontSize: 13,
+                  }}
+                >
+                  <span>应付 <b>¥{r.payable ?? '-'}</b></span>
+                  <span>实付 <b>¥{docPaid(r)}</b></span>
+                  {!isPendingReview(r) && docDebt(r) > 0.01 && (
+                    <span style={{ color: COLORS.red }}>
+                      欠款 <b>¥{docDebt(r)}</b>
+                    </span>
+                  )}
+                  {renderSettleTag(r)}
+                </div>
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #f0f0f0' }}>
+                  {renderOps(r)}
+                </div>
+              </Card>
+            ))}
+            {filtered.length > cardLimit && (
+              <Button block onClick={() => setCardLimit((n) => n + 20)}>
+                显示更多（还有 {filtered.length - cardLimit} 张）
+              </Button>
+            )}
+          </div>
         ) : (
           <Table<InventoryDoc>
             rowKey={rk}
