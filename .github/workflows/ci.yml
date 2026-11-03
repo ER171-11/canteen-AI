@@ -124,7 +124,19 @@ jobs:
         # 因此必须在 android-app 根下构建；原 `cd kmp-shared && ./gradlew` 必挂。
         run: |
           cd apps/android-app
-          ./gradlew :shared:compileKotlinMetadata :shared:testDebugUnitTest --stacktrace
+          set +e
+          ./gradlew :shared:compileKotlinMetadata :shared:testDebugUnitTest --stacktrace > /tmp/gradle.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            # 失败时把关键行提成 annotation：GitHub annotations 走公开 API 可读（拉原始日志需要 token，
+            # 经常拿不到），目的是一次红灯就能定位，不用反复「看日志→贴日志」。
+            echo "---- gradle 关键行（同时提为 annotation）----"
+            grep -nE "FAILURE:|What went wrong|Execution failed|Unresolved reference|^e: |error:|Caused by|> Task .*FAILED|Could not |SDK location" /tmp/gradle.log \
+              | tail -n 30 | while IFS= read -r line; do echo "::error::gradle| ${line}"; done
+            echo "---- gradle.log tail（最后 80 行）----"
+            tail -n 80 /tmp/gradle.log
+          fi
+          exit "$code"
 
   lint-zero-dep:
     runs-on: ubuntu-latest
