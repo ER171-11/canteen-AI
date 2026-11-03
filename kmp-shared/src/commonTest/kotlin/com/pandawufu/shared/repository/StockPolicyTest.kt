@@ -14,10 +14,20 @@ class StockPolicyTest {
     }
 
     @Test
-    fun safetyFallsBackToQtyWhenNothingProvided() {
+    fun safetyIsUnknownWhenNoArchiveButStocked() {
+        // 口径变更（4fafbd2）：无档案（safe/safety/est 全缺）时不再拿 qty 当安全线，
+        // 有量 → 安全线 0（没有安全线就不编造），判「充足」而不是误报告急
         val ing = IngredientDto(id = "4", name = "d", qty = 7.5)
-        assertEquals(7.5, StockPolicy.resolveSafety(ing))
+        assertEquals(0.0, StockPolicy.resolveSafety(ing))
         assertEquals(StockStatus.ENOUGH, StockPolicy.toStockItem(ing).status) // 不误报告急
+    }
+
+    @Test
+    fun safetyIsOneWhenNoArchiveAndEmpty() {
+        // 零库存且无档案 → 安全线按 1 兜底，判告急（避免补货链空转）
+        val ing = IngredientDto(id = "6", name = "e", qty = 0.0)
+        assertEquals(1.0, StockPolicy.resolveSafety(ing))
+        assertEquals(StockStatus.CRITICAL, StockPolicy.toStockItem(ing).status)
     }
 
     @Test
