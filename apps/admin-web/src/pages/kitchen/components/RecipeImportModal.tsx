@@ -208,7 +208,7 @@ export default function RecipeImportModal({ open, onClose, onQueued }: RecipeImp
   }
 
   /* ---- 手动指定列：表头行候选 + 列选项（用该行单元格文字做标签） ---- */
-  const headRows = head?.rows ?? []
+  const headRows = useMemo(() => head?.rows ?? [], [head])
   const colOptions = useMemo(() => {
     const row = headRows[headerRow] || []
     const n = Math.max(row.length, headRows.reduce((m, r) => Math.max(m, r.length), 0))

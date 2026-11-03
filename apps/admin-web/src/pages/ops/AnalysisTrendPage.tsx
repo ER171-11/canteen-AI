@@ -102,8 +102,9 @@ export default function AnalysisTrendPage() {
             Modal.warning({ title: '已入队但未确认', content: `动作 ID：${res.id || '-'}（可能 rev 不匹配，请到动作队列手动确认）` })
           }
           setApplied((p) => ({ ...p, [index]: res.id || 'done' }))
-        } catch (e: any) {
-          Modal.error({ title: '采纳失败', content: String(e?.message || e || '未知错误') })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e || '未知错误')
+          Modal.error({ title: '采纳失败', content: msg })
         }
       },
     })

@@ -19,8 +19,9 @@ import { presignSafetyPointDemo, upsertSafetyPoint } from '../../api'
 import type { SafetyPoint, SafetyPointKind } from '../../api/types'
 import { COLORS } from '../../theme'
 
-/** 自定义点位 id：U + 时间戳 + 随机，避免与内置 K/F/C/D 前缀冲突 */
-export function genPointId(): string {
+/** 自定义点位 id：U + 时间戳 + 随机，避免与内置 K/F/C/D 前缀冲突
+ *  仅本文件使用，不对外导出（组件文件只导出组件，否则 fast-refresh 失效）。 */
+function genPointId(): string {
   return 'U' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 

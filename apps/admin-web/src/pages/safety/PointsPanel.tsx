@@ -122,11 +122,14 @@ export default function PointsPanel({ kind, title }: Props) {
     else message.error(res.error || '导入失败')
   }
 
-  const doRemove = async (row: SafetyPoint) => {
-    const res = await removeSafetyPoint({ id: row.id, kind })
-    if (res.ok) message.success(res.note || '删除已入队，待审批中心确认')
-    else message.error(res.error || '删除失败')
-  }
+  const doRemove = useCallback(
+    async (row: SafetyPoint) => {
+      const res = await removeSafetyPoint({ id: row.id, kind })
+      if (res.ok) message.success(res.note || '删除已入队，待审批中心确认')
+      else message.error(res.error || '删除失败')
+    },
+    [kind],
+  )
 
   const cols: ColumnsType<SafetyPoint> = useMemo(
     () => [
@@ -190,7 +193,7 @@ export default function PointsPanel({ kind, title }: Props) {
         ),
       },
     ],
-    [kind, canWrite, configured, demoUrlOf, uploadDemoFor],
+    [kind, canWrite, configured, demoUrlOf, uploadDemoFor, doRemove],
   )
 
   return (

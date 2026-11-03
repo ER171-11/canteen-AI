@@ -315,12 +315,17 @@ curl -s -X POST "$BASE/api/actions" -H "$AUTH" -H 'Content-Type: application/jso
   -d '{"type":"price.update","payload":{"sku":"d1","price":30},"operator":"老板"}' > "$TMPD/a3.json"
 BID=$(json_get "$TMPD/a3.json" id)
 curl -s -o /dev/null -X POST "$BASE/api/actions/$BID/confirm" -H "$AUTH" -H 'Content-Type: application/json' -d '{"operator":"老板","rev":42}'
+# 含中文的请求体一律由 node 写文件再 --data-binary：Windows 下 git-bash 调原生 curl.exe 时
+# 命令行参数会按 ANSI 码页转换，-d 里的中文到服务端已成乱码（Linux 上无此问题，但本地会假红）
+node -e 'require("fs").writeFileSync(process.argv[1],JSON.stringify({result:{ok:false,error:"店内库存不足"}}))' "$TMPD/reject.body.json"
 curl -s -X POST "$BASE/api/actions/$BID/execute" -H "$AUTH" -H 'Content-Type: application/json' \
-  -d '{"result":{"ok":false,"error":"店内库存不足"}}' > "$TMPD/rj.json"
+  --data-binary @"$TMPD/reject.body.json" > "$TMPD/rj.json"
 assert_grep "execute ok:false → 已驳回" "$TMPD/rj.json" '"status":"已驳回"'
 assert_grep "驳回含 error" "$TMPD/rj.json" '店内库存不足'
 
-curl -s -G "$BASE/api/actions" --data-urlencode "status=已执行" -H "$AUTH" > "$TMPD/ls.json"
+# 中文 query 参数同理：先由 node 百分号编码，避免命令行码页转换
+ST_DONE=$(node -e 'process.stdout.write(encodeURIComponent("已执行"))')
+curl -s "$BASE/api/actions?status=$ST_DONE" -H "$AUTH" > "$TMPD/ls.json"
 assert_grep "按 status=已执行 过滤" "$TMPD/ls.json" "\"id\":\"$AID\""
 if grep -q "\"id\":\"$BID\"" "$TMPD/ls.json"; then bad "过滤混入了已驳回记录"; else ok "过滤未混入已驳回"; fi
 
@@ -559,7 +564,10 @@ const snap={rev:60,machine:"pos-m",
     fs_disinfect:[{area:"后厨",ts:today+"T07:30:00"}],
     bookings:[{id:"b1",date:today,people:4},{id:"b2",date:today,people:2},{id:"b3",date:yday,people:6}],
     queue:[{no:"A05"},{no:"A06"},{no:"A07"},{no:"A08"},{no:"A09"}],
-    sop_workorders:[{id:"w1",date:today,status:"已完成"},{id:"w2",date:today,status:"进行中"}]
+    sop_workorders:[{id:"w1",date:today,status:"已完成"},{id:"w2",date:today,status:"进行中"}],
+    // 冷柜温度走真 IoT 口径（ext.eq_temps）；演示数据淘汰后无此键即空态（mock_temps=true）
+    eq_temps:[{device:"冷藏柜A",kind:"冷藏",temp:3.8,max:5},{device:"冷冻柜B",kind:"冷冻",temp:-18.2,max:-15}],
+    eq_energy:[{kind:"电",usage:120,cost:96},{kind:"燃气",usage:30,cost:96}]
   }};
 fs.writeFileSync(process.argv[1],JSON.stringify(snap));
 ' "$TMPD/mod.json" "$TODAY" "$YDAY"
@@ -619,7 +627,8 @@ REV1=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1
 if [ "$REV0" = "$REV1" ]; then ok "推演未推进快照 rev（$REV0，零写库）"; else bad "推演推进了快照 rev：$REV0 → $REV1"; fi
 
 curl -s "$BASE/api/modules/equipment" -H "$MAUTH" > "$TMPD/meq.json"
-assert_node "equipment temps 非空" "$TMPD/meq.json" 'j.ok&&Array.isArray(j.temps)&&j.temps.length>=1&&j.temps[0].device'
+assert_node "equipment temps 非空（ext.eq_temps 真实口径）" "$TMPD/meq.json" 'j.ok&&Array.isArray(j.temps)&&j.temps.length>=1&&j.temps[0].device'
+assert_node "equipment 有 IoT 数据时不标 mock" "$TMPD/meq.json" 'j.mock_temps===false'
 assert_node "equipment energy_summary" "$TMPD/meq.json" 'j.energy_summary&&Array.isArray(j.energy_summary.items)'
 
 curl -s "$BASE/api/modules/vip" -H "$MAUTH" > "$TMPD/mvip.json"
@@ -660,10 +669,13 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/snapshot/push" 
   -H "$MAUTH" -H 'Content-Type: application/json' -d '{"rev":61,"machine":"pos-m","data":{}}')
 assert_code "push 空 data 快照" 200 "$CODE"
 curl -s "$BASE/api/modules/analysis" -H "$MAUTH" > "$TMPD/man0.json"
-assert_node "analysis mock 回退" "$TMPD/man0.json" 'j.ok&&j.mock===true&&j.trend.length===4&&j.matrix.some(function(m){return m.quadrant==="star"})'
-assert_node "analysis mock efficiency 演示" "$TMPD/man0.json" 'j.efficiency&&j.efficiency.翻台率===3.2'
+# 演示数据淘汰后：无销售流水不再编造 trend/heatmap/效率，只保留价盘派生的矩阵
+assert_node "analysis 空态不编造趋势（mock:true + 空 trend）" "$TMPD/man0.json" 'j.ok&&j.mock===true&&j.trend.length===0&&j.heatmap.length===0'
+assert_node "analysis 空态矩阵仍按保本价盘展示" "$TMPD/man0.json" 'Array.isArray(j.matrix)&&j.matrix.length>0&&j.matrix.some(function(m){return m.quadrant==="star"})'
+assert_node "analysis 空态效率为空对象（不编造翻台率）" "$TMPD/man0.json" 'j.efficiency&&typeof j.efficiency==="object"&&Object.keys(j.efficiency).length===0'
+assert_node "analysis 空态带说明" "$TMPD/man0.json" 'typeof j.note==="string"&&j.note.length>0'
 curl -s "$BASE/api/report/daily?date=$TODAY" -H "$MAUTH" > "$TMPD/mrp0.json"
-assert_node "report 无数据回退 mock" "$TMPD/mrp0.json" 'j.mock===true&&j.rev===null&&j.kpi.length===8'
+assert_node "report 无数据空态：不编造 KPI/序列" "$TMPD/mrp0.json" 'j.mock===true&&j.rev===null&&Array.isArray(j.kpi)&&j.kpi.length===0&&j.daily_series.length===0&&!!j.banner'
 
 # 只读性：写动词一律 404
 for ep in staff booking foodsafe analysis; do

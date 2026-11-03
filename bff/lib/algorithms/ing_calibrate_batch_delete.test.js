@@ -74,7 +74,11 @@ ok('W3-01 数量+均价一起校准：两者都生效', () => {
 ok('W3-01 校准后再次进货：均价按移动加权推，不被冲回', () => {
   const d = calibData();
   inv.applyStockCount(d, { ing_id: 'I1', name: '面粉', avg: 6.5, note: '校正均价' }, {});
-  d.recv.push({ id: 'R1', no: 'JH1', date: '2026-11-01', lines: [{ ing: 'I1', qty: 4, price: 8 }] });
+  /* 「手工调整」流水日期 = 校准当天（today()），rebuild_stock 按日期升序重放：
+   * 进货单必须排在校准之后，否则会被绝对值的校准流水覆盖。原先写死 '2026-11-01'，
+   * 一旦系统日期越过该日就必挂（时间炸弹），改为相对今天动态生成。 */
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  d.recv.push({ id: 'R1', no: 'JH1', date: tomorrow, lines: [{ ing: 'I1', qty: 4, price: 8 }] });
   rebuildStock(d);
   assert.strictEqual(d.ings[0].stock, 14);
   /* (10×6.5 + 4×8) / 14 = 6.929 */

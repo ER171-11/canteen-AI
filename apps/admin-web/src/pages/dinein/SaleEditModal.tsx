@@ -81,14 +81,16 @@ export default function SaleEditModal({ open, sale, onClose, onQueued }: SaleEdi
     }
   }, [open, sale])
 
-  if (!sale) return null
-
+  /* Hooks 必须无条件执行：原先这 3 个 useMemo 写在 `if (!sale) return null` 之后，
+   * 等于「sale 为空就不调用」，违反 rules-of-hooks（CI ESLint 红灯）。全部上提到早退之前。 */
   const sub = useMemo(() => r2(lines.reduce((a, l) => a + (l.qty || 0) * (l.price || 0), 0)), [lines])
   const receivable = useMemo(() => r2(sub - discount), [sub, discount])
   const validLines = useMemo(
     () => lines.filter((l) => l.name.trim() && l.qty > 0 && l.price >= 0),
     [lines],
   )
+
+  if (!sale) return null
 
   const invalid =
     validLines.length === 0 ||

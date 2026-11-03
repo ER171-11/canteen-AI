@@ -11,14 +11,49 @@
  */
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
-const DATA = path.join(__dirname, '../../data');
+/*
+ * 数据隔离（本次修）：`bff/data/` 整目录在 .gitignore 里（真实经营数据），CI checkout 里根本没有
+ * snapshot.json —— 原用例直接 `缺少 data/snapshot.json` 失败，导致 algorithms-parity 在 CI 上必红。
+ * 规避「假绿」的做法不是 skip，而是自带最小快照 fixture + 临时 BFF_DATA_DIR：
+ * 本地与 CI 走同一条代码路径、同一份数据、同一结果（真实快照换了也不影响本用例的判定）。
+ * 必须在 require 存储/快照模块之前设好环境变量（DATA_DIR 在模块加载时求值）。
+ */
+const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'baoben-sim-'));
+process.env.BFF_DATA_DIR = DATA;
+
+/** 最小快照 fixture：4 道菜（含下架/改价改量用例依赖的「老虎菜」「酱黄瓜」）+ 2 笔真实销量 */
+function fixtureSnapshot() {
+  const d = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+  return {
+    rev: 901,
+    machine: 'ci-fixture',
+    data: {
+      dishes: [
+        { id: '老虎菜', name: '老虎菜', price: 18, cost: 7, q: 5, cat: '凉菜' },
+        { id: '酱黄瓜', name: '酱黄瓜', price: 16, cost: 5, q: 4, cat: '凉菜' },
+        { id: '五福饺子', name: '五福饺子', price: 28, cost: 9, q: 30, cat: '水饺' },
+        { id: '冰花煎饺', name: '冰花煎饺', price: 26, cost: 8, q: 12, cat: '水饺' }
+      ],
+      // 近 30 天内的真实销量（日期动态算，避免写死日期变成时间炸弹）
+      sales: [
+        { date: d(3), lines: [{ dish: '老虎菜', qty: 6 }] },
+        { date: d(5), lines: [{ dish: '五福饺子', qty: 40 }] }
+      ]
+    }
+  };
+}
+
+const SNAP_PATH = path.join(DATA, 'snapshot.json');
+fs.writeFileSync(SNAP_PATH, JSON.stringify(fixtureSnapshot()));
+
 const mb = require('../menu_baoben');
 const simRoute = require('../../routes/analysis_sim');
 
-const SNAP_PATH = path.join(DATA, 'snapshot.json');
-const BAOBEN_PATH = path.join(DATA, 'menu-baoben.json');
+/** 价盘：优先 bff/data（本地），CI 上回落仓库内 old/apps/boss-app/public/menu-baoben.json */
+const BAOBEN_PATH = path.join(__dirname, '../../data/menu-baoben.json');
 const QUEUE_PATH = path.join(DATA, 'actions_queue.json');
 
 function readJSON(p) {

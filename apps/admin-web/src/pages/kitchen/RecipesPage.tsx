@@ -68,8 +68,10 @@ export default function RecipesPage() {
 
   /* 编辑弹窗实时成本：Form.useWatch([]) 监听整表，任一改动触发重渲染 */
   const watched = Form.useWatch([], form) as Record<string, unknown> | undefined
-  const linesOf = (key: 'main' | 'aux' | 'seasoning') =>
-    (watched?.[key] as BomFormLine[] | undefined) || []
+  const linesOf = useCallback(
+    (key: 'main' | 'aux' | 'seasoning') => (watched?.[key] as BomFormLine[] | undefined) || [],
+    [watched],
+  )
   /* 原料名 → IngOpt 索引（供 resolveIngName 精确命中） */
   const byName = useMemo(() => {
     const m: Record<string, IngOpt> = {}
@@ -87,7 +89,7 @@ export default function RecipesPage() {
     }
     const price = Number(watched?.price)
     return { total, gm: price > 0 ? (price - total) / price : null, price }
-  }, [watched, ings, ingAlias, byName])
+  }, [watched, linesOf, ingAlias, byName])
 
   const load = useCallback(() => {
     fetchKitchenRecipes()
